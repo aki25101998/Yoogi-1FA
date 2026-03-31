@@ -325,6 +325,9 @@ void ManagePairs()
 {
    activeChainsCount = 0;
 
+   // --- RÚT TIỀN TỰ ĐỘNG TRONG TESTER ---
+   ManageTesterWithdrawal();
+
    // --- TINH TOAN VIRTUAL BALANCE ---
    double real_balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double total_debt   = GetTotalSystemDebt();
@@ -471,5 +474,46 @@ void ManagePairs()
    }
 
    trade.SetExpertMagicNumber(0);
+}
+
+//+------------------------------------------------------------------+
+//| QUẢN LÝ RÚT TIỀN TRONG TESTER                                    |
+//+------------------------------------------------------------------+
+void ManageTesterWithdrawal()
+{
+   if(!MQLInfoInteger(MQL_TESTER)) return; // Chỉ chạy trong Tester
+   if(!InpTesterWithdrawalEnabled) return;
+
+   // Vòng lặp rút liên tục cho đến khi balance < base + threshold
+   while(true)
+   {
+       double current_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+       double excess_balance = current_balance - InpTesterBaseBalance;
+
+       // Nếu phần dư chưa đạt ngưỡng → dừng
+       if(excess_balance < InpTesterWithdrawThreshold) break;
+
+       // Xác định số tiền rút mỗi lần
+       double amount_to_withdraw = InpTesterWithdrawAmount;
+       if(amount_to_withdraw <= 0 || amount_to_withdraw > excess_balance)
+           amount_to_withdraw = excess_balance;
+
+       PrintFormat("[TESTER WITHDRAWAL] Balance=%.2f, Excess=%.2f (Nguong %.2f). Rut %.2f...", 
+           current_balance, excess_balance, InpTesterWithdrawThreshold, amount_to_withdraw);
+
+       if(TesterWithdrawal(amount_to_withdraw))
+       {
+           PrintFormat("[TESTER WITHDRAWAL] >>> RUT THANH CONG %.2f. Balance: %.2f -> %.2f <<<", 
+               amount_to_withdraw, current_balance, AccountInfoDouble(ACCOUNT_BALANCE));
+       }
+       else
+       {
+           PrintFormat("[TESTER WITHDRAWAL] Rut that bai. Kiem tra lai.");
+           break;
+       }
+
+       // Nếu đã rút toàn bộ phần dư → thoát
+       if(amount_to_withdraw >= excess_balance) break;
+   }
 }
 //+------------------------------------------------------------------+

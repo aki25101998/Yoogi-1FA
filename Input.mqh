@@ -47,3 +47,10 @@ input ENUM_TIMEFRAMES InpEURGBP_TF = PERIOD_H4; // EURGBP Timeframe
 input bool   InpUSDCHF_On   = true; // USDCHF Bật/Tắt
 input double InpUSDCHF_Risk = 0.3; // USDCHF % Lot
 input ENUM_TIMEFRAMES InpUSDCHF_TF = PERIOD_H4; // USDCHF Timeframe
+
+//--- Tester Withdrawal Settings ---
+input group "--- Tester Withdrawal Settings ---"
+input bool   InpTesterWithdrawalEnabled   = false;   // Bật chế độ rút tiền ảo trong Tester
+input double InpTesterBaseBalance         = 10000.0; // Số dư gốc mong muốn duy trì ($)
+input double InpTesterWithdrawThreshold   = 1000.0;  // Lợi nhuận đạt được để kích hoạt rút ($)
+input double InpTesterWithdrawAmount      = 1000.0;  // Số tiền rút mỗi lần (0 = rút toàn bộ phần dư)
