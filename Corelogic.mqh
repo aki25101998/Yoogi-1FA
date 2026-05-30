@@ -53,15 +53,20 @@ bool OpenChildOrder_Multi(int idx, ENUM_POSITION_TYPE ptype, double lot, const s
    trade.SetExpertMagicNumber(G_Pairs[idx].active_chain_id);
 
    bool res=false;
+   double sl = 0.0;
+   int sl_pips = (InpStrategyMode == STRATEGY_MANUAL) ? InpManual_SL_Pips : 0;
+
    if(ptype == POSITION_TYPE_BUY)
    {
       double price = SymbolInfoDouble(sym, SYMBOL_ASK);
-      res = trade.Buy(lot, sym, price, 0, 0, comment);
+      if(sl_pips > 0) sl = price - sl_pips * G_Pairs[idx].pip_value;
+      res = trade.Buy(lot, sym, price, sl, 0, comment);
    }
    else if(ptype == POSITION_TYPE_SELL)
    {
       double price = SymbolInfoDouble(sym, SYMBOL_BID);
-      res = trade.Sell(lot, sym, price, 0, 0, comment);
+      if(sl_pips > 0) sl = price + sl_pips * G_Pairs[idx].pip_value;
+      res = trade.Sell(lot, sym, price, sl, 0, comment);
    }
    return res;
 }
@@ -156,32 +161,42 @@ void OpenMasterTrade_Multi(int idx, int signal)
    bool   res     = false;
    double sl=0.0, tp=0.0;
 
-   // --- [LOGIC REAL TIME] TÍNH LOT THEO BALANCE THỰC TẾ ---
+   // --- [LOGIC REAL TIME] TÍNH LOT THEO BALANCE THỰC TẾ HOẶC THỦ CÔNG ---
    double current_bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   double lot_calculation_bal = current_bal;
+
+   if(InpStrategyMode == STRATEGY_MANUAL && InpManual_Balance > 0.0)
+   {
+      lot_calculation_bal = InpManual_Balance;
+   }
 
    // Gọi hàm tính Lot từ Globals (Đã gán cứng Risk%)
-   double initial_lot = CalculateAutoLot(idx, current_bal);
+   double initial_lot = CalculateAutoLot(idx, lot_calculation_bal);
 
    // --- [QUAN TRỌNG] NẾU LOT = 0 (DO RISK = 0%), DỪNG NGAY ---
    if(initial_lot <= 0.0) return;
 
-   // --- XAC DINH TP THEO CHE DO ---
+   // --- XAC DINH TP VA SL THEO CHE DO ---
    int tp_pips = InpMasterTPPips;  // Mac dinh Auto
+   int sl_pips = 0;
    if(InpStrategyMode == STRATEGY_MANUAL)
    {
       tp_pips = InpManual_TP_Pips;
+      sl_pips = InpManual_SL_Pips;
    }
 
    if(signal == 1)
    {
       double price = SymbolInfoDouble(sym, SYMBOL_ASK);
       if(tp_pips > 0) tp = price + tp_pips * G_Pairs[idx].pip_value;
+      if(sl_pips > 0) sl = price - sl_pips * G_Pairs[idx].pip_value;
       res = trade.Buy(initial_lot, sym, price, sl, tp, comment);
    }
    else if(signal == -1)
    {
       double price = SymbolInfoDouble(sym, SYMBOL_BID);
       if(tp_pips > 0) tp = price - tp_pips * G_Pairs[idx].pip_value;
+      if(sl_pips > 0) sl = price + sl_pips * G_Pairs[idx].pip_value;
       res = trade.Sell(initial_lot, sym, price, sl, tp, comment);
    }
 
@@ -194,13 +209,13 @@ void OpenMasterTrade_Multi(int idx, int signal)
       G_Pairs[idx].virtual_step    = 0;
       G_Pairs[idx].realized_bleed_loss = 0.0;
 
-      // Lưu Balance thực tế làm mốc để DCA sau này
-      G_Pairs[idx].locked_balance = current_bal;
+      // Lưu Balance lấy tính Lot làm mốc để DCA sau này
+      G_Pairs[idx].locked_balance = lot_calculation_bal;
 
       SaveChainState_Multi(idx);
 
-      PrintFormat("[%s] >>> OPEN MASTER: %.2f lots (Actual Bal: $%.2f). ID: %I64u",
-                  sym, initial_lot, current_bal, new_chain_id);
+      PrintFormat("[%s] >>> OPEN MASTER: %.2f lots (Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
+                  sym, initial_lot, current_bal, lot_calculation_bal, new_chain_id);
    }
 }
 
@@ -226,7 +241,8 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
    int step_pips = InpKhoangMoPip; // Mac dinh Auto = 30
    if(InpStrategyMode == STRATEGY_MANUAL)
    {
-      if(InpManual_StepPips <= 0) return; // Manual + Step=0 -> TAT DCA
+      if(!InpManual_DCA) return;          // Manual tắt DCA -> Tắt tính năng nhồi
+      if(InpManual_StepPips <= 0) return; // Manual + Step=0 -> Tắt DCA
       step_pips = InpManual_StepPips;
    }
    double step = step_pips * G_Pairs[idx].pip_value;
@@ -240,8 +256,26 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
    {
       int next_step_index = G_Pairs[idx].virtual_step + 1;
 
+      // KIỂM TRA GIỚI HẠN SỐ LỆNH VÀ CẮT LỖ CHUỖI NẾU VƯỢT QUÁ (CHẾ ĐỘ THỦ CÔNG)
+      if(InpStrategyMode == STRATEGY_MANUAL && InpManual_MaxOrders > 0)
+      {
+         // next_step_index chính là tổng số lệnh đang chờ được mường tượng (0=Master, 1=lệnh thứ 2, 2=lệnh thứ 3)
+         // Nếu tiếp tục đi ngược đến mức mở số thứ tự lớn hơn MaxOrders, lập tức chốt cắt lỗ chuỗi
+         if(next_step_index >= InpManual_MaxOrders)
+         {
+             PrintFormat("[%s] >>> Gia tiep tuc di nguoc. Dat muc mo lenh thu %d nhung MaxOrders chi la %d. Tien hanh cat lo chuoi!", sym, next_step_index + 1, InpManual_MaxOrders);
+             CloseAllInChain_Multi(idx);
+             return;
+         }
+      }
+
       // 3. Tính Lot (Dùng Locked Balance hoặc Fallback về Actual Balance)
       double working_balance = (G_Pairs[idx].locked_balance > 0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
+
+      if(InpStrategyMode == STRATEGY_MANUAL && InpManual_Balance > 0.0)
+      {
+         working_balance = InpManual_Balance;
+      }
 
       double base_lot = CalculateAutoLot(idx, working_balance);
 
@@ -336,15 +370,18 @@ void ManagePairs()
    bool allow_new_entry = true;
    string limit_msg = "";
 
-   if(virtual_bal < LIMIT_MIN_VIRTUAL)
+   if(InpEnableBalanceLimit)
    {
-      allow_new_entry = false;
-      limit_msg = "STANDBY: Low Capital (< 10k)";
-   }
-   else if(virtual_bal > LIMIT_MAX_VIRTUAL)
-   {
-      allow_new_entry = false;
-      limit_msg = "LIMIT REACHED: Cap > 500k";
+      if(virtual_bal < LIMIT_MIN_VIRTUAL)
+      {
+         allow_new_entry = false;
+         limit_msg = "STANDBY: Low Capital (< 10k)";
+      }
+      else if(virtual_bal > LIMIT_MAX_VIRTUAL)
+      {
+         allow_new_entry = false;
+         limit_msg = "LIMIT REACHED: Cap > 500k";
+      }
    }
 
    // --- [FIX BUG 1] GOI DXY SIGNAL TRUOC VONG LAP CHINH ---

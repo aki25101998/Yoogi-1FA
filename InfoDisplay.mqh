@@ -212,8 +212,11 @@ void UpdateDisplay()
    // --- STATUS ---
    string status_msg = TXT_STAT_RUN;
    color  status_clr = C_VALUE; 
-   if(virt_bal < LIMIT_MIN_VIRTUAL) { status_msg = TXT_STAT_LOW; status_clr = C_WARN; }
-   else if(virt_bal > LIMIT_MAX_VIRTUAL) { status_msg = TXT_STAT_LIMIT; status_clr = C_LIMIT; }
+   if(InpEnableBalanceLimit)
+   {
+      if(virt_bal < LIMIT_MIN_VIRTUAL) { status_msg = TXT_STAT_LOW; status_clr = C_WARN; }
+      else if(virt_bal > LIMIT_MAX_VIRTUAL) { status_msg = TXT_STAT_LIMIT; status_clr = C_LIMIT; }
+   }
 
    ObjectSetString(0, INFO_PREFIX + "Status_Val", OBJPROP_TEXT, status_msg);
    ObjectSetInteger(0, INFO_PREFIX + "Status_Val", OBJPROP_COLOR, status_clr);

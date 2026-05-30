@@ -18,10 +18,15 @@ enum ENUM_STRATEGY_MODE {
 
 input ENUM_STRATEGY_MODE InpStrategyMode = STRATEGY_AUTO; // Chọn chế độ chiến thuật
 input bool InpUseDXYReference = true; // Sử dụng lọc tham chiếu DXY
+input bool InpEnableBalanceLimit = true; // Giới hạn Balance (10k-500k) để vào lệnh
 
 input group "=== CÀI ĐẶT THỦ CÔNG (MANUAL MODE) ==="
-input int    InpManual_TP_Pips = 0;  // Take Profit (pips, 0 = không dùng)
-input int    InpManual_StepPips = 0; // Khoảng cách nhồi DCA (pips, 0 = dùng mặc định 30)
+input double InpManual_Balance  = 0.0;   // Set Balance tính Lot (0 = Auto)
+input bool   InpManual_DCA      = true;  // Bật/tắt DCA
+input int    InpManual_MaxOrders= 0;     // Giới hạn số lệnh của chuỗi (Vd 2 = 1 Master + 1 DCA), 0 = Không giới hạn
+input int    InpManual_SL_Pips  = 0;     // SL Pips (0 = Tắt tính năng)
+input int    InpManual_TP_Pips  = 0;     // Take Profit (pips, 0 = không dùng)
+input int    InpManual_StepPips = 0;     // Khoảng cách nhồi DCA (pips, 0 = dùng mặc định 30)
 
 // Cặp 1: EURUSD
 input bool   InpEURUSD_On   = true; // EURUSD Bật/Tắt
