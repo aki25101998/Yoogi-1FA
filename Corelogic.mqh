@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
 //|                                                  CoreLogic.mqh   |
 //|                                                  Yoogi Trading   |
-//|   Logic giao dịch cốt lõi (v12.2 - Hardcoded Version)            |
-//|   (Mode: Real Time + 10k Limit + 7 Pairs Support)                |
+//|   Logic giao dịch cốt lõi (v14.0 - MTF Dual Signal)             |
+//|   (Mode: HTF Trap → LTF Confirm → DXY Dual Convergence)         |
 //+------------------------------------------------------------------+
 #property strict
 #include "Trimming.mqh" // Chứa logic cắt tỉa thông minh đa cặp
@@ -212,6 +212,9 @@ void OpenMasterTrade_Multi(int idx, int signal)
       // Lưu Balance lấy tính Lot làm mốc để DCA sau này
       G_Pairs[idx].locked_balance = lot_calculation_bal;
 
+      // Reset HTF trap sau khi vào lệnh thành công
+      G_Pairs[idx].htf_trap_signal = 0;
+
       SaveChainState_Multi(idx);
 
       PrintFormat("[%s] >>> OPEN MASTER: %.2f lots (Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
@@ -259,8 +262,6 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
       // KIỂM TRA GIỚI HẠN SỐ LỆNH VÀ CẮT LỖ CHUỖI NẾU VƯỢT QUÁ (CHẾ ĐỘ THỦ CÔNG)
       if(InpStrategyMode == STRATEGY_MANUAL && InpManual_MaxOrders > 0)
       {
-         // next_step_index chính là tổng số lệnh đang chờ được mường tượng (0=Master, 1=lệnh thứ 2, 2=lệnh thứ 3)
-         // Nếu tiếp tục đi ngược đến mức mở số thứ tự lớn hơn MaxOrders, lập tức chốt cắt lỗ chuỗi
          if(next_step_index >= InpManual_MaxOrders)
          {
              PrintFormat("[%s] >>> Gia tiep tuc di nguoc. Dat muc mo lenh thu %d nhung MaxOrders chi la %d. Tien hanh cat lo chuoi!", sym, next_step_index + 1, InpManual_MaxOrders);
@@ -299,61 +300,80 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 }
 
 // ==================================================================
-// KIEM TRA HOP LUU DXY (CONVERGENCE CHECK)
+// KIEM TRA HOP LUU DXY DUAL TF (CONVERGENCE CHECK)
 // ==================================================================
-int CheckDXYConvergence(int idx)
+int CheckDXYConvergence_Dual(int idx)
 {
    int di = G_Pairs[idx].dxy_map_index;
    if(di < 0) return 0;
 
    int mainTrap = G_Pairs[idx].trapSignal;
-   int dxyTrap  = G_DXY_TrapSignal[di];
+   int dxyTrapHTF = G_DXY_TrapSignal_HTF[di];
+   int dxyTrapLTF = G_DXY_TrapSignal_LTF[di];
 
-   // Neu 1 trong 2 bay chua co tin hieu -> Cho tiep (vo han)
-   if(mainTrap == 0 || dxyTrap == 0)
+   // Neu main trap chua co tin hieu -> Cho tiep
+   if(mainTrap == 0) return 0;
+
+   // DXY phai co tin hieu tren CA 2 TF
+   if(dxyTrapHTF == 0 || dxyTrapLTF == 0) return 0;
+
+   // DXY HTF va LTF phai cung huong
+   if(dxyTrapHTF != dxyTrapLTF)
+   {
+      PrintFormat("DXY Filter: DXY HTF/LTF XUNG DOT (%s vs %s) -> RESET!",
+                  (dxyTrapHTF == 1 ? "BUY" : "SELL"),
+                  (dxyTrapLTF == 1 ? "BUY" : "SELL"));
+      G_DXY_TrapSignal_HTF[di] = 0;
+      G_DXY_TrapSignal_LTF[di] = 0;
       return 0;
+   }
 
-   // Ca 2 bay deu da co tin hieu -> Kiem tra
+   // DXY da dong bo (HTF == LTF), kiem tra hop luu voi cap tien
+   int dxySignal = dxyTrapHTF; // Ca 2 giong nhau, lay 1
+
    bool converges = false;
 
    if(G_Pairs[idx].isUSDSecond)
    {
       // xxxUSD: Hop luu khi NGUOC CHIEU
-      converges = (mainTrap != dxyTrap);
+      converges = (mainTrap != dxySignal);
    }
    else if(G_Pairs[idx].isUSDFirst)
    {
       // USDxxx: Hop luu khi CUNG CHIEU
-      converges = (mainTrap == dxyTrap);
+      converges = (mainTrap == dxySignal);
    }
 
    if(converges)
    {
       int finalSignal = mainTrap;
       G_Pairs[idx].trapSignal = 0;
-      G_DXY_TrapSignal[di] = 0;
+      G_DXY_TrapSignal_HTF[di] = 0;
+      G_DXY_TrapSignal_LTF[di] = 0;
 
-      PrintFormat("DXY Filter: HOP LUU! %s Trap=%s, DXY Trap=%s -> Vao lenh %s",
+      PrintFormat("DXY Filter: HOP LUU DUAL! %s Trap=%s, DXY HTF=%s, DXY LTF=%s -> Vao lenh %s",
                   G_Pairs[idx].symbol,
                   (mainTrap == 1 ? "BUY" : "SELL"),
-                  (dxyTrap  == 1 ? "BUY" : "SELL"),
+                  (dxyTrapHTF == 1 ? "BUY" : "SELL"),
+                  (dxyTrapLTF == 1 ? "BUY" : "SELL"),
                   (finalSignal == 1 ? "BUY" : "SELL"));
       return finalSignal;
    }
    else
    {
-      PrintFormat("DXY Filter: XUNG DOT! %s Trap=%s, DXY Trap=%s -> RESET!",
+      PrintFormat("DXY Filter: XUNG DOT! %s Trap=%s, DXY=%s -> RESET!",
                   G_Pairs[idx].symbol,
                   (mainTrap == 1 ? "BUY" : "SELL"),
-                  (dxyTrap  == 1 ? "BUY" : "SELL"));
+                  (dxySignal == 1 ? "BUY" : "SELL"));
       G_Pairs[idx].trapSignal = 0;
-      G_DXY_TrapSignal[di] = 0;
+      G_DXY_TrapSignal_HTF[di] = 0;
+      G_DXY_TrapSignal_LTF[di] = 0;
       return 0;
    }
 }
 
 // ==================================================================
-// HAM QUET VA DIEU PHOI (MAIN LOOP)
+// HAM QUET VA DIEU PHOI (MAIN LOOP - MTF DUAL SIGNAL)
 // ==================================================================
 void ManagePairs()
 {
@@ -384,18 +404,27 @@ void ManagePairs()
       }
    }
 
-   // --- [FIX BUG 1] GOI DXY SIGNAL TRUOC VONG LAP CHINH ---
-   // Goi 1 lan duy nhat cho moi DXY context, tranh bi "an mat" boi cap dau tien
+   // --- [PRE-SCAN] DXY SIGNAL DUAL TF ---
    if(g_dxy_available && InpUseDXYReference)
    {
       for(int d = 0; d < DXY_CONTEXTS; d++)
       {
-         int dxySignal = CheckEntrySignal_DXY(d);
-         if(dxySignal != 0)
+         // DXY HTF Signal
+         int dxyHTF = CheckEntrySignal_DXY_HTF(d);
+         if(dxyHTF != 0)
          {
-            G_DXY_TrapSignal[d] = dxySignal;
-            PrintFormat("DXY Filter: DXY(%s) dat bay %s",
-                        EnumToString(G_DXY[d].tf), (dxySignal == 1 ? "BUY" : "SELL"));
+            G_DXY_TrapSignal_HTF[d] = dxyHTF;
+            PrintFormat("DXY Filter: DXY HTF(%s) dat bay %s",
+                        EnumToString(G_DXY_HTF[d].ltf), (dxyHTF == 1 ? "BUY" : "SELL"));
+         }
+
+         // DXY LTF Signal
+         int dxyLTF = CheckEntrySignal_DXY_LTF(d);
+         if(dxyLTF != 0)
+         {
+            G_DXY_TrapSignal_LTF[d] = dxyLTF;
+            PrintFormat("DXY Filter: DXY LTF(%s) dat bay %s",
+                        EnumToString(G_DXY_LTF[d].ltf), (dxyLTF == 1 ? "BUY" : "SELL"));
          }
       }
    }
@@ -470,41 +499,83 @@ void ManagePairs()
       {
          if(G_Pairs[i].active_chain_id != 0) ClearChainState_Multi(i);
 
-         // --- TIM TIN HIEU MOI ---
+         // --- TIM TIN HIEU MOI (MTF DUAL SIGNAL) ---
          if(InpAutoSignalTrading && allow_new_entry && G_Pairs[i].enabled)
          {
-            int mainSignal = CheckEntrySignal(i);
-            int signal = 0;
-
-            if(G_Pairs[i].isUSDPair && g_dxy_available && InpUseDXYReference)
+            // =============================================
+            // BUOC 1: CHECK HTF SIGNAL (Xu huong)
+            // =============================================
+            int htfSignal = CheckEntrySignal_HTF(i);
+            if(htfSignal != 0)
             {
-               // === DXY TRAP (CHI CAP USD) ===
-               int di = G_Pairs[i].dxy_map_index;
-
-               if(mainSignal != 0)
+               // Neu HTF phat tin hieu moi
+               if(G_Pairs[i].htf_trap_signal != 0 && G_Pairs[i].htf_trap_signal != htfSignal)
                {
-                  G_Pairs[i].trapSignal = mainSignal;
-                  PrintFormat("DXY Filter: %s dat bay %s",
-                              G_Pairs[i].symbol, (mainSignal == 1 ? "BUY" : "SELL"));
+                  // HTF dao chieu -> Reset bay cu
+                  PrintFormat("[%s] HTF dao chieu %s -> %s. Reset bay.",
+                              sym,
+                              (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"),
+                              (htfSignal == 1 ? "BUY" : "SELL"));
                }
-
-               // DXY da duoc check truoc vong lap, chi can check convergence
-               signal = CheckDXYConvergence(i);
-            }
-            else
-            {
-               // === KHONG USD (EURGBP) -> Binh thuong ===
-               signal = mainSignal;
+               G_Pairs[i].htf_trap_signal = htfSignal;
+               PrintFormat("[%s] >>> HTF Signal: %s (Bay dat thanh cong)",
+                           sym, (htfSignal == 1 ? "BUY" : "SELL"));
             }
 
-            if(signal != 0)
+            // =============================================
+            // BUOC 2: CHECK LTF SIGNAL (Entry) - Chi khi HTF da co bay
+            // =============================================
+            if(G_Pairs[i].htf_trap_signal != 0)
             {
-               if(signal == 1  && !InpAllowBuy) continue;
-               if(signal == -1 && !InpAllowSell) continue;
+               int ltfSignal = CheckEntrySignal(i);
 
-               PrintFormat("[%s] >>> Entry signal = %s. Opening trade...",
-                           sym, (signal == 1 ? "BUY" : "SELL"));
-               OpenMasterTrade_Multi(i, signal);
+               if(ltfSignal != 0 && ltfSignal == G_Pairs[i].htf_trap_signal)
+               {
+                  // LTF xac nhan cung huong voi HTF!
+                  int confirmed_signal = ltfSignal;
+
+                  PrintFormat("[%s] >>> LTF xac nhan %s (Cung huong HTF). Tim DXY...",
+                              sym, (confirmed_signal == 1 ? "BUY" : "SELL"));
+
+                  // =============================================
+                  // BUOC 3: DXY CONVERGENCE (Dual TF)
+                  // =============================================
+                  int signal = 0;
+
+                  if(G_Pairs[i].isUSDPair && g_dxy_available && InpUseDXYReference)
+                  {
+                     // === DXY TRAP (CHI CAP USD) ===
+                     G_Pairs[i].trapSignal = confirmed_signal;
+
+                     // DXY da duoc pre-scan, chi can check convergence
+                     signal = CheckDXYConvergence_Dual(i);
+                  }
+                  else
+                  {
+                     // === KHONG USD (EURGBP) -> Binh thuong ===
+                     signal = confirmed_signal;
+                  }
+
+                  if(signal != 0)
+                  {
+                     if(signal == 1  && !InpAllowBuy) continue;
+                     if(signal == -1 && !InpAllowSell) continue;
+
+                     PrintFormat("[%s] >>> MTF CONFIRMED: HTF=%s + LTF=%s. Opening trade...",
+                                 sym,
+                                 (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"),
+                                 (ltfSignal == 1 ? "BUY" : "SELL"));
+                     OpenMasterTrade_Multi(i, signal);
+                  }
+               }
+               else if(ltfSignal != 0 && ltfSignal != G_Pairs[i].htf_trap_signal)
+               {
+                  // LTF phat tin hieu NGUOC huong HTF -> Bo qua
+                  PrintFormat("[%s] LTF Signal %s nguoc HTF %s -> Bo qua.",
+                              sym,
+                              (ltfSignal == 1 ? "BUY" : "SELL"),
+                              (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"));
+               }
             }
          }
       }

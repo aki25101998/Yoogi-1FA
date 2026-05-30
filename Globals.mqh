@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
 //|                                                      Globals.mqh |
 //|                                                    Yoogi Trading |
-//|   Biến toàn cục & Cấu hình hệ thống (v13.0 - 5 Pairs + DXY)     |
-//|   (Min Balance 10k - No External Inputs - Hardcoded Logic)       |
+//|   Biến toàn cục & Cấu hình hệ thống (v14.0 - MTF Dual Signal)   |
+//|   (Multi-Timeframe: HTF + LTF Signal Confirmation)               |
 //+------------------------------------------------------------------+
 #property strict
 #include <Trade/Trade.mqh>
@@ -42,7 +42,8 @@ struct PairContext
 {
    string           symbol;       // Tên thực tế (VD: EURUSD.pro)
    string           base_name;    // Tên chuẩn (VD: EURUSD)
-   ENUM_TIMEFRAMES  tf;
+   ENUM_TIMEFRAMES  htf;          // Timeframe lớn (xu hướng)
+   ENUM_TIMEFRAMES  ltf;          // Timeframe nhỏ (entry)
    int              digits;
    double           point;
    double           pip_value;
@@ -51,12 +52,12 @@ struct PairContext
    double           risk_percent;
    bool             enabled;       // Bật/Tắt cặp tiền (Manual mode)
 
-   // --- Indicator ---
+   // --- LTF Indicator (Entry - logic gốc) ---
    int      handle_cci;
    bool     isReadyForBuy;
    bool     isReadyForSell;
 
-   // --- Filter State ---
+   // --- LTF Filter State ---
    bool     g_inited_filt;
    double   filt_prev;
    double   filt_prev_for_calc;
@@ -65,6 +66,19 @@ struct PairContext
    int      lastCond;
 
    datetime last_bar_time;
+
+   // --- HTF Signal State (bộ indicator riêng cho TF lớn) ---
+   int      htf_handle_cci;           // CCI handle cho HTF
+   bool     htf_isReadyForBuy;        // CCI Trap BUY trên HTF
+   bool     htf_isReadyForSell;       // CCI Trap SELL trên HTF
+   bool     htf_g_inited_filt;        // Range Filter đã init trên HTF?
+   double   htf_filt_prev;
+   double   htf_filt_prev_for_calc;
+   int      htf_upCount;
+   int      htf_dnCount;
+   int      htf_lastCond;
+   datetime htf_last_bar_time;        // New bar tracking cho HTF
+   int      htf_trap_signal;          // Bẫy HTF: 1(BUY), -1(SELL), 0(NONE)
 
    // --- DXY TRAP STATE ---
    int      trapSignal;       // Tín hiệu bẫy: 1(BUY), -1(SELL), 0(NONE)
@@ -83,9 +97,11 @@ struct PairContext
 PairContext G_Pairs[TOTAL_PAIRS];
 CTrade  trade;
 
-// --- DXY GLOBALS ---
-PairContext G_DXY[DXY_CONTEXTS];       // Context cho DXY (index 0=H4, 1=H2)
-int         G_DXY_TrapSignal[DXY_CONTEXTS]; // Trap signal per DXY TF
+// --- DXY GLOBALS (DUAL TF) ---
+PairContext G_DXY_HTF[DXY_CONTEXTS];     // DXY context trên TF lớn
+PairContext G_DXY_LTF[DXY_CONTEXTS];     // DXY context trên TF nhỏ
+int         G_DXY_TrapSignal_HTF[DXY_CONTEXTS]; // DXY trap signal HTF
+int         G_DXY_TrapSignal_LTF[DXY_CONTEXTS]; // DXY trap signal LTF
 string DXY_SYMBOL = "DXY";             // Se duoc tu dong phat hien boi AutoDetectDXY()
 bool   g_dxy_available = false;         // True neu DXY duoc tim thay tren san
 
@@ -98,24 +114,6 @@ int     activeChainsCount = 0;
 string StandardBaseNames[TOTAL_PAIRS] = {
    "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "USDCHF"
 };
-
-// ==================================================================
-// HÀM HELPER: LẤY TIMEFRAME CỐ ĐỊNH
-// ==================================================================
-ENUM_TIMEFRAMES GetFixedTimeframe(string base_name)
-{
-   // --- NHÓM H4 ---
-   // EURUSD, EURGBP, AUDUSD, USDCHF
-   if(base_name == "EURUSD" || base_name == "EURGBP" || base_name == "AUDUSD" || base_name == "USDCHF")
-      return PERIOD_H4;
-
-   // --- NHÓM H2 ---
-   // USDCAD
-   if(base_name == "USDCAD")
-      return PERIOD_H2;
-
-   return PERIOD_H4; // Mặc định fallback
-}
 
 // ==================================================================
 // AUTO-DETECT SUFFIX (HỖ TRỢ MỌI CHART)
@@ -223,7 +221,7 @@ string AutoDetectDXY()
 // ==================================================================
 void InitGlobals()
 {
-   Print(">>> KHOI TAO YOOGI ONE FOR ALL (MODE: 5 PAIRS + DXY FILTER)...");
+   Print(">>> KHOI TAO YOOGI ONE FOR ALL (MODE: MTF DUAL SIGNAL + DXY FILTER)...");
 
    for(int i=0; i<TOTAL_PAIRS; i++)
    {
@@ -243,18 +241,27 @@ void InitGlobals()
 
       if(InpStrategyMode == STRATEGY_MANUAL)
       {
-         // --- CHE DO THU CONG ---
-         if(G_Pairs[i].base_name == "EURUSD")      { G_Pairs[i].risk_percent = InpEURUSD_Risk; G_Pairs[i].tf = InpEURUSD_TF; G_Pairs[i].enabled = InpEURUSD_On; }
-         else if(G_Pairs[i].base_name == "AUDUSD") { G_Pairs[i].risk_percent = InpAUDUSD_Risk; G_Pairs[i].tf = InpAUDUSD_TF; G_Pairs[i].enabled = InpAUDUSD_On; }
-         else if(G_Pairs[i].base_name == "USDCAD") { G_Pairs[i].risk_percent = InpUSDCAD_Risk; G_Pairs[i].tf = InpUSDCAD_TF; G_Pairs[i].enabled = InpUSDCAD_On; }
-         else if(G_Pairs[i].base_name == "EURGBP") { G_Pairs[i].risk_percent = InpEURGBP_Risk; G_Pairs[i].tf = InpEURGBP_TF; G_Pairs[i].enabled = InpEURGBP_On; }
-         else if(G_Pairs[i].base_name == "USDCHF") { G_Pairs[i].risk_percent = InpUSDCHF_Risk; G_Pairs[i].tf = InpUSDCHF_TF; G_Pairs[i].enabled = InpUSDCHF_On; }
-         else { G_Pairs[i].risk_percent = 0.0; G_Pairs[i].tf = PERIOD_H4; G_Pairs[i].enabled = false; }
+         // --- CHE DO THU CONG: Doc HTF/LTF tu Input ---
+         if(G_Pairs[i].base_name == "EURUSD")      { G_Pairs[i].risk_percent = InpEURUSD_Risk; G_Pairs[i].htf = InpEURUSD_HTF; G_Pairs[i].ltf = InpEURUSD_LTF; G_Pairs[i].enabled = InpEURUSD_On; }
+         else if(G_Pairs[i].base_name == "AUDUSD") { G_Pairs[i].risk_percent = InpAUDUSD_Risk; G_Pairs[i].htf = InpAUDUSD_HTF; G_Pairs[i].ltf = InpAUDUSD_LTF; G_Pairs[i].enabled = InpAUDUSD_On; }
+         else if(G_Pairs[i].base_name == "USDCAD") { G_Pairs[i].risk_percent = InpUSDCAD_Risk; G_Pairs[i].htf = InpUSDCAD_HTF; G_Pairs[i].ltf = InpUSDCAD_LTF; G_Pairs[i].enabled = InpUSDCAD_On; }
+         else if(G_Pairs[i].base_name == "EURGBP") { G_Pairs[i].risk_percent = InpEURGBP_Risk; G_Pairs[i].htf = InpEURGBP_HTF; G_Pairs[i].ltf = InpEURGBP_LTF; G_Pairs[i].enabled = InpEURGBP_On; }
+         else if(G_Pairs[i].base_name == "USDCHF") { G_Pairs[i].risk_percent = InpUSDCHF_Risk; G_Pairs[i].htf = InpUSDCHF_HTF; G_Pairs[i].ltf = InpUSDCHF_LTF; G_Pairs[i].enabled = InpUSDCHF_On; }
+         else { G_Pairs[i].risk_percent = 0.0; G_Pairs[i].htf = PERIOD_H1; G_Pairs[i].ltf = PERIOD_M5; G_Pairs[i].enabled = false; }
       }
       else
       {
-         // --- CHE DO TU DONG ---
-         G_Pairs[i].tf = GetFixedTimeframe(G_Pairs[i].base_name);
+         // --- CHE DO TU DONG: Mac dinh H1/M5 cho tat ca, doc HTF/LTF tu Input ---
+         G_Pairs[i].htf = InpEURUSD_HTF;  // Mac dinh lay tu EURUSD input
+         G_Pairs[i].ltf = InpEURUSD_LTF;
+         
+         // Override neu user set rieng cho tung cap
+         if(G_Pairs[i].base_name == "EURUSD")      { G_Pairs[i].htf = InpEURUSD_HTF; G_Pairs[i].ltf = InpEURUSD_LTF; }
+         else if(G_Pairs[i].base_name == "AUDUSD") { G_Pairs[i].htf = InpAUDUSD_HTF; G_Pairs[i].ltf = InpAUDUSD_LTF; }
+         else if(G_Pairs[i].base_name == "USDCAD") { G_Pairs[i].htf = InpUSDCAD_HTF; G_Pairs[i].ltf = InpUSDCAD_LTF; }
+         else if(G_Pairs[i].base_name == "EURGBP") { G_Pairs[i].htf = InpEURGBP_HTF; G_Pairs[i].ltf = InpEURGBP_LTF; }
+         else if(G_Pairs[i].base_name == "USDCHF") { G_Pairs[i].htf = InpUSDCHF_HTF; G_Pairs[i].ltf = InpUSDCHF_LTF; }
+
          if(G_Pairs[i].base_name == "EURUSD")      G_Pairs[i].risk_percent = 0.4;
          else if(G_Pairs[i].base_name == "AUDUSD") G_Pairs[i].risk_percent = 0.6;
          else if(G_Pairs[i].base_name == "EURGBP") G_Pairs[i].risk_percent = 0.5;
@@ -264,11 +271,27 @@ void InitGlobals()
          G_Pairs[i].enabled = true; // Auto mode: tat ca cap deu bat
       }
 
-      // Reset State
+      // Reset LTF State
       G_Pairs[i].handle_cci = INVALID_HANDLE;
       G_Pairs[i].isReadyForBuy = false;
       G_Pairs[i].isReadyForSell = false;
       G_Pairs[i].g_inited_filt = false;
+      G_Pairs[i].last_bar_time = 0;
+
+      // Reset HTF State
+      G_Pairs[i].htf_handle_cci = INVALID_HANDLE;
+      G_Pairs[i].htf_isReadyForBuy = false;
+      G_Pairs[i].htf_isReadyForSell = false;
+      G_Pairs[i].htf_g_inited_filt = false;
+      G_Pairs[i].htf_filt_prev = 0.0;
+      G_Pairs[i].htf_filt_prev_for_calc = 0.0;
+      G_Pairs[i].htf_upCount = 0;
+      G_Pairs[i].htf_dnCount = 0;
+      G_Pairs[i].htf_lastCond = 0;
+      G_Pairs[i].htf_last_bar_time = 0;
+      G_Pairs[i].htf_trap_signal = 0;
+
+      // Reset Persistence
       G_Pairs[i].realized_bleed_loss = 0.0;
       G_Pairs[i].locked_balance = 0.0;
       G_Pairs[i].virtual_step = 0;
@@ -306,12 +329,13 @@ void InitGlobals()
          G_Pairs[i].dxy_map_index = i;
       }
 
-      PrintFormat("   + Load Pair [%d]: %s (Risk: %.1f%%) - TF: %s - USD: %s",
-                  i, G_Pairs[i].symbol, G_Pairs[i].risk_percent, EnumToString(G_Pairs[i].tf),
+      PrintFormat("   + Load Pair [%d]: %s (Risk: %.1f%%) - HTF: %s / LTF: %s - USD: %s",
+                  i, G_Pairs[i].symbol, G_Pairs[i].risk_percent,
+                  EnumToString(G_Pairs[i].htf), EnumToString(G_Pairs[i].ltf),
                   (G_Pairs[i].isUSDPair ? (G_Pairs[i].isUSDFirst ? "USDxxx" : "xxxUSD") : "No"));
    }
 
-   // --- TU DONG PHAT HIEN VA KHOI TAO DXY ---
+   // --- TU DONG PHAT HIEN VA KHOI TAO DXY (DUAL TF) ---
    DXY_SYMBOL = AutoDetectDXY();
 
    if(DXY_SYMBOL == "")
@@ -326,21 +350,32 @@ void InitGlobals()
 
       for (int i = 0; i < DXY_CONTEXTS; i++)
       {
-         G_DXY[i].symbol = dxy_broker;
-         G_DXY[i].base_name = DXY_SYMBOL;
-         
-         // Dong bo Timeframe cua DXY ngam dinh giong voi Timeframe cua cap tien luon
-         G_DXY[i].tf = G_Pairs[i].tf; 
+         // --- DXY HTF Context ---
+         G_DXY_HTF[i].symbol = dxy_broker;
+         G_DXY_HTF[i].base_name = DXY_SYMBOL;
+         G_DXY_HTF[i].htf = G_Pairs[i].htf;
+         G_DXY_HTF[i].ltf = G_Pairs[i].htf; // DXY HTF dung TF lon cua cap tien
+         G_DXY_HTF[i].handle_cci = INVALID_HANDLE;
+         G_DXY_HTF[i].isReadyForBuy = false;
+         G_DXY_HTF[i].isReadyForSell = false;
+         G_DXY_HTF[i].g_inited_filt = false;
+         G_DXY_HTF[i].last_bar_time = 0;
+         G_DXY_TrapSignal_HTF[i] = 0;
 
-         G_DXY[i].handle_cci = INVALID_HANDLE;
-         G_DXY[i].isReadyForBuy = false;
-         G_DXY[i].isReadyForSell = false;
-         G_DXY[i].g_inited_filt = false;
-         G_DXY[i].last_bar_time = 0;
-         G_DXY_TrapSignal[i] = 0;
+         // --- DXY LTF Context ---
+         G_DXY_LTF[i].symbol = dxy_broker;
+         G_DXY_LTF[i].base_name = DXY_SYMBOL;
+         G_DXY_LTF[i].htf = G_Pairs[i].ltf;
+         G_DXY_LTF[i].ltf = G_Pairs[i].ltf; // DXY LTF dung TF nho cua cap tien
+         G_DXY_LTF[i].handle_cci = INVALID_HANDLE;
+         G_DXY_LTF[i].isReadyForBuy = false;
+         G_DXY_LTF[i].isReadyForSell = false;
+         G_DXY_LTF[i].g_inited_filt = false;
+         G_DXY_LTF[i].last_bar_time = 0;
+         G_DXY_TrapSignal_LTF[i] = 0;
       }
 
-      Print("DXY Filter: Symbol = ", dxy_broker, " | Contexts: 5 (Dynamic Timeframes)");
+      Print("DXY Filter: Symbol = ", dxy_broker, " | Contexts: 5 (Dual TF per pair)");
    }
 
    activeChainsCount = 0;

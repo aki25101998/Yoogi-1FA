@@ -31,27 +31,32 @@ input int    InpManual_StepPips = 0;     // Khoảng cách nhồi DCA (pips, 0 =
 // Cặp 1: EURUSD
 input bool   InpEURUSD_On   = true; // EURUSD Bật/Tắt
 input double InpEURUSD_Risk = 0.4; // EURUSD % Lot
-input ENUM_TIMEFRAMES InpEURUSD_TF = PERIOD_H4; // EURUSD Timeframe
+input ENUM_TIMEFRAMES InpEURUSD_HTF = PERIOD_H1; // EURUSD TF Lớn (Xu hướng)
+input ENUM_TIMEFRAMES InpEURUSD_LTF = PERIOD_M5; // EURUSD TF Nhỏ (Entry)
 
 // Cặp 2: AUDUSD
 input bool   InpAUDUSD_On   = true; // AUDUSD Bật/Tắt
 input double InpAUDUSD_Risk = 0.6; // AUDUSD % Lot
-input ENUM_TIMEFRAMES InpAUDUSD_TF = PERIOD_H4; // AUDUSD Timeframe
+input ENUM_TIMEFRAMES InpAUDUSD_HTF = PERIOD_H1; // AUDUSD TF Lớn (Xu hướng)
+input ENUM_TIMEFRAMES InpAUDUSD_LTF = PERIOD_M5; // AUDUSD TF Nhỏ (Entry)
 
 // Cặp 3: USDCAD
 input bool   InpUSDCAD_On   = true; // USDCAD Bật/Tắt
 input double InpUSDCAD_Risk = 0.4; // USDCAD % Lot
-input ENUM_TIMEFRAMES InpUSDCAD_TF = PERIOD_H2; // USDCAD Timeframe
+input ENUM_TIMEFRAMES InpUSDCAD_HTF = PERIOD_H1; // USDCAD TF Lớn (Xu hướng)
+input ENUM_TIMEFRAMES InpUSDCAD_LTF = PERIOD_M5; // USDCAD TF Nhỏ (Entry)
 
 // Cặp 4: EURGBP
 input bool   InpEURGBP_On   = true; // EURGBP Bật/Tắt
 input double InpEURGBP_Risk = 0.5; // EURGBP % Lot
-input ENUM_TIMEFRAMES InpEURGBP_TF = PERIOD_H4; // EURGBP Timeframe
+input ENUM_TIMEFRAMES InpEURGBP_HTF = PERIOD_H1; // EURGBP TF Lớn (Xu hướng)
+input ENUM_TIMEFRAMES InpEURGBP_LTF = PERIOD_M5; // EURGBP TF Nhỏ (Entry)
 
 // Cặp 5: USDCHF
 input bool   InpUSDCHF_On   = true; // USDCHF Bật/Tắt
 input double InpUSDCHF_Risk = 0.3; // USDCHF % Lot
-input ENUM_TIMEFRAMES InpUSDCHF_TF = PERIOD_H4; // USDCHF Timeframe
+input ENUM_TIMEFRAMES InpUSDCHF_HTF = PERIOD_H1; // USDCHF TF Lớn (Xu hướng)
+input ENUM_TIMEFRAMES InpUSDCHF_LTF = PERIOD_M5; // USDCHF TF Nhỏ (Entry)
 
 //--- Tester Withdrawal Settings ---
 input group "--- Tester Withdrawal Settings ---"
