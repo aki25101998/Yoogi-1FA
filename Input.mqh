@@ -58,6 +58,28 @@ input double InpUSDCHF_Risk = 0.3; // USDCHF % Lot
 input ENUM_TIMEFRAMES InpUSDCHF_HTF = PERIOD_H1; // USDCHF TF Lớn (Xu hướng)
 input ENUM_TIMEFRAMES InpUSDCHF_LTF = PERIOD_M5; // USDCHF TF Nhỏ (Entry)
 
+//--- Reversal Engine Settings ---
+input group "=== REVERSAL ENGINE ==="
+input bool   InpUseReversalEngine = true;
+input int    InpReversal_ATR_Period = 14;
+input int    InpReversal_EquilibriumPeriod = 50;
+input double InpReversal_Extension_Normal = 1.0;
+input double InpReversal_Extension_Strong = 1.5;
+input double InpReversal_Extension_Extreme = 2.0;
+input int    InpReversal_SwingLeft = 2;
+input int    InpReversal_SwingRight = 2;
+input int    InpReversal_LookbackBars = 100;
+input double InpScore_Divergence = 25.0;
+input double InpScore_Structure = 25.0;
+input double InpScore_Extension = 20.0;
+input double InpScore_Exhaustion = 15.0;
+input double InpScore_DXY = 10.0;
+input double InpScore_HTF = 5.0;
+input double InpReversal_MinScore = 70.0;
+input double InpReversal_HighScore = 80.0;
+input bool   InpReversal_RequireStructureShift = true;
+input bool   InpReversal_RequireClosedBars = true;
+
 //--- Tester Withdrawal Settings ---
 input group "--- Tester Withdrawal Settings ---"
 input bool   InpTesterWithdrawalEnabled   = false;   // Bật chế độ rút tiền ảo trong Tester

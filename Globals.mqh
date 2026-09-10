@@ -38,8 +38,27 @@ const double InpTrimPercentage    = 100.0;
 // ==================================================================
 // STRUCT QUẢN LÝ TRẠNG THÁI TỪNG CẶP
 // ==================================================================
+enum ENUM_MARKET_REGIME { 
+   REGIME_UNKNOWN = 0, 
+   REGIME_TREND_BULL, 
+   REGIME_TREND_BEAR, 
+   REGIME_SIDEWAY, 
+   REGIME_EXHAUSTION 
+};
+
 struct PairContext
 {
+   // --- Reversal Engine State ---
+   ENUM_MARKET_REGIME regime;
+   bool             htf_reversal_zone;
+   bool             ltf_divergence;
+   bool             ltf_mss;
+   double           reversal_score;
+   int              state_machine;
+   double           last_swing_high;
+   double           last_swing_low;
+   
+
    string           symbol;       // Tên thực tế (VD: EURUSD.pro)
    string           base_name;    // Tên chuẩn (VD: EURUSD)
    ENUM_TIMEFRAMES  htf;          // Timeframe lớn (xu hướng)
@@ -277,6 +296,17 @@ void InitGlobals()
       G_Pairs[i].isReadyForSell = false;
       G_Pairs[i].g_inited_filt = false;
       G_Pairs[i].last_bar_time = 0;
+      
+      // Reset Reversal Engine State
+      G_Pairs[i].regime = REGIME_UNKNOWN;
+      G_Pairs[i].htf_reversal_zone = false;
+      G_Pairs[i].ltf_divergence = false;
+      G_Pairs[i].ltf_mss = false;
+      G_Pairs[i].reversal_score = 0.0;
+      G_Pairs[i].state_machine = 0;
+      G_Pairs[i].last_swing_high = 0.0;
+      G_Pairs[i].last_swing_low = 0.0;
+
 
       // Reset HTF State
       G_Pairs[i].htf_handle_cci = INVALID_HANDLE;

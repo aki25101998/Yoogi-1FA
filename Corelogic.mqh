@@ -499,85 +499,122 @@ void ManagePairs()
       {
          if(G_Pairs[i].active_chain_id != 0) ClearChainState_Multi(i);
 
-         // --- TIM TIN HIEU MOI (MTF DUAL SIGNAL) ---
+         // --- TIM TIN HIEU MOI (MTF DUAL SIGNAL HOAC REVERSAL ENGINE) ---
          if(InpAutoSignalTrading && allow_new_entry && G_Pairs[i].enabled)
          {
-            // =============================================
-            // BUOC 1: CHECK HTF SIGNAL (Xu huong)
-            // =============================================
-            int htfSignal = CheckEntrySignal_HTF(i);
-            if(htfSignal != 0)
+            if(InpUseReversalEngine)
             {
-               // Neu HTF phat tin hieu moi
-               if(G_Pairs[i].htf_trap_signal != 0 && G_Pairs[i].htf_trap_signal != htfSignal)
+               // =============================================
+               // REVERSAL ENGINE V1 (NEW LOGIC)
+               // =============================================
+               int revSignal = CheckReversalSignal(i);
+               
+               if(revSignal != 0)
                {
-                  // HTF dao chieu -> Reset bay cu
-                  PrintFormat("[%s] HTF dao chieu %s -> %s. Reset bay.",
-                              sym,
-                              (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"),
-                              (htfSignal == 1 ? "BUY" : "SELL"));
-               }
-               G_Pairs[i].htf_trap_signal = htfSignal;
-               PrintFormat("[%s] >>> HTF Signal: %s (Bay dat thanh cong)",
-                           sym, (htfSignal == 1 ? "BUY" : "SELL"));
-            }
-
-            // =============================================
-            // BUOC 2: CHECK LTF SIGNAL (Entry) - Chi khi HTF da co bay
-            // =============================================
-            if(G_Pairs[i].htf_trap_signal != 0)
-            {
-               int ltfSignal = CheckEntrySignal(i);
-
-               if(ltfSignal != 0 && ltfSignal == G_Pairs[i].htf_trap_signal)
-               {
-                  // LTF xac nhan cung huong voi HTF!
-                  int confirmed_signal = ltfSignal;
-
-                  PrintFormat("[%s] >>> LTF xac nhan %s (Cung huong HTF). Tim DXY...",
-                              sym, (confirmed_signal == 1 ? "BUY" : "SELL"));
-
-                  // =============================================
-                  // BUOC 3: DXY CONVERGENCE (Dual TF)
-                  // =============================================
                   int signal = 0;
-
                   if(G_Pairs[i].isUSDPair && g_dxy_available && InpUseDXYReference)
                   {
                      // === DXY TRAP (CHI CAP USD) ===
-                     G_Pairs[i].trapSignal = confirmed_signal;
-
-                     // DXY da duoc pre-scan, chi can check convergence
+                     G_Pairs[i].trapSignal = revSignal;
                      signal = CheckDXYConvergence_Dual(i);
                   }
                   else
                   {
                      // === KHONG USD (EURGBP) -> Binh thuong ===
-                     signal = confirmed_signal;
+                     signal = revSignal;
                   }
-
+                  
                   if(signal != 0)
                   {
                      if(signal == 1  && !InpAllowBuy) continue;
                      if(signal == -1 && !InpAllowSell) continue;
 
-                     PrintFormat("[%s] >>> MTF CONFIRMED: HTF=%s + LTF=%s. Opening trade...",
-                                 sym,
-                                 (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"),
-                                 (ltfSignal == 1 ? "BUY" : "SELL"));
+                     PrintFormat("[%s] >>> REVERSAL ENGINE CONFIRMED: Opening %s trade...",
+                                 sym, (signal == 1 ? "BUY" : "SELL"));
                      OpenMasterTrade_Multi(i, signal);
                   }
                }
-               else if(ltfSignal != 0 && ltfSignal != G_Pairs[i].htf_trap_signal)
+            }
+            else
+            {
+               // =============================================
+               // BUOC 1: CHECK HTF SIGNAL (Xu huong) - OLD LOGIC
+               // =============================================
+               int htfSignal = CheckEntrySignal_HTF(i);
+               if(htfSignal != 0)
                {
-                  // LTF phat tin hieu NGUOC huong HTF -> Bo qua
-                  PrintFormat("[%s] LTF Signal %s nguoc HTF %s -> Bo qua.",
-                              sym,
-                              (ltfSignal == 1 ? "BUY" : "SELL"),
-                              (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"));
+                  // Neu HTF phat tin hieu moi
+                  if(G_Pairs[i].htf_trap_signal != 0 && G_Pairs[i].htf_trap_signal != htfSignal)
+                  {
+                     // HTF dao chieu -> Reset bay cu
+                     PrintFormat("[%s] HTF dao chieu %s -> %s. Reset bay.",
+                                 sym,
+                                 (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"),
+                                 (htfSignal == 1 ? "BUY" : "SELL"));
+                  }
+                  G_Pairs[i].htf_trap_signal = htfSignal;
+                  PrintFormat("[%s] >>> HTF Signal: %s (Bay dat thanh cong)",
+                              sym, (htfSignal == 1 ? "BUY" : "SELL"));
+               }
+   
+               // =============================================
+               // BUOC 2: CHECK LTF SIGNAL (Entry) - Chi khi HTF da co bay
+               // =============================================
+               if(G_Pairs[i].htf_trap_signal != 0)
+               {
+                  int ltfSignal = CheckEntrySignal(i);
+   
+                  if(ltfSignal != 0 && ltfSignal == G_Pairs[i].htf_trap_signal)
+                  {
+                     // LTF xac nhan cung huong voi HTF!
+                     int confirmed_signal = ltfSignal;
+   
+                     PrintFormat("[%s] >>> LTF xac nhan %s (Cung huong HTF). Tim DXY...",
+                                 sym, (confirmed_signal == 1 ? "BUY" : "SELL"));
+   
+                     // =============================================
+                     // BUOC 3: DXY CONVERGENCE (Dual TF)
+                     // =============================================
+                     int signal = 0;
+   
+                     if(G_Pairs[i].isUSDPair && g_dxy_available && InpUseDXYReference)
+                     {
+                        // === DXY TRAP (CHI CAP USD) ===
+                        G_Pairs[i].trapSignal = confirmed_signal;
+   
+                        // DXY da duoc pre-scan, chi can check convergence
+                        signal = CheckDXYConvergence_Dual(i);
+                     }
+                     else
+                     {
+                        // === KHONG USD (EURGBP) -> Binh thuong ===
+                        signal = confirmed_signal;
+                     }
+   
+                     if(signal != 0)
+                     {
+                        if(signal == 1  && !InpAllowBuy) continue;
+                        if(signal == -1 && !InpAllowSell) continue;
+   
+                        PrintFormat("[%s] >>> MTF CONFIRMED: HTF=%s + LTF=%s. Opening trade...",
+                                    sym,
+                                    (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"),
+                                    (ltfSignal == 1 ? "BUY" : "SELL"));
+                        OpenMasterTrade_Multi(i, signal);
+                     }
+                  }
+                  else if(ltfSignal != 0 && ltfSignal != G_Pairs[i].htf_trap_signal)
+                  {
+                     // LTF phat tin hieu NGUOC huong HTF -> Bo qua
+                     PrintFormat("[%s] LTF Signal %s nguoc HTF %s -> Bo qua.",
+                                 sym,
+                                 (ltfSignal == 1 ? "BUY" : "SELL"),
+                                 (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"));
+                  }
                }
             }
          }
+
       }
    }
 

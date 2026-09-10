@@ -173,6 +173,38 @@ bool ReadClose_3Bars_HTF(int idx, double &c0, double &c1, double &c2)
 }
 
 // ==================================================================
+// HỖ TRỢ ĐỌC DỮ LIỆU BỔ SUNG (REVERSAL ENGINE)
+// ==================================================================
+double CalculateATR_Generic(string sym, ENUM_TIMEFRAMES tf, int period, int shift)
+{
+   int handle = iATR(sym, tf, period);
+   if(handle == INVALID_HANDLE) return 0.0;
+   double buf[1];
+   if(CopyBuffer(handle, 0, shift, 1, buf) < 1) { IndicatorRelease(handle); return 0.0; }
+   IndicatorRelease(handle);
+   return buf[0];
+}
+
+double CalculateEMA_Generic(string sym, ENUM_TIMEFRAMES tf, int period, int shift)
+{
+   int handle = iMA(sym, tf, period, 0, MODE_EMA, PRICE_CLOSE);
+   if(handle == INVALID_HANDLE) return 0.0;
+   double buf[1];
+   if(CopyBuffer(handle, 0, shift, 1, buf) < 1) { IndicatorRelease(handle); return 0.0; }
+   IndicatorRelease(handle);
+   return buf[0];
+}
+
+bool ReadHighLow_Generic(string sym, ENUM_TIMEFRAMES tf, int shift, int count, double &highs[], double &lows[])
+{
+   if(CopyHigh(sym, tf, shift, count, highs) < count) return false;
+   if(CopyLow(sym, tf, shift, count, lows) < count) return false;
+   ArraySetAsSeries(highs, true);
+   ArraySetAsSeries(lows, true);
+   return true;
+}
+
+// ==================================================================
 // NEW BAR DETECTION
 // ==================================================================
 bool IsNewBar_Multi(int idx)

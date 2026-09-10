@@ -141,6 +141,12 @@ void CreateDisplay()
    CreateLabel(INFO_PREFIX + "DXY_Val", "Detecting...", x_val, y, DASH_CORNER, FONT_SIZE, C_SUB);
    y -= DASH_LINE_H;
 
+   // 2c. REVERSAL ENGINE
+   CreateLabel(INFO_PREFIX + "Rev_Lbl", "Reversal :", x_base, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+   CreateLabel(INFO_PREFIX + "Rev_Val", "Init...", x_val, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   y -= DASH_LINE_H;
+
+
    // 3. ACCOUNT INFO
    CreateLabel(INFO_PREFIX + "Acc_Bal", TXT_REAL_BAL, x_base, y, DASH_CORNER, FONT_SIZE, C_TEXT);
    CreateLabel(INFO_PREFIX + "Acc_Bal_Val", "0.00", x_val + 20, y, DASH_CORNER, FONT_SIZE, C_VALUE);
@@ -237,6 +243,21 @@ void UpdateDisplay()
       ObjectSetString(0, INFO_PREFIX + "DXY_Val", OBJPROP_TEXT, "Not Available");
       ObjectSetInteger(0, INFO_PREFIX + "DXY_Val", OBJPROP_COLOR, C_WARN);
    }
+
+   // --- REVERSAL ENGINE STATUS ---
+   if(!InpUseReversalEngine)
+   {
+      ObjectSetString(0, INFO_PREFIX + "Rev_Val", OBJPROP_TEXT, "Disabled");
+      ObjectSetInteger(0, INFO_PREFIX + "Rev_Val", OBJPROP_COLOR, C_WARN);
+   }
+   else
+   {
+      // Display the Reversal Score of the EURUSD pair as representative, or an aggregate status.
+      // Since it's a global label, we'll show "Active" and we can add score to the individual pair rows later if needed.
+      ObjectSetString(0, INFO_PREFIX + "Rev_Val", OBJPROP_TEXT, "Active (MTF+Scoring)");
+      ObjectSetInteger(0, INFO_PREFIX + "Rev_Val", OBJPROP_COLOR, C_VALUE);
+   }
+
 
    // --- BAL ---
    ObjectSetString(0, INFO_PREFIX + "Acc_Bal_Val", OBJPROP_TEXT, StringFormat("$%.2f", real_bal));
