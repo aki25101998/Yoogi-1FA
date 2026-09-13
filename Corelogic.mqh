@@ -214,6 +214,8 @@ void OpenMasterTrade_Multi(int idx, int signal)
 
       // Reset HTF trap sau khi vào lệnh thành công
       G_Pairs[idx].htf_trap_signal = 0;
+      G_Pairs[idx].state_machine = 0;
+      G_Pairs[idx].rev_status = "NO SETUP";
 
       SaveChainState_Multi(idx);
 

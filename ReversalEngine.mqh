@@ -182,8 +182,16 @@ ENUM_MARKET_REGIME DetectMarketRegime(string sym, ENUM_TIMEFRAMES tf)
    bool isUptrend = (close[0] > ema_fast && ema_fast > ema_slow);
    bool isDowntrend = (close[0] < ema_fast && ema_fast < ema_slow);
    
-   if(isUptrend) return REGIME_TREND_BULL;
-   if(isDowntrend) return REGIME_TREND_BEAR;
+   if(isUptrend)
+   {
+       if(DetectExhaustion(sym, tf, -1) || DetectDivergence(sym, tf, -1)) return REGIME_EXHAUSTION;
+       return REGIME_TREND_BULL;
+   }
+   if(isDowntrend)
+   {
+       if(DetectExhaustion(sym, tf, 1) || DetectDivergence(sym, tf, 1)) return REGIME_EXHAUSTION;
+       return REGIME_TREND_BEAR;
+   }
    
    return REGIME_SIDEWAY;
 }
@@ -196,16 +204,48 @@ double CalculateReversalScore(int idx, int direction)
    if(G_Pairs[idx].ltf_divergence) score += InpScore_Divergence;
    if(G_Pairs[idx].ltf_mss) score += InpScore_Structure;
    
-   double ext = CalculateExtension(G_Pairs[idx].symbol, G_Pairs[idx].htf);
+   double ext = G_Pairs[idx].htf_ext;
    if(ext >= InpReversal_Extension_Extreme) score += InpScore_Extension;
    else if(ext >= InpReversal_Extension_Strong) score += InpScore_Extension * 0.75;
    else if(ext >= InpReversal_Extension_Normal) score += InpScore_Extension * 0.5;
    
-   if(DetectExhaustion(G_Pairs[idx].symbol, G_Pairs[idx].htf, direction)) score += InpScore_Exhaustion;
+   if(G_Pairs[idx].ltf_exh) score += InpScore_Exhaustion;
    
    if(G_Pairs[idx].htf_reversal_zone) score += InpScore_HTF;
    
    return score;
+}
+
+void LogReversalDecision(int idx, int direction, string decision, string reason, double score)
+{
+    string sym = G_Pairs[idx].symbol;
+    string dir_str = (direction == 1) ? "BUY" : "SELL";
+    string regime_str = EnumToString(G_Pairs[idx].regime);
+    
+    string cci_str = (G_Pairs[idx].ltf_cci_recov == direction) ? "RECOVERY" : "WAIT";
+    string rf_str = (G_Pairs[idx].ltf_rf_state == 1) ? "BULL" : ((G_Pairs[idx].ltf_rf_state == -1) ? "BEAR" : "WAIT");
+    
+    string dxy_str = "N/A";
+    if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
+    {
+        dxy_str = (decision == "ENTRY") ? "CONFIRMED" : "WAITING";
+    }
+
+    if(decision == "REJECT")
+    {
+        PrintFormat("[REVERSAL] %s %s Decision = REJECT Reason = %s", sym, dir_str, reason);
+    }
+    else
+    {
+        PrintFormat("[REVERSAL] Symbol: %s Direction: %s HTF Regime: %s HTF Extension: %.2f ATR HTF Divergence: %s HTF Exhaustion: %s LTF Divergence: %s LTF Structure Shift: %s LTF Exhaustion: %s LTF CCI: %s LTF Range Filter: %s DXY: %s Score: %.0f Final Decision: %s",
+                    sym, dir_str, regime_str, G_Pairs[idx].htf_ext,
+                    (G_Pairs[idx].htf_div ? "TRUE" : "FALSE"),
+                    (G_Pairs[idx].htf_exh ? "TRUE" : "FALSE"),
+                    (G_Pairs[idx].ltf_divergence ? "TRUE" : "FALSE"),
+                    (G_Pairs[idx].ltf_mss ? "TRUE" : "FALSE"),
+                    (G_Pairs[idx].ltf_exh ? "TRUE" : "FALSE"),
+                    cci_str, rf_str, dxy_str, score, decision);
+    }
 }
 
 // --- 7. CORE REVERSAL SIGNAL LOGIC ---
@@ -217,11 +257,11 @@ int CheckReversalSignal(int idx)
    ENUM_TIMEFRAMES htf = G_Pairs[idx].htf;
    ENUM_TIMEFRAMES ltf = G_Pairs[idx].ltf;
    
-   // 1. HTF REVERSAL ZONE PERMISSION
+   // --- HTF PROCESSING ---
    if(IsNewBar_HTF(idx))
    {
       G_Pairs[idx].regime = DetectMarketRegime(sym, htf);
-      double htf_ext = CalculateExtension(sym, htf);
+      G_Pairs[idx].htf_ext = CalculateExtension(sym, htf);
       
       bool htf_bull_div = DetectDivergence(sym, htf, 1);
       bool htf_bear_div = DetectDivergence(sym, htf, -1);
@@ -230,64 +270,137 @@ int CheckReversalSignal(int idx)
       
       G_Pairs[idx].htf_reversal_zone = false;
       
-      // Allow searching for BUY if strongly extended down, or diverging/exhausting down
-      if(G_Pairs[idx].regime == REGIME_TREND_BEAR || G_Pairs[idx].regime == REGIME_SIDEWAY)
+      if(G_Pairs[idx].regime == REGIME_TREND_BEAR || G_Pairs[idx].regime == REGIME_SIDEWAY || G_Pairs[idx].regime == REGIME_EXHAUSTION)
       {
-         if(htf_ext >= InpReversal_Extension_Normal || htf_bull_div || htf_bull_exh)
+         if(G_Pairs[idx].htf_ext >= InpReversal_Extension_Normal || htf_bull_div || htf_bull_exh)
          {
             G_Pairs[idx].htf_reversal_zone = true;
-            if(G_Pairs[idx].htf_trap_signal != 1) 
-               PrintFormat("[REVERSAL] %s HTF Zone = POTENTIAL BUY (Ext: %.2f)", sym, htf_ext);
-            G_Pairs[idx].htf_trap_signal = 1;
+            G_Pairs[idx].htf_div = htf_bull_div;
+            G_Pairs[idx].htf_exh = htf_bull_exh;
+            G_Pairs[idx].htf_trap_signal = 1; // Potential BUY
+            
+            if(G_Pairs[idx].state_machine == 0) 
+            {
+               G_Pairs[idx].state_machine = 1;
+               G_Pairs[idx].rev_status = "ZONE";
+            }
          }
       }
       
-      // Allow searching for SELL if strongly extended up, or diverging/exhausting up
-      if(G_Pairs[idx].regime == REGIME_TREND_BULL || G_Pairs[idx].regime == REGIME_SIDEWAY)
+      if(G_Pairs[idx].regime == REGIME_TREND_BULL || G_Pairs[idx].regime == REGIME_SIDEWAY || G_Pairs[idx].regime == REGIME_EXHAUSTION)
       {
-         if(htf_ext >= InpReversal_Extension_Normal || htf_bear_div || htf_bear_exh)
+         if(G_Pairs[idx].htf_ext >= InpReversal_Extension_Normal || htf_bear_div || htf_bear_exh)
          {
             G_Pairs[idx].htf_reversal_zone = true;
-            if(G_Pairs[idx].htf_trap_signal != -1)
-               PrintFormat("[REVERSAL] %s HTF Zone = POTENTIAL SELL (Ext: %.2f)", sym, htf_ext);
-            G_Pairs[idx].htf_trap_signal = -1;
+            G_Pairs[idx].htf_div = htf_bear_div;
+            G_Pairs[idx].htf_exh = htf_bear_exh;
+            G_Pairs[idx].htf_trap_signal = -1; // Potential SELL
+            
+            if(G_Pairs[idx].state_machine == 0) 
+            {
+               G_Pairs[idx].state_machine = 1;
+               G_Pairs[idx].rev_status = "ZONE";
+            }
          }
+      }
+      
+      // Reset if zone is lost
+      if(!G_Pairs[idx].htf_reversal_zone)
+      {
+         G_Pairs[idx].state_machine = 0;
+         G_Pairs[idx].htf_trap_signal = 0;
+         G_Pairs[idx].rev_status = "NO SETUP";
       }
    }
    
-   // 2. LTF TRIGGER LOGIC
+   // --- LTF PROCESSING & STATE MACHINE ---
    if(G_Pairs[idx].htf_trap_signal != 0 && IsNewBar_Multi(idx))
    {
       int dir = G_Pairs[idx].htf_trap_signal;
       
+      // Update LTF Evidence
       G_Pairs[idx].ltf_divergence = DetectDivergence(sym, ltf, dir);
       G_Pairs[idx].ltf_mss = DetectStructureShift(sym, ltf, dir);
+      G_Pairs[idx].ltf_exh = DetectExhaustion(sym, ltf, dir);
       
-      // Evaluate base signal logic (CCI recovery + Filter confirmation)
-      int baseSignal = CheckEntrySignal(idx); // Call original function to get CCI/Range Filter confirmation
+      // Check base signal for CCI recovery + Range Filter
+      int baseSignal = CheckEntrySignal(idx); 
+      if(baseSignal != 0)
+      {
+          G_Pairs[idx].ltf_cci_recov = baseSignal;
+          G_Pairs[idx].ltf_rf_state = baseSignal;
+      }
       
       double score = CalculateReversalScore(idx, dir);
       G_Pairs[idx].reversal_score = score;
       
-      // Logging
-      if(baseSignal == dir || G_Pairs[idx].ltf_divergence || G_Pairs[idx].ltf_mss)
+      // Hard No-Trade Rules
+      bool reject = false;
+      string reject_reason = "";
+      
+      if(dir == 1 && G_Pairs[idx].regime == REGIME_TREND_BEAR && !G_Pairs[idx].ltf_divergence && G_Pairs[idx].htf_ext < InpReversal_Extension_Strong && !G_Pairs[idx].ltf_mss)
       {
-         PrintFormat("[REVERSAL] %s %s | Div: %s | MSS: %s | Score: %.0f/100", 
-                     sym, (dir == 1 ? "BUY" : "SELL"), 
-                     (G_Pairs[idx].ltf_divergence ? "YES" : "NO"),
-                     (G_Pairs[idx].ltf_mss ? "YES" : "NO"),
-                     score);
+          reject = true;
+          reject_reason = "Strong Bear Trend + No Div + No Ext + No MSS";
+      }
+      if(dir == -1 && G_Pairs[idx].regime == REGIME_TREND_BULL && !G_Pairs[idx].ltf_divergence && G_Pairs[idx].htf_ext < InpReversal_Extension_Strong && !G_Pairs[idx].ltf_mss)
+      {
+          reject = true;
+          reject_reason = "Strong Bull Trend + No Div + No Ext + No MSS";
       }
       
-      // Hard Constraints
-      if(score < InpReversal_MinScore) return 0;
-      if(InpReversal_RequireStructureShift && !G_Pairs[idx].ltf_mss) return 0;
-      
-      // If we have LTF signal + sufficient score -> Return Final Trigger
-      if(baseSignal == dir)
+      if(reject)
       {
-         PrintFormat("[REVERSAL TRIGGER] %s %s APPROVED. Score: %.0f >= %.0f", sym, (dir == 1 ? "BUY" : "SELL"), score, InpReversal_MinScore);
-         return dir;
+          LogReversalDecision(idx, dir, "REJECT", reject_reason, score);
+          G_Pairs[idx].state_machine = 0;
+          G_Pairs[idx].htf_trap_signal = 0;
+          G_Pairs[idx].rev_status = "REJECTED";
+          return 0;
+      }
+
+      // STATE MACHINE PROGRESSION
+      if(G_Pairs[idx].state_machine == 1) // HTF Zone -> Watch for LTF Div/Exh
+      {
+          if(G_Pairs[idx].ltf_divergence || G_Pairs[idx].ltf_exh) 
+          {
+              G_Pairs[idx].state_machine = 2;
+              G_Pairs[idx].rev_status = "WATCH";
+          }
+      }
+      
+      if(G_Pairs[idx].state_machine == 2) // Watch -> Structure Shift
+      {
+          if(G_Pairs[idx].ltf_mss || !InpReversal_RequireStructureShift) 
+          {
+              G_Pairs[idx].state_machine = 3;
+              G_Pairs[idx].rev_status = "MSS";
+          }
+      }
+      
+      if(G_Pairs[idx].state_machine >= 1) // Can jump to state 4 if baseSignal hits and MSS is true
+      {
+          if(baseSignal == dir) 
+          {
+              if(InpReversal_RequireStructureShift && !G_Pairs[idx].ltf_mss) 
+              {
+                  LogReversalDecision(idx, dir, "REJECT", "Structure Shift Missing", score);
+                  G_Pairs[idx].rev_status = "WAIT MSS";
+                  return 0;
+              }
+              
+              if(score < InpReversal_MinScore)
+              {
+                  LogReversalDecision(idx, dir, "REJECT", "Score too low: " + DoubleToString(score, 0), score);
+                  G_Pairs[idx].rev_status = "LOW SCORE";
+                  return 0; 
+              }
+              
+              G_Pairs[idx].state_machine = 4; // CONFIRMATION
+              G_Pairs[idx].rev_status = "TRIGGER";
+              
+              LogReversalDecision(idx, dir, "ENTRY", "", score);
+              return dir;
+          }
       }
    }
    

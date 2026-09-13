@@ -50,11 +50,20 @@ struct PairContext
 {
    // --- Reversal Engine State ---
    ENUM_MARKET_REGIME regime;
+   double           htf_ext;
+   bool             htf_div;
+   bool             htf_exh;
    bool             htf_reversal_zone;
+   
    bool             ltf_divergence;
    bool             ltf_mss;
+   bool             ltf_exh;
+   int              ltf_cci_recov;
+   int              ltf_rf_state;
+   
    double           reversal_score;
    int              state_machine;
+   string           rev_status;
    double           last_swing_high;
    double           last_swing_low;
    
@@ -299,11 +308,18 @@ void InitGlobals()
       
       // Reset Reversal Engine State
       G_Pairs[i].regime = REGIME_UNKNOWN;
+      G_Pairs[i].htf_ext = 0.0;
+      G_Pairs[i].htf_div = false;
+      G_Pairs[i].htf_exh = false;
       G_Pairs[i].htf_reversal_zone = false;
       G_Pairs[i].ltf_divergence = false;
       G_Pairs[i].ltf_mss = false;
+      G_Pairs[i].ltf_exh = false;
+      G_Pairs[i].ltf_cci_recov = 0;
+      G_Pairs[i].ltf_rf_state = 0;
       G_Pairs[i].reversal_score = 0.0;
       G_Pairs[i].state_machine = 0;
+      G_Pairs[i].rev_status = "NO SETUP";
       G_Pairs[i].last_swing_high = 0.0;
       G_Pairs[i].last_swing_low = 0.0;
 
