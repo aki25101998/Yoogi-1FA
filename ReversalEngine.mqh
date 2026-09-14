@@ -94,6 +94,11 @@ void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
    double highs[], lows[];
    if(!ReadHighLow_Generic(sym, tf, 1, lookback, highs, lows)) return;
    
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) return;
+   
+   double minDistance = InpMinSwingDistanceATR * atr;
+   
    // Tìm Swing High (gần nhất -> cũ hơn)
    for(int i = right; i < lookback - left; i++)
    {
@@ -110,8 +115,12 @@ void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
          }
          else if(prevSwingHigh == 0.0)
          {
-            prevSwingHigh = highs[i];
-            break; // Đã tìm đủ 2 swing high
+            // Noise filter: swing thứ 2 phải cách swing 1 một khoảng >= minDistance
+            if(MathAbs(qSwingHigh - highs[i]) >= minDistance)
+            {
+               prevSwingHigh = highs[i];
+               break; // Đã tìm đủ 2 swing high
+            }
          }
       }
    }
@@ -132,8 +141,12 @@ void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
          }
          else if(prevSwingLow == 0.0)
          {
-            prevSwingLow = lows[i];
-            break; // Đã tìm đủ 2 swing low
+            // Noise filter: swing thứ 2 phải cách swing 1 một khoảng >= minDistance
+            if(MathAbs(qSwingLow - lows[i]) >= minDistance)
+            {
+               prevSwingLow = lows[i];
+               break; // Đã tìm đủ 2 swing low
+            }
          }
       }
    }
@@ -145,11 +158,12 @@ ENUM_MARKET_REGIME DetectMarketRegime(string sym, ENUM_TIMEFRAMES tf)
    double ema_fast = CalculateEMA_Generic(sym, tf, 20, 1);
    double ema_slow = CalculateEMA_Generic(sym, tf, 50, 1);
    
-   double close[];
-   if(CopyClose(sym, tf, 1, 1, close) < 1) return REGIME_UNKNOWN;
+   if(ema_fast <= 0 || ema_slow <= 0) return REGIME_UNKNOWN;
    
-   bool isUptrend = (close[0] > ema_fast && ema_fast > ema_slow);
-   bool isDowntrend = (close[0] < ema_fast && ema_fast < ema_slow);
+   // Đánh giá slope/bias của cấu trúc dựa trên tương quan EMA,
+   // không ràng buộc giá đóng cửa phải nằm cùng phía với EMA để tránh conflict khi giá extended (reversal condition)
+   bool isUptrend = (ema_fast > ema_slow);
+   bool isDowntrend = (ema_fast < ema_slow);
    
    if(isUptrend) return REGIME_TREND_BULL;
    if(isDowntrend) return REGIME_TREND_BEAR;
@@ -492,10 +506,13 @@ bool DetectStructureShift(int idx, string sym, ENUM_TIMEFRAMES tf, int direction
    {
       double recent_swing_high = G_Pairs[idx].qual_swing_high;
       double prev_swing_high = G_Pairs[idx].prev_swing_high;
+      double recent_swing_low = G_Pairs[idx].qual_swing_low;
       
-      if(recent_swing_high > 0.0 && prev_swing_high > 0.0)
+      // Phải có đủ dữ kiện: swing high gần nhất, swing high trước đó (để xác nhận LH),
+      // và một swing low gần nhất (chứng tỏ đã có pullback tạo LH)
+      if(recent_swing_high > 0.0 && prev_swing_high > 0.0 && recent_swing_low > 0.0)
       {
-         // Verify it's a Lower High (LH)
+         // Verify it's a true Lower High (LH) in a bearish structure
          if(recent_swing_high < prev_swing_high)
          {
             double breakDistance = close[0] - recent_swing_high;
@@ -511,10 +528,13 @@ bool DetectStructureShift(int idx, string sym, ENUM_TIMEFRAMES tf, int direction
    {
       double recent_swing_low = G_Pairs[idx].qual_swing_low;
       double prev_swing_low = G_Pairs[idx].prev_swing_low;
+      double recent_swing_high = G_Pairs[idx].qual_swing_high;
       
-      if(recent_swing_low > 0.0 && prev_swing_low > 0.0)
+      // Phải có đủ dữ kiện: swing low gần nhất, swing low trước đó (để xác nhận HL),
+      // và một swing high gần nhất (chứng tỏ đã có pullback tạo HL)
+      if(recent_swing_low > 0.0 && prev_swing_low > 0.0 && recent_swing_high > 0.0)
       {
-         // Verify it's a Higher Low (HL)
+         // Verify it's a true Higher Low (HL) in a bullish structure
          if(recent_swing_low > prev_swing_low)
          {
             double breakDistance = recent_swing_low - close[0];
@@ -638,21 +658,35 @@ bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
       return false;
    }
    
-   // 3. Structure Shift phải được xác nhận (nếu bắt buộc)
+   // 3. Liquidity Sweep (nếu bật)
+   if(InpEnableLiquiditySweep && !G_Pairs[idx].conf_sweep)
+   {
+      rejectReason = "SWEEP_NOT_CONFIRMED";
+      return false;
+   }
+   
+   // 4. Displacement (nếu bật)
+   if(InpEnableDisplacement && !G_Pairs[idx].conf_displacement)
+   {
+      rejectReason = "DISPLACEMENT_NOT_CONFIRMED";
+      return false;
+   }
+   
+   // 5. Structure Shift phải được xác nhận (nếu bắt buộc)
    if(InpReversal_RequireStructureShift && !G_Pairs[idx].conf_mss)
    {
       rejectReason = "MSS_NOT_CONFIRMED";
       return false;
    }
    
-   // 4. Score >= MinScore
+   // 6. Score >= MinScore
    if(G_Pairs[idx].reversal_score < InpReversalMinScore)
    {
       rejectReason = "SCORE_BELOW_MIN";
       return false;
    }
    
-   // 5. DXY không chống lại setup (nếu áp dụng)
+   // 7. DXY không chống lại setup (nếu áp dụng)
    if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
    {
       G_Pairs[idx].trapSignal = direction;
@@ -725,11 +759,10 @@ bool IsEvidenceReady(int idx, int direction)
    if(!G_Pairs[idx].htf_reversal_zone) return false;
    if(!G_Pairs[idx].exh_divergence && !G_Pairs[idx].exh_rejection && !G_Pairs[idx].exh_failed_cont) return false;
    
-   if(InpReversal_RequireStructureShift)
-   {
-      if(!G_Pairs[idx].conf_mss) return false;
-      if(InpEnableDisplacement && !G_Pairs[idx].conf_displacement) return false;
-   }
+   if(InpEnableLiquiditySweep && !G_Pairs[idx].conf_sweep) return false;
+   if(InpEnableDisplacement && !G_Pairs[idx].conf_displacement) return false;
+   
+   if(InpReversal_RequireStructureShift && !G_Pairs[idx].conf_mss) return false;
    
    if(CalculateReversalScore(idx, direction) < InpReversalMinScore) return false;
    return true;
@@ -994,8 +1027,5 @@ int CheckReversalSignal(int idx)
          }
       }
    }
-   
-   return 0;
-   
    return 0;
 }
