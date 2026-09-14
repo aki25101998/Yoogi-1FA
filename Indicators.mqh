@@ -511,4 +511,73 @@ int CheckEntrySignal_DXY_LTF(int dxy_idx)
    if(dxy_idx < 0 || dxy_idx >= DXY_CONTEXTS) return 0;
    return CheckEntrySignal_DXY_Ctx(G_DXY_LTF[dxy_idx]);
 }
+
+// ==================================================================
+// HÀM UPDATE & CHECK TRẠNG THÁI (CHO REVERSAL ENGINE V1)
+// ==================================================================
+void UpdateIndicatorsState(int idx)
+{
+   double cci_val=0, cci_prev=0;
+   if(ReadCCI_2Bars(G_Pairs[idx].handle_cci, cci_val, cci_prev))
+   {
+       if(cci_prev <= CCI_OS && cci_val > CCI_OS)
+       { 
+          G_Pairs[idx].isReadyForBuy  = true;  
+          G_Pairs[idx].isReadyForSell = false; 
+       }
+       if(cci_prev >= CCI_OB && cci_val < CCI_OB)
+       { 
+          G_Pairs[idx].isReadyForSell = true;  
+          G_Pairs[idx].isReadyForBuy  = false; 
+       }
+   }
+   
+   double source=0, source_prev=0, source_prev2=0;
+   if(ReadClose_3Bars_Multi(idx, source, source_prev, source_prev2))
+   {
+       double s1 = CalculateSmoothRng_Multi(27, 1.5, 1, idx);
+       double s2 = CalculateSmoothRng_Multi(55, SENSITIVITY, 1, idx);
+       if(s1>0.0 && s2>0.0)
+       {
+           double sr = (s1 + s2) / 2.0;
+           if(!G_Pairs[idx].g_inited_filt)
+           {
+              G_Pairs[idx].filt_prev          = source;
+              G_Pairs[idx].filt_prev_for_calc = source_prev;
+              G_Pairs[idx].upCount = 0;
+              G_Pairs[idx].dnCount = 0;
+              G_Pairs[idx].lastCond = 0;
+              G_Pairs[idx].g_inited_filt = true;
+           }
+           double prev_filt = G_Pairs[idx].filt_prev;
+           double prev_calc = G_Pairs[idx].filt_prev_for_calc;
+           double f_curr = CalculateRngFilt(source, sr, prev_filt);
+           double f_prev = CalculateRngFilt(source_prev, sr, prev_calc);
+           
+           G_Pairs[idx].filt_prev          = f_curr;
+           G_Pairs[idx].filt_prev_for_calc = f_prev;
+           
+           if(f_curr > f_prev){ G_Pairs[idx].upCount++; G_Pairs[idx].dnCount=0; }
+           else if(f_curr < f_prev){ G_Pairs[idx].dnCount++; G_Pairs[idx].upCount=0; }
+           
+           bool bull = (source > f_curr) && (G_Pairs[idx].upCount > 0);
+           bool bear = (source < f_curr) && (G_Pairs[idx].dnCount > 0);
+           
+           if(bull)      G_Pairs[idx].lastCond = 1;
+           else if(bear) G_Pairs[idx].lastCond = -1;
+       }
+   }
+}
+
+void CheckMomentumStatus(int idx, int &cci_status, int &rf_status)
+{
+   cci_status = 0;
+   rf_status = 0;
+   
+   if(G_Pairs[idx].isReadyForBuy) cci_status = 1;
+   if(G_Pairs[idx].isReadyForSell) cci_status = -1;
+   
+   if(G_Pairs[idx].lastCond == 1) rf_status = 1;
+   if(G_Pairs[idx].lastCond == -1) rf_status = -1;
+}
 //+------------------------------------------------------------------+

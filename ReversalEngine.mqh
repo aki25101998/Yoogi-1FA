@@ -1,11 +1,60 @@
 //+------------------------------------------------------------------+
 //|                                              ReversalEngine.mqh  |
 //|                                                Yoogi Trading     |
-//|   Reversal Quality Engine v1 - MTF + Scoring                     |
+//|   Reversal Quality Engine V2 - 4-Layer Architecture              |
+//|   Layer A: Location | Layer B: Exhaustion                        |
+//|   Layer C: Reversal Confirmation | Layer D: External             |
 //+------------------------------------------------------------------+
 #property strict
 
-// --- 1. EXTENSION DETECTION ---
+// ==================================================================
+// HELPER: Reset toàn bộ Reversal Setup về trạng thái ban đầu
+// ==================================================================
+void ResetReversalSetup(int idx, string reason)
+{
+   if(InpReversalDebug && G_Pairs[idx].state_machine != STATE_NO_SETUP)
+   {
+      PrintFormat("[REVERSAL][%s] RESET | Prev State=%d | Dir=%d | Reason=%s",
+                  G_Pairs[idx].symbol, G_Pairs[idx].state_machine,
+                  G_Pairs[idx].setup_direction, reason);
+   }
+   
+   G_Pairs[idx].state_machine = STATE_NO_SETUP;
+   G_Pairs[idx].setup_direction = 0;
+   G_Pairs[idx].setup_start_bar = 0;
+   G_Pairs[idx].setup_bar_count = 0;
+   G_Pairs[idx].rev_status = "NO SETUP";
+   
+   G_Pairs[idx].htf_reversal_zone = false;
+   G_Pairs[idx].htf_trap_signal = 0;
+   G_Pairs[idx].htf_conflict = false;
+   
+   G_Pairs[idx].exh_divergence = false;
+   G_Pairs[idx].exh_rejection = false;
+   G_Pairs[idx].exh_failed_cont = false;
+   
+   G_Pairs[idx].conf_sweep = false;
+   G_Pairs[idx].conf_displacement = false;
+   G_Pairs[idx].conf_mss = false;
+   G_Pairs[idx].conf_retest = false;
+   G_Pairs[idx].sweep_level = 0.0;
+   G_Pairs[idx].mss_break_level = 0.0;
+   G_Pairs[idx].retest_bar_count = 0;
+   
+   G_Pairs[idx].reversal_score = 0.0;
+   G_Pairs[idx].score_location = 0.0;
+   G_Pairs[idx].score_exhaustion = 0.0;
+   G_Pairs[idx].score_sweep = 0.0;
+   G_Pairs[idx].score_displacement = 0.0;
+   G_Pairs[idx].score_mss = 0.0;
+   G_Pairs[idx].score_momentum = 0.0;
+}
+
+// ==================================================================
+// LAYER A – LOCATION
+// ==================================================================
+
+// --- A1. EXTENSION DETECTION ---
 double CalculateExtension(string sym, ENUM_TIMEFRAMES tf)
 {
    double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
@@ -17,47 +66,164 @@ double CalculateExtension(string sym, ENUM_TIMEFRAMES tf)
    return MathAbs(close[0] - ema) / atr;
 }
 
-// --- 2. EXHAUSTION DETECTION ---
-bool DetectExhaustion(string sym, ENUM_TIMEFRAMES tf, int direction)
+// --- A2. QUALIFIED SWING DETECTION ---
+// Tìm swing points đủ chất lượng (lọc bỏ swing quá nhỏ / nhiễu)
+void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
+                          double &qSwingHigh, double &qSwingLow)
 {
+   qSwingHigh = 0.0;
+   qSwingLow = 0.0;
+   
+   int left = InpReversal_SwingLeft;
+   int right = InpReversal_SwingRight;
+   
+   double highs[], lows[];
+   if(!ReadHighLow_Generic(sym, tf, 1, lookback, highs, lows)) return;
+   
    double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
-   if(atr <= 0) return false;
+   if(atr <= 0) return;
    
-   double open[], high[], low[], close[];
-   if(CopyOpen(sym, tf, 1, 2, open) < 2) return false;
-   if(CopyHigh(sym, tf, 1, 2, high) < 2) return false;
-   if(CopyLow(sym, tf, 1, 2, low) < 2) return false;
-   if(CopyClose(sym, tf, 1, 2, close) < 2) return false;
+   double minDist = InpMinSwingDistanceATR * atr;
    
-   ArraySetAsSeries(open, true);
-   ArraySetAsSeries(high, true);
-   ArraySetAsSeries(low, true);
-   ArraySetAsSeries(close, true);
-   
-   double body0 = MathAbs(close[0] - open[0]);
-   double range0 = high[0] - low[0];
-   
-   if(direction == 1) // Bullish Exhaustion (Bearish Trend weakening)
+   // Tìm Swing High đủ chất lượng (gần nhất)
+   double prevSwingH = 0.0;
+   for(int i = right; i < lookback - left; i++)
    {
-      double lowerWick = MathMin(open[0], close[0]) - low[0];
-      // 1. Large rejection wick
-      if(lowerWick > atr * 0.8 && lowerWick > body0 * 1.5) return true;
-      // 2. Failed continuation (bearish attempt failed)
-      if(low[0] < low[1] && close[0] > low[1] && close[0] > close[1]) return true;
+      bool isSwing = true;
+      for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
+      if(!isSwing) continue;
+      for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
+      
+      if(isSwing)
+      {
+         if(prevSwingH == 0.0)
+         {
+            // Swing đầu tiên luôn chấp nhận
+            prevSwingH = highs[i];
+            qSwingHigh = highs[i];
+         }
+         else if(MathAbs(highs[i] - prevSwingH) >= minDist)
+         {
+            // Swing tiếp theo phải đủ xa swing trước
+            qSwingHigh = highs[i];
+            break;
+         }
+      }
    }
-   else if(direction == -1) // Bearish Exhaustion (Bullish Trend weakening)
-   {
-      double upperWick = high[0] - MathMax(open[0], close[0]);
-      // 1. Large rejection wick
-      if(upperWick > atr * 0.8 && upperWick > body0 * 1.5) return true;
-      // 2. Failed continuation (bullish attempt failed)
-      if(high[0] > high[1] && close[0] < high[1] && close[0] < close[1]) return true;
-   }
+   // Nếu chỉ tìm được 1 swing, giữ nó
+   if(qSwingHigh == 0.0 && prevSwingH > 0.0) qSwingHigh = prevSwingH;
    
-   return false;
+   // Tìm Swing Low đủ chất lượng (gần nhất)
+   double prevSwingL = 0.0;
+   for(int i = right; i < lookback - left; i++)
+   {
+      bool isSwing = true;
+      for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
+      if(!isSwing) continue;
+      for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
+      
+      if(isSwing)
+      {
+         if(prevSwingL == 0.0)
+         {
+            prevSwingL = lows[i];
+            qSwingLow = lows[i];
+         }
+         else if(MathAbs(lows[i] - prevSwingL) >= minDist)
+         {
+            qSwingLow = lows[i];
+            break;
+         }
+      }
+   }
+   if(qSwingLow == 0.0 && prevSwingL > 0.0) qSwingLow = prevSwingL;
 }
 
-// --- 3. SWING & DIVERGENCE DETECTION ---
+// --- A3. MARKET REGIME DETECTION ---
+ENUM_MARKET_REGIME DetectMarketRegime(string sym, ENUM_TIMEFRAMES tf)
+{
+   double ema_fast = CalculateEMA_Generic(sym, tf, 20, 1);
+   double ema_slow = CalculateEMA_Generic(sym, tf, 50, 1);
+   
+   double close[];
+   if(CopyClose(sym, tf, 1, 1, close) < 1) return REGIME_UNKNOWN;
+   
+   bool isUptrend = (close[0] > ema_fast && ema_fast > ema_slow);
+   bool isDowntrend = (close[0] < ema_fast && ema_fast < ema_slow);
+   
+   if(isUptrend) return REGIME_TREND_BULL;
+   if(isDowntrend) return REGIME_TREND_BEAR;
+   return REGIME_SIDEWAY;
+}
+
+// --- A. HTF ZONE EVALUATION ---
+// Đơn giản hơn V1: chỉ đánh giá location (extension + regime)
+// Divergence chuyển sang Layer B (Exhaustion)
+void EvaluateHTFZone(int idx, int &direction)
+{
+   string sym = G_Pairs[idx].symbol;
+   ENUM_TIMEFRAMES htf = G_Pairs[idx].htf;
+   
+   G_Pairs[idx].regime = DetectMarketRegime(sym, htf);
+   G_Pairs[idx].htf_ext = CalculateExtension(sym, htf);
+   
+   double ext = G_Pairs[idx].htf_ext;
+   
+   // HTF Reversal Zone = giá extended khỏi equilibrium
+   // BUY zone: đang downtrend/sideway VÀ extension đủ (giá dưới EMA)
+   // SELL zone: đang uptrend/sideway VÀ extension đủ (giá trên EMA)
+   double ema = CalculateEMA_Generic(sym, htf, InpReversal_EquilibriumPeriod, 1);
+   double close[];
+   if(CopyClose(sym, htf, 1, 1, close) < 1) { direction = 0; return; }
+   
+   bool price_below_ema = (close[0] < ema);
+   bool price_above_ema = (close[0] > ema);
+   
+   bool bullish_zone = false;
+   bool bearish_zone = false;
+   
+   // BUY zone: giá extended phía dưới
+   if(price_below_ema && ext >= InpReversal_Extension_Normal)
+   {
+      bullish_zone = true;
+   }
+   
+   // SELL zone: giá extended phía trên
+   if(price_above_ema && ext >= InpReversal_Extension_Normal)
+   {
+      bearish_zone = true;
+   }
+   
+   // Bổ sung: kiểm tra HTF divergence và exhaustion (dùng làm evidence, không quyết định zone)
+   G_Pairs[idx].htf_div = DetectDivergence(sym, htf, price_below_ema ? 1 : -1);
+   G_Pairs[idx].htf_exh = DetectCandleRejection(sym, htf, price_below_ema ? 1 : -1);
+   
+   // Conflict Resolution
+   G_Pairs[idx].htf_conflict = false;
+   if(bullish_zone && !bearish_zone) direction = 1;
+   else if(bearish_zone && !bullish_zone) direction = -1;
+   else if(bullish_zone && bearish_zone) { direction = 0; G_Pairs[idx].htf_conflict = true; }
+   else direction = 0;
+}
+
+// --- LOCATION SCORE (capped at 15) ---
+double CalculateLocationScore(int idx)
+{
+   double ext = G_Pairs[idx].htf_ext;
+   double score = 0.0;
+   
+   if(ext >= InpReversal_Extension_Extreme)      score = 15.0;
+   else if(ext >= InpReversal_Extension_Strong)   score = 10.0;
+   else if(ext >= InpReversal_Extension_Normal)   score = 5.0;
+   
+   return MathMin(score, 15.0); // Cap at 15
+}
+
+// ==================================================================
+// LAYER B – EXHAUSTION
+// ==================================================================
+
+// --- B1. DIVERGENCE DETECTION ---
 bool DetectDivergence(string sym, ENUM_TIMEFRAMES tf, int direction)
 {
    int lookback = InpReversal_LookbackBars;
@@ -75,20 +241,19 @@ bool DetectDivergence(string sym, ENUM_TIMEFRAMES tf, int direction)
    ArraySetAsSeries(cci, true);
    IndicatorRelease(handle_cci);
    
-   // Find latest confirmed swing
    int swing1 = -1;
    int swing2 = -1;
    
    for(int i = right; i < lookback - left; i++)
    {
       bool isSwing = true;
-      if(direction == 1) // Bullish Divergence -> Need Swing Lows
+      if(direction == 1)
       {
          for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
          if(!isSwing) continue;
          for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
       }
-      else // Bearish Divergence -> Need Swing Highs
+      else
       {
          for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
          if(!isSwing) continue;
@@ -104,12 +269,14 @@ bool DetectDivergence(string sym, ENUM_TIMEFRAMES tf, int direction)
    
    if(swing1 != -1 && swing2 != -1)
    {
-      if(direction == 1) // Bullish Divergence (Price LL, CCI HL)
+      if(direction == 1)
       {
+         // Bullish Div: Price Lower Low + CCI Higher Low
          if(lows[swing1] < lows[swing2] && cci[swing1] > cci[swing2]) return true;
       }
-      else // Bearish Divergence (Price HH, CCI LH)
+      else
       {
+         // Bearish Div: Price Higher High + CCI Lower High
          if(highs[swing1] > highs[swing2] && cci[swing1] < cci[swing2]) return true;
       }
    }
@@ -117,10 +284,191 @@ bool DetectDivergence(string sym, ENUM_TIMEFRAMES tf, int direction)
    return false;
 }
 
-// --- 4. STRUCTURE SHIFT ---
-bool DetectStructureShift(string sym, ENUM_TIMEFRAMES tf, int direction)
+// --- B2. CANDLE REJECTION ---
+// Cải thiện: kiểm tra wick + body + vị trí close
+bool DetectCandleRejection(string sym, ENUM_TIMEFRAMES tf, int direction)
 {
-   if(!InpReversal_RequireStructureShift) return true; // Bypass if disabled
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) return false;
+   
+   double open[], high[], low[], close[];
+   if(CopyOpen(sym, tf, 1, 1, open) < 1) return false;
+   if(CopyHigh(sym, tf, 1, 1, high) < 1) return false;
+   if(CopyLow(sym, tf, 1, 1, low) < 1) return false;
+   if(CopyClose(sym, tf, 1, 1, close) < 1) return false;
+   
+   double body = MathAbs(close[0] - open[0]);
+   double range = high[0] - low[0];
+   if(range <= 0) return false;
+   
+   if(direction == 1) // Bullish rejection (bearish trend weakening)
+   {
+      double lowerWick = MathMin(open[0], close[0]) - low[0];
+      double closePosition = (close[0] - low[0]) / range; // 0=bottom, 1=top
+      
+      // Wick phải đáng kể (>= 0.5 ATR), close phải ở nửa trên, wick > body
+      if(lowerWick >= atr * 0.5 && closePosition >= 0.6 && lowerWick > body)
+         return true;
+   }
+   else if(direction == -1) // Bearish rejection (bullish trend weakening)
+   {
+      double upperWick = high[0] - MathMax(open[0], close[0]);
+      double closePosition = (high[0] - close[0]) / range; // 0=top, 1=bottom
+      
+      // Wick phải đáng kể, close phải ở nửa dưới, wick > body
+      if(upperWick >= atr * 0.5 && closePosition >= 0.6 && upperWick > body)
+         return true;
+   }
+   
+   return false;
+}
+
+// --- B3. FAILED CONTINUATION ---
+// Giá cố tiếp tục xu hướng → tạo extreme mới → nhưng close quay lại
+bool DetectFailedContinuation(string sym, ENUM_TIMEFRAMES tf, int direction)
+{
+   double open[], high[], low[], close[];
+   if(CopyOpen(sym, tf, 1, 2, open) < 2) return false;
+   if(CopyHigh(sym, tf, 1, 2, high) < 2) return false;
+   if(CopyLow(sym, tf, 1, 2, low) < 2) return false;
+   if(CopyClose(sym, tf, 1, 2, close) < 2) return false;
+   
+   ArraySetAsSeries(open, true);
+   ArraySetAsSeries(high, true);
+   ArraySetAsSeries(low, true);
+   ArraySetAsSeries(close, true);
+   
+   if(direction == 1) // Bullish: giá cố giảm tiếp nhưng thất bại
+   {
+      // Candle [0] tạo low mới (dưới low candle [1])
+      // Nhưng close quay lại trên low candle [1]
+      // Và close cao hơn close candle [1]
+      if(low[0] < low[1] && close[0] > low[1] && close[0] > close[1])
+         return true;
+   }
+   else if(direction == -1) // Bearish: giá cố tăng tiếp nhưng thất bại
+   {
+      // Candle [0] tạo high mới (trên high candle [1])
+      // Nhưng close quay lại dưới high candle [1]
+      // Và close thấp hơn close candle [1]
+      if(high[0] > high[1] && close[0] < high[1] && close[0] < close[1])
+         return true;
+   }
+   
+   return false;
+}
+
+// --- EXHAUSTION SCORE (capped at 15) ---
+// Divergence + Rejection + FailedCont cùng nhóm → KHÔNG cộng vô hạn
+double CalculateExhaustionScore(int idx)
+{
+   double score = 0.0;
+   int count = 0;
+   
+   if(G_Pairs[idx].exh_divergence)  { score += 8.0; count++; }
+   if(G_Pairs[idx].exh_rejection)   { score += 6.0; count++; }
+   if(G_Pairs[idx].exh_failed_cont) { score += 6.0; count++; }
+   
+   // Nếu nhiều signal cùng xuất hiện → tăng tin cậy nhưng cap
+   // 1 signal: max 8, 2 signals: max 12, 3 signals: 15 (capped)
+   if(count >= 2) score = MathMin(score, 12.0);
+   if(count >= 3) score = 15.0;
+   
+   return MathMin(score, 15.0); // Hard cap at 15
+}
+
+// ==================================================================
+// LAYER C – REVERSAL CONFIRMATION
+// ==================================================================
+
+// --- C1. LIQUIDITY SWEEP ---
+// BUY: giá quét dưới swing low rồi close quay lại trên
+// SELL: giá quét trên swing high rồi close quay lại dưới
+bool DetectLiquiditySweep(string sym, ENUM_TIMEFRAMES tf, int direction, double swingLevel)
+{
+   if(!InpEnableLiquiditySweep) return true; // Disabled = auto pass
+   if(swingLevel <= 0.0) return false;
+   
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) return false;
+   
+   double tolerance = InpLiquiditySweepToleranceATR * atr;
+   
+   double high[], low[], close[];
+   if(CopyHigh(sym, tf, 1, 1, high) < 1) return false;
+   if(CopyLow(sym, tf, 1, 1, low) < 1) return false;
+   if(CopyClose(sym, tf, 1, 1, close) < 1) return false;
+   
+   if(direction == 1) // BUY: sweep below swing low
+   {
+      // Low phải quét dưới swing low (có thể + tolerance)
+      bool swept = (low[0] <= swingLevel + tolerance);
+      // Close phải quay lại trên swing low
+      bool closedBack = (close[0] > swingLevel);
+      
+      return (swept && closedBack);
+   }
+   else if(direction == -1) // SELL: sweep above swing high
+   {
+      bool swept = (high[0] >= swingLevel - tolerance);
+      bool closedBack = (close[0] < swingLevel);
+      
+      return (swept && closedBack);
+   }
+   
+   return false;
+}
+
+// --- C2. DISPLACEMENT ---
+// Candle đảo chiều có lực đủ mạnh (ATR-normalized)
+bool DetectDisplacement(string sym, ENUM_TIMEFRAMES tf, int direction)
+{
+   if(!InpEnableDisplacement) return true; // Disabled = auto pass
+   
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) return false;
+   
+   double open[], high[], low[], close[];
+   if(CopyOpen(sym, tf, 1, 1, open) < 1) return false;
+   if(CopyHigh(sym, tf, 1, 1, high) < 1) return false;
+   if(CopyLow(sym, tf, 1, 1, low) < 1) return false;
+   if(CopyClose(sym, tf, 1, 1, close) < 1) return false;
+   
+   double body = MathAbs(close[0] - open[0]);
+   double range = high[0] - low[0];
+   if(range <= 0) return false;
+   
+   double minBody = InpDisplacementMinBodyATR * atr;
+   double minClosePercent = InpDisplacementClosePercent / 100.0;
+   
+   if(direction == 1) // Bullish displacement
+   {
+      bool isBullish = (close[0] > open[0]);
+      bool bodyOK = (body >= minBody);
+      double closePos = (close[0] - low[0]) / range;
+      bool closePosOK = (closePos >= minClosePercent);
+      
+      return (isBullish && bodyOK && closePosOK);
+   }
+   else if(direction == -1) // Bearish displacement
+   {
+      bool isBearish = (close[0] < open[0]);
+      bool bodyOK = (body >= minBody);
+      double closePos = (high[0] - close[0]) / range;
+      bool closePosOK = (closePos >= minClosePercent);
+      
+      return (isBearish && bodyOK && closePosOK);
+   }
+   
+   return false;
+}
+
+// --- C3. STRUCTURE SHIFT (Quality MSS) ---
+// Cải thiện: thêm quality check (khoảng phá + displacement preference)
+bool DetectStructureShift(string sym, ENUM_TIMEFRAMES tf, int direction,
+                           double &breakLevel)
+{
+   if(!InpReversal_RequireStructureShift) { breakLevel = 0.0; return true; }
    
    int lookback = InpReversal_LookbackBars;
    int left = InpReversal_SwingLeft;
@@ -130,277 +478,559 @@ bool DetectStructureShift(string sym, ENUM_TIMEFRAMES tf, int direction)
    if(!ReadHighLow_Generic(sym, tf, 1, lookback, highs, lows)) return false;
    if(CopyClose(sym, tf, 1, 1, close) < 1) return false;
    
-   // Find latest opposing swing
-   int swing = -1;
-   for(int i = right; i < lookback - left; i++)
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) return false;
+   
+   double minBreak = InpMSSMinBreakATR * atr;
+   
+   if(direction == 1) // Bullish MSS: LL → LH → Break LH
    {
-      bool isSwing = true;
-      if(direction == 1) // Bullish MSS -> Break of recent swing HIGH
+      // 1. Find Lowest Low (LL)
+      int ll_idx = right;
+      double lowest_low = lows[ll_idx];
+      for(int i = right + 1; i < lookback; i++) 
       {
+         if(lows[i] < lowest_low) { lowest_low = lows[i]; ll_idx = i; }
+      }
+      
+      // 2. Find Lower High (LH) between LL and now
+      int lh_idx = -1;
+      for(int i = right; i < ll_idx - left; i++)
+      {
+         bool isSwing = true;
          for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
          if(!isSwing) continue;
          for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
+         if(isSwing) { lh_idx = i; break; }
       }
-      else // Bearish MSS -> Break of recent swing LOW
+      
+      // 3. Check break with quality
+      if(lh_idx != -1)
       {
+         double breakDistance = close[0] - highs[lh_idx];
+         if(breakDistance >= minBreak) // Phá đủ xa, không phải wick spike
+         {
+            breakLevel = highs[lh_idx];
+            return true;
+         }
+      }
+   }
+   else if(direction == -1) // Bearish MSS: HH → HL → Break HL
+   {
+      // 1. Find Highest High (HH)
+      int hh_idx = right;
+      double highest_high = highs[hh_idx];
+      for(int i = right + 1; i < lookback; i++) 
+      {
+         if(highs[i] > highest_high) { highest_high = highs[i]; hh_idx = i; }
+      }
+      
+      // 2. Find Higher Low (HL) between HH and now
+      int hl_idx = -1;
+      for(int i = right; i < hh_idx - left; i++)
+      {
+         bool isSwing = true;
          for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
          if(!isSwing) continue;
          for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
+         if(isSwing) { hl_idx = i; break; }
       }
       
-      if(isSwing)
+      // 3. Check break with quality
+      if(hl_idx != -1)
       {
-         swing = i;
-         break;
+         double breakDistance = lows[hl_idx] - close[0];
+         if(breakDistance >= minBreak)
+         {
+            breakLevel = lows[hl_idx];
+            return true;
+         }
       }
    }
    
-   if(swing != -1)
+   breakLevel = 0.0;
+   return false;
+}
+
+// --- C4. RETEST ---
+// Giá quay lại test vùng vừa phá, giữ được và đóng candle xác nhận
+bool DetectRetest(string sym, ENUM_TIMEFRAMES tf, int direction, 
+                   double breakLevel, int &retestBarCount)
+{
+   if(!InpEnableRetest || !InpRequireRetest) return true; // Disabled = auto pass
+   if(breakLevel <= 0.0) return false;
+   
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) return false;
+   
+   double tolerance = InpRetestToleranceATR * atr;
+   
+   double high[], low[], close[];
+   if(CopyHigh(sym, tf, 1, 1, high) < 1) return false;
+   if(CopyLow(sym, tf, 1, 1, low) < 1) return false;
+   if(CopyClose(sym, tf, 1, 1, close) < 1) return false;
+   
+   retestBarCount++;
+   
+   if(direction == 1) // BUY retest: giá pullback xuống gần breakLevel, rồi hold trên
    {
-      if(direction == 1) // Bullish MSS
+      // Giá phải đã chạm gần vùng breakLevel
+      bool touched = (low[0] <= breakLevel + tolerance);
+      // Close phải giữ trên breakLevel
+      bool held = (close[0] > breakLevel);
+      
+      if(touched && held) return true;
+   }
+   else if(direction == -1) // SELL retest: giá pullback lên gần breakLevel, rồi hold dưới
+   {
+      bool touched = (high[0] >= breakLevel - tolerance);
+      bool held = (close[0] < breakLevel);
+      
+      if(touched && held) return true;
+   }
+   
+   // Check timeout
+   if(retestBarCount > InpRetestMaxBars) return false;
+   
+   return false;
+}
+
+// ==================================================================
+// SCORING ENGINE (Grouped, Capped)
+// ==================================================================
+
+double CalculateReversalScore(int idx, int direction)
+{
+   // --- LOCATION (max 15) ---
+   G_Pairs[idx].score_location = CalculateLocationScore(idx);
+   
+   // --- EXHAUSTION (max 15) ---
+   G_Pairs[idx].score_exhaustion = CalculateExhaustionScore(idx);
+   
+   // --- LIQUIDITY SWEEP (max 20) ---
+   G_Pairs[idx].score_sweep = G_Pairs[idx].conf_sweep ? 20.0 : 0.0;
+   
+   // --- DISPLACEMENT (max 15) ---
+   G_Pairs[idx].score_displacement = G_Pairs[idx].conf_displacement ? 15.0 : 0.0;
+   
+   // --- STRUCTURE SHIFT (max 25) ---
+   G_Pairs[idx].score_mss = G_Pairs[idx].conf_mss ? 25.0 : 0.0;
+   
+   // --- MOMENTUM (max 10) ---
+   double mom = 0.0;
+   int cci_status = 0, rf_status = 0;
+   CheckMomentumStatus(idx, cci_status, rf_status);
+   G_Pairs[idx].ltf_cci_recov = cci_status;
+   G_Pairs[idx].ltf_rf_state = rf_status;
+   
+   if(cci_status == direction) mom += 5.0;
+   if(rf_status == direction)  mom += 5.0;
+   G_Pairs[idx].score_momentum = MathMin(mom, 10.0);
+   
+   // --- TOTAL ---
+   double total = G_Pairs[idx].score_location
+                + G_Pairs[idx].score_exhaustion
+                + G_Pairs[idx].score_sweep
+                + G_Pairs[idx].score_displacement
+                + G_Pairs[idx].score_mss
+                + G_Pairs[idx].score_momentum;
+   
+   G_Pairs[idx].reversal_score = total;
+   return total;
+}
+
+// ==================================================================
+// HARD REQUIREMENTS VALIDATION
+// ==================================================================
+// Score KHÔNG được thay thế các điều kiện bắt buộc.
+bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
+{
+   // 1. HTF Location hợp lệ
+   if(!G_Pairs[idx].htf_reversal_zone)
+   {
+      rejectReason = "NO_HTF_ZONE";
+      return false;
+   }
+   
+   // 2. Ít nhất 1 dấu hiệu Exhaustion
+   if(!G_Pairs[idx].exh_divergence && !G_Pairs[idx].exh_rejection && !G_Pairs[idx].exh_failed_cont)
+   {
+      rejectReason = "NO_EXHAUSTION";
+      return false;
+   }
+   
+   // 3. Structure Shift phải được xác nhận (nếu bắt buộc)
+   if(InpReversal_RequireStructureShift && !G_Pairs[idx].conf_mss)
+   {
+      rejectReason = "MSS_NOT_CONFIRMED";
+      return false;
+   }
+   
+   // 4. Score >= MinScore
+   if(G_Pairs[idx].reversal_score < InpReversalMinScore)
+   {
+      rejectReason = "SCORE_BELOW_MIN";
+      return false;
+   }
+   
+   // 5. DXY không chống lại setup (nếu áp dụng)
+   if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
+   {
+      G_Pairs[idx].trapSignal = direction;
+      int dxy_signal = CheckDXYConvergence_Dual(idx);
+      
+      if(dxy_signal == 0)
       {
-         if(close[0] > highs[swing]) return true;
+         rejectReason = "DXY_NOT_READY";
+         return false;
       }
-      else // Bearish MSS
+      if(dxy_signal != direction)
       {
-         if(close[0] < lows[swing]) return true;
+         rejectReason = "DXY_CONFLICT";
+         return false;
+      }
+   }
+   
+   rejectReason = "";
+   return true;
+}
+
+// ==================================================================
+// SETUP TIMEOUT & INVALIDATION
+// ==================================================================
+
+bool CheckSetupTimeout(int idx)
+{
+   if(G_Pairs[idx].setup_bar_count > InpSafetyMaxSetupBars)
+   {
+      return true; // Safety Timeout!
+   }
+   return false;
+}
+
+// Kiểm tra invalidation: nếu giá tiếp tục tạo extreme mới mà không rejection
+bool CheckSetupInvalidation(int idx, string sym, ENUM_TIMEFRAMES tf)
+{
+   if(G_Pairs[idx].state_machine <= STATE_HTF_LOCATION) return false;
+   
+   int dir = G_Pairs[idx].setup_direction;
+   
+   double close[];
+   if(CopyClose(sym, tf, 1, 1, close) < 1) return false;
+   
+   if(dir == 1) // BUY setup
+   {
+      // Nếu giá phá qua dưới qualified swing low → cấu trúc mất
+      if(G_Pairs[idx].qual_swing_low > 0.0 && close[0] < G_Pairs[idx].qual_swing_low)
+      {
+         // Chỉ invalidate nếu đã qua state exhaustion (tức đã có evidence)
+         if(G_Pairs[idx].state_machine >= STATE_EXHAUSTION)
+            return true;
+      }
+   }
+   else if(dir == -1) // SELL setup
+   {
+      if(G_Pairs[idx].qual_swing_high > 0.0 && close[0] > G_Pairs[idx].qual_swing_high)
+      {
+         if(G_Pairs[idx].state_machine >= STATE_EXHAUSTION)
+            return true;
       }
    }
    
    return false;
 }
 
-// --- 5. REGIME DETECTION ---
-ENUM_MARKET_REGIME DetectMarketRegime(string sym, ENUM_TIMEFRAMES tf)
-{
-   double ema_fast = CalculateEMA_Generic(sym, tf, 20, 1);
-   double ema_slow = CalculateEMA_Generic(sym, tf, 50, 1);
-   
-   double close[];
-   if(CopyClose(sym, tf, 1, 1, close) < 1) return REGIME_UNKNOWN;
-   
-   bool isUptrend = (close[0] > ema_fast && ema_fast > ema_slow);
-   bool isDowntrend = (close[0] < ema_fast && ema_fast < ema_slow);
-   
-   if(isUptrend)
-   {
-       if(DetectExhaustion(sym, tf, -1) || DetectDivergence(sym, tf, -1)) return REGIME_EXHAUSTION;
-       return REGIME_TREND_BULL;
-   }
-   if(isDowntrend)
-   {
-       if(DetectExhaustion(sym, tf, 1) || DetectDivergence(sym, tf, 1)) return REGIME_EXHAUSTION;
-       return REGIME_TREND_BEAR;
-   }
-   
-   return REGIME_SIDEWAY;
-}
-
-// --- 6. SCORING ENGINE ---
-double CalculateReversalScore(int idx, int direction)
-{
-   double score = 0.0;
-   
-   if(G_Pairs[idx].ltf_divergence) score += InpScore_Divergence;
-   if(G_Pairs[idx].ltf_mss) score += InpScore_Structure;
-   
-   double ext = G_Pairs[idx].htf_ext;
-   if(ext >= InpReversal_Extension_Extreme) score += InpScore_Extension;
-   else if(ext >= InpReversal_Extension_Strong) score += InpScore_Extension * 0.75;
-   else if(ext >= InpReversal_Extension_Normal) score += InpScore_Extension * 0.5;
-   
-   if(G_Pairs[idx].ltf_exh) score += InpScore_Exhaustion;
-   
-   if(G_Pairs[idx].htf_reversal_zone) score += InpScore_HTF;
-   
-   return score;
-}
-
+// ==================================================================
+// DEBUG LOGGING
+// ==================================================================
 void LogReversalDecision(int idx, int direction, string decision, string reason, double score)
 {
-    string sym = G_Pairs[idx].symbol;
-    string dir_str = (direction == 1) ? "BUY" : "SELL";
-    string regime_str = EnumToString(G_Pairs[idx].regime);
-    
-    string cci_str = (G_Pairs[idx].ltf_cci_recov == direction) ? "RECOVERY" : "WAIT";
-    string rf_str = (G_Pairs[idx].ltf_rf_state == 1) ? "BULL" : ((G_Pairs[idx].ltf_rf_state == -1) ? "BEAR" : "WAIT");
-    
-    string dxy_str = "N/A";
-    if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
-    {
-        dxy_str = (decision == "ENTRY") ? "CONFIRMED" : "WAITING";
-    }
-
-    if(decision == "REJECT")
-    {
-        PrintFormat("[REVERSAL] %s %s Decision = REJECT Reason = %s", sym, dir_str, reason);
-    }
-    else
-    {
-        PrintFormat("[REVERSAL] Symbol: %s Direction: %s HTF Regime: %s HTF Extension: %.2f ATR HTF Divergence: %s HTF Exhaustion: %s LTF Divergence: %s LTF Structure Shift: %s LTF Exhaustion: %s LTF CCI: %s LTF Range Filter: %s DXY: %s Score: %.0f Final Decision: %s",
-                    sym, dir_str, regime_str, G_Pairs[idx].htf_ext,
-                    (G_Pairs[idx].htf_div ? "TRUE" : "FALSE"),
-                    (G_Pairs[idx].htf_exh ? "TRUE" : "FALSE"),
-                    (G_Pairs[idx].ltf_divergence ? "TRUE" : "FALSE"),
-                    (G_Pairs[idx].ltf_mss ? "TRUE" : "FALSE"),
-                    (G_Pairs[idx].ltf_exh ? "TRUE" : "FALSE"),
-                    cci_str, rf_str, dxy_str, score, decision);
-    }
+   if(!InpReversalDebug) return;
+   
+   string sym = G_Pairs[idx].symbol;
+   string dir_str = (direction == 1) ? "BUY" : ((direction == -1) ? "SELL" : "NONE");
+   string regime_str = EnumToString(G_Pairs[idx].regime);
+   
+   string state_str = "";
+   switch(G_Pairs[idx].state_machine) {
+      case STATE_NO_SETUP:        state_str = "NO_SETUP"; break;
+      case STATE_HTF_LOCATION:    state_str = "HTF_LOCATION"; break;
+      case STATE_EXHAUSTION:      state_str = "EXHAUSTION"; break;
+      case STATE_LIQUIDITY:       state_str = "LIQUIDITY"; break;
+      case STATE_REVERSAL_CONF:   state_str = "REVERSAL_CONF"; break;
+      case STATE_STRUCTURE_SHIFT: state_str = "STRUCTURE_SHIFT"; break;
+      case STATE_RETEST:          state_str = "RETEST"; break;
+      case STATE_ENTRY_READY:     state_str = "ENTRY_READY"; break;
+   }
+   
+   string dxy_str = "N/A";
+   if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
+   {
+      if(decision == "ENTRY_READY") dxy_str = "PASS";
+      else dxy_str = "WAITING";
+   }
+   
+   PrintFormat("[REVERSAL] %s", sym);
+   PrintFormat("  Direction=%s | State=%s | Regime=%s", dir_str, state_str, regime_str);
+   PrintFormat("  Location: Ext=%.2f | Score=%.0f", G_Pairs[idx].htf_ext, G_Pairs[idx].score_location);
+   PrintFormat("  Exhaustion: Div=%d | Rej=%d | FailCont=%d | Score=%.0f",
+               G_Pairs[idx].exh_divergence, G_Pairs[idx].exh_rejection,
+               G_Pairs[idx].exh_failed_cont, G_Pairs[idx].score_exhaustion);
+   PrintFormat("  Confirmation: Sweep=%d | Displacement=%d | MSS=%d | Retest=%d",
+               G_Pairs[idx].conf_sweep, G_Pairs[idx].conf_displacement,
+               G_Pairs[idx].conf_mss, G_Pairs[idx].conf_retest);
+   PrintFormat("  Score: Loc=%.0f Exh=%.0f Swp=%.0f Dsp=%.0f MSS=%.0f Mom=%.0f = Total=%.0f",
+               G_Pairs[idx].score_location, G_Pairs[idx].score_exhaustion,
+               G_Pairs[idx].score_sweep, G_Pairs[idx].score_displacement,
+               G_Pairs[idx].score_mss, G_Pairs[idx].score_momentum,
+               G_Pairs[idx].reversal_score);
+   PrintFormat("  DXY=%s | Decision=%s | Reason=%s", dxy_str, decision, reason);
 }
 
-// --- 7. CORE REVERSAL SIGNAL LOGIC ---
+// ==================================================================
+// CORE REVERSAL SIGNAL LOGIC (V2 STATE MACHINE)
+// ==================================================================
+// Returns: 1 = BUY Trigger, -1 = SELL Trigger, 0 = Wait/None
 int CheckReversalSignal(int idx)
 {
    if(!InpUseReversalEngine) return 0;
    
    string sym = G_Pairs[idx].symbol;
-   ENUM_TIMEFRAMES htf = G_Pairs[idx].htf;
    ENUM_TIMEFRAMES ltf = G_Pairs[idx].ltf;
    
-   // --- HTF PROCESSING ---
+   // === STATE 0 & 1: HTF EVALUATION (On HTF New Bar) ===
    if(IsNewBar_HTF(idx))
    {
-      G_Pairs[idx].regime = DetectMarketRegime(sym, htf);
-      G_Pairs[idx].htf_ext = CalculateExtension(sym, htf);
+      int new_dir = 0;
+      EvaluateHTFZone(idx, new_dir);
       
-      bool htf_bull_div = DetectDivergence(sym, htf, 1);
-      bool htf_bear_div = DetectDivergence(sym, htf, -1);
-      bool htf_bull_exh = DetectExhaustion(sym, htf, 1);
-      bool htf_bear_exh = DetectExhaustion(sym, htf, -1);
-      
-      G_Pairs[idx].htf_reversal_zone = false;
-      
-      if(G_Pairs[idx].regime == REGIME_TREND_BEAR || G_Pairs[idx].regime == REGIME_SIDEWAY || G_Pairs[idx].regime == REGIME_EXHAUSTION)
+      if(new_dir != 0)
       {
-         if(G_Pairs[idx].htf_ext >= InpReversal_Extension_Normal || htf_bull_div || htf_bull_exh)
+         G_Pairs[idx].htf_reversal_zone = true;
+         G_Pairs[idx].htf_trap_signal = new_dir;
+         
+         if(G_Pairs[idx].state_machine == STATE_NO_SETUP)
          {
-            G_Pairs[idx].htf_reversal_zone = true;
-            G_Pairs[idx].htf_div = htf_bull_div;
-            G_Pairs[idx].htf_exh = htf_bull_exh;
-            G_Pairs[idx].htf_trap_signal = 1; // Potential BUY
-            
-            if(G_Pairs[idx].state_machine == 0) 
-            {
-               G_Pairs[idx].state_machine = 1;
-               G_Pairs[idx].rev_status = "ZONE";
-            }
+            G_Pairs[idx].state_machine = STATE_HTF_LOCATION;
+            G_Pairs[idx].setup_direction = new_dir;
+            G_Pairs[idx].setup_bar_count = 0;
+            G_Pairs[idx].rev_status = "LOCATION";
+            LogReversalDecision(idx, new_dir, "HTF_LOCATION", "Zone detected", 0);
+         }
+         else if(G_Pairs[idx].setup_direction != 0 && G_Pairs[idx].setup_direction != new_dir)
+         {
+            // HTF đổi hướng → reset hoàn toàn
+            ResetReversalSetup(idx, "HTF Direction Changed");
          }
       }
-      
-      if(G_Pairs[idx].regime == REGIME_TREND_BULL || G_Pairs[idx].regime == REGIME_SIDEWAY || G_Pairs[idx].regime == REGIME_EXHAUSTION)
+      else
       {
-         if(G_Pairs[idx].htf_ext >= InpReversal_Extension_Normal || htf_bear_div || htf_bear_exh)
+         if(G_Pairs[idx].state_machine != STATE_NO_SETUP)
          {
-            G_Pairs[idx].htf_reversal_zone = true;
-            G_Pairs[idx].htf_div = htf_bear_div;
-            G_Pairs[idx].htf_exh = htf_bear_exh;
-            G_Pairs[idx].htf_trap_signal = -1; // Potential SELL
-            
-            if(G_Pairs[idx].state_machine == 0) 
-            {
-               G_Pairs[idx].state_machine = 1;
-               G_Pairs[idx].rev_status = "ZONE";
-            }
+            ResetReversalSetup(idx, "HTF Zone Lost or Conflict");
          }
-      }
-      
-      // Reset if zone is lost
-      if(!G_Pairs[idx].htf_reversal_zone)
-      {
-         G_Pairs[idx].state_machine = 0;
-         G_Pairs[idx].htf_trap_signal = 0;
-         G_Pairs[idx].rev_status = "NO SETUP";
       }
    }
    
-   // --- LTF PROCESSING & STATE MACHINE ---
-   if(G_Pairs[idx].htf_trap_signal != 0 && IsNewBar_Multi(idx))
+   // Nếu không có direction → dừng
+   if(G_Pairs[idx].setup_direction == 0) return 0;
+   if(G_Pairs[idx].state_machine == STATE_NO_SETUP) return 0;
+   
+   // === LTF STATE MACHINE (On LTF New Bar) ===
+   if(!IsNewBar_Multi(idx)) return 0;
+   
+   int dir = G_Pairs[idx].setup_direction;
+   
+   // Update indicator states (CCI + Range Filter) mỗi bar mới
+   UpdateIndicatorsState(idx);
+   
+   // Tăng bar count cho timeout tracking
+   G_Pairs[idx].setup_bar_count++;
+   
+   // --- CHECK TIMEOUT ---
+   if(CheckSetupTimeout(idx))
    {
-      int dir = G_Pairs[idx].htf_trap_signal;
+      ResetReversalSetup(idx, "SETUP_TIMEOUT");
+      return 0;
+   }
+   
+   // --- CHECK INVALIDATION ---
+   if(CheckSetupInvalidation(idx, sym, ltf))
+   {
+      ResetReversalSetup(idx, "SETUP_INVALIDATED");
+      return 0;
+   }
+   
+   // === STATE 1: HTF_LOCATION → EXHAUSTION ===
+   if(G_Pairs[idx].state_machine == STATE_HTF_LOCATION)
+   {
+      // Cập nhật qualified swings
+      FindQualifiedSwings(sym, ltf, InpLiquiditySweepLookback,
+                          G_Pairs[idx].qual_swing_high, G_Pairs[idx].qual_swing_low);
       
-      // Update LTF Evidence
-      G_Pairs[idx].ltf_divergence = DetectDivergence(sym, ltf, dir);
-      G_Pairs[idx].ltf_mss = DetectStructureShift(sym, ltf, dir);
-      G_Pairs[idx].ltf_exh = DetectExhaustion(sym, ltf, dir);
+      // Kiểm tra exhaustion signals
+      G_Pairs[idx].exh_divergence = DetectDivergence(sym, ltf, dir);
+      G_Pairs[idx].exh_rejection = DetectCandleRejection(sym, ltf, dir);
+      G_Pairs[idx].exh_failed_cont = DetectFailedContinuation(sym, ltf, dir);
       
-      // Check base signal for CCI recovery + Range Filter
-      int baseSignal = CheckEntrySignal(idx); 
-      if(baseSignal != 0)
+      bool hasExhaustion = (G_Pairs[idx].exh_divergence || 
+                            G_Pairs[idx].exh_rejection || 
+                            G_Pairs[idx].exh_failed_cont);
+      
+      if(hasExhaustion)
       {
-          G_Pairs[idx].ltf_cci_recov = baseSignal;
-          G_Pairs[idx].ltf_rf_state = baseSignal;
+         G_Pairs[idx].state_machine = STATE_EXHAUSTION;
+         G_Pairs[idx].rev_status = "EXHAUSTION";
+         LogReversalDecision(idx, dir, "EXHAUSTION", "Exhaustion detected", 0);
       }
+      else
+      {
+         G_Pairs[idx].rev_status = "WAIT_EXHAUSTION";
+      }
+   }
+   
+   // === STATE 2: EXHAUSTION → LIQUIDITY ===
+   if(G_Pairs[idx].state_machine == STATE_EXHAUSTION)
+   {
+      // Liên tục cập nhật exhaustion (có thể thêm evidence)
+      if(!G_Pairs[idx].exh_divergence) G_Pairs[idx].exh_divergence = DetectDivergence(sym, ltf, dir);
+      if(!G_Pairs[idx].exh_rejection) G_Pairs[idx].exh_rejection = DetectCandleRejection(sym, ltf, dir);
+      if(!G_Pairs[idx].exh_failed_cont) G_Pairs[idx].exh_failed_cont = DetectFailedContinuation(sym, ltf, dir);
       
+      // Check liquidity sweep
+      double sweepTarget = (dir == 1) ? G_Pairs[idx].qual_swing_low : G_Pairs[idx].qual_swing_high;
+      bool swept = DetectLiquiditySweep(sym, ltf, dir, sweepTarget);
+      
+      if(swept)
+      {
+         G_Pairs[idx].conf_sweep = true;
+         G_Pairs[idx].sweep_level = sweepTarget;
+         G_Pairs[idx].state_machine = STATE_LIQUIDITY;
+         G_Pairs[idx].rev_status = "SWEEP";
+         LogReversalDecision(idx, dir, "LIQUIDITY", "Sweep detected", 0);
+      }
+      else
+      {
+         G_Pairs[idx].rev_status = "WAIT_SWEEP";
+      }
+   }
+   
+   // === STATE 3: LIQUIDITY → REVERSAL_CONF (Displacement) ===
+   if(G_Pairs[idx].state_machine == STATE_LIQUIDITY)
+   {
+      bool displaced = DetectDisplacement(sym, ltf, dir);
+      
+      if(displaced)
+      {
+         G_Pairs[idx].conf_displacement = true;
+         G_Pairs[idx].state_machine = STATE_REVERSAL_CONF;
+         G_Pairs[idx].rev_status = "DISPLACEMENT";
+         LogReversalDecision(idx, dir, "DISPLACEMENT", "Displacement candle detected", 0);
+      }
+      else
+      {
+         G_Pairs[idx].rev_status = "WAIT_DISPLACEMENT";
+      }
+   }
+   
+   // === STATE 4: REVERSAL_CONF → STRUCTURE_SHIFT (Quality MSS) ===
+   if(G_Pairs[idx].state_machine == STATE_REVERSAL_CONF)
+   {
+      double breakLvl = 0.0;
+      bool mssConfirmed = DetectStructureShift(sym, ltf, dir, breakLvl);
+      
+      if(mssConfirmed)
+      {
+         G_Pairs[idx].conf_mss = true;
+         G_Pairs[idx].ltf_mss = true;
+         G_Pairs[idx].mss_break_level = breakLvl;
+         G_Pairs[idx].state_machine = STATE_STRUCTURE_SHIFT;
+         G_Pairs[idx].rev_status = "MSS";
+         LogReversalDecision(idx, dir, "MSS_CONFIRMED", "Structure shifted (quality)", 0);
+      }
+      else
+      {
+         G_Pairs[idx].rev_status = "WAIT_MSS";
+      }
+   }
+   
+   // === STATE 5: STRUCTURE_SHIFT → RETEST (or skip) ===
+   if(G_Pairs[idx].state_machine == STATE_STRUCTURE_SHIFT)
+   {
+      if(InpRequireRetest && InpEnableRetest)
+      {
+         // Chờ retest
+         bool retested = DetectRetest(sym, ltf, dir, G_Pairs[idx].mss_break_level,
+                                      G_Pairs[idx].retest_bar_count);
+         
+         if(retested)
+         {
+            G_Pairs[idx].conf_retest = true;
+            G_Pairs[idx].state_machine = STATE_RETEST;
+            G_Pairs[idx].rev_status = "RETEST OK";
+            LogReversalDecision(idx, dir, "RETEST", "Retest confirmed", 0);
+         }
+         else if(G_Pairs[idx].retest_bar_count > InpRetestMaxBars)
+         {
+            // Retest timeout → vẫn cho qua nhưng không có bonus retest
+            G_Pairs[idx].state_machine = STATE_RETEST;
+            G_Pairs[idx].rev_status = "RETEST TIMEOUT";
+            LogReversalDecision(idx, dir, "RETEST_SKIP", "Retest timeout, proceeding", 0);
+         }
+         else
+         {
+            G_Pairs[idx].rev_status = "WAIT_RETEST";
+         }
+      }
+      else
+      {
+         // Skip retest
+         G_Pairs[idx].state_machine = STATE_RETEST;
+         G_Pairs[idx].rev_status = "RETEST SKIP";
+      }
+   }
+   
+   // === STATE 6: RETEST → ENTRY_READY (Final Gate) ===
+   if(G_Pairs[idx].state_machine == STATE_RETEST)
+   {
+      // Calculate final score
       double score = CalculateReversalScore(idx, dir);
-      G_Pairs[idx].reversal_score = score;
       
-      // Hard No-Trade Rules
-      bool reject = false;
-      string reject_reason = "";
+      // Validate Hard Requirements
+      string rejectReason = "";
+      bool hardPass = ValidateHardRequirements(idx, dir, rejectReason);
       
-      if(dir == 1 && G_Pairs[idx].regime == REGIME_TREND_BEAR && !G_Pairs[idx].ltf_divergence && G_Pairs[idx].htf_ext < InpReversal_Extension_Strong && !G_Pairs[idx].ltf_mss)
+      if(hardPass)
       {
-          reject = true;
-          reject_reason = "Strong Bear Trend + No Div + No Ext + No MSS";
+         G_Pairs[idx].state_machine = STATE_ENTRY_READY;
+         G_Pairs[idx].rev_status = "TRIGGER";
+         LogReversalDecision(idx, dir, "ENTRY_READY", "All Gates Passed", score);
+         
+         // Reset state machine ngay sau khi return
+         int result = dir;
+         ResetReversalSetup(idx, "Entry Triggered - Reset");
+         return result;
       }
-      if(dir == -1 && G_Pairs[idx].regime == REGIME_TREND_BULL && !G_Pairs[idx].ltf_divergence && G_Pairs[idx].htf_ext < InpReversal_Extension_Strong && !G_Pairs[idx].ltf_mss)
+      else
       {
-          reject = true;
-          reject_reason = "Strong Bull Trend + No Div + No Ext + No MSS";
-      }
-      
-      if(reject)
-      {
-          LogReversalDecision(idx, dir, "REJECT", reject_reason, score);
-          G_Pairs[idx].state_machine = 0;
-          G_Pairs[idx].htf_trap_signal = 0;
-          G_Pairs[idx].rev_status = "REJECTED";
-          return 0;
-      }
-
-      // STATE MACHINE PROGRESSION
-      if(G_Pairs[idx].state_machine == 1) // HTF Zone -> Watch for LTF Div/Exh
-      {
-          if(G_Pairs[idx].ltf_divergence || G_Pairs[idx].ltf_exh) 
-          {
-              G_Pairs[idx].state_machine = 2;
-              G_Pairs[idx].rev_status = "WATCH";
-          }
-      }
-      
-      if(G_Pairs[idx].state_machine == 2) // Watch -> Structure Shift
-      {
-          if(G_Pairs[idx].ltf_mss || !InpReversal_RequireStructureShift) 
-          {
-              G_Pairs[idx].state_machine = 3;
-              G_Pairs[idx].rev_status = "MSS";
-          }
-      }
-      
-      if(G_Pairs[idx].state_machine >= 1) // Can jump to state 4 if baseSignal hits and MSS is true
-      {
-          if(baseSignal == dir) 
-          {
-              if(InpReversal_RequireStructureShift && !G_Pairs[idx].ltf_mss) 
-              {
-                  LogReversalDecision(idx, dir, "REJECT", "Structure Shift Missing", score);
-                  G_Pairs[idx].rev_status = "WAIT MSS";
-                  return 0;
-              }
-              
-              if(score < InpReversal_MinScore)
-              {
-                  LogReversalDecision(idx, dir, "REJECT", "Score too low: " + DoubleToString(score, 0), score);
-                  G_Pairs[idx].rev_status = "LOW SCORE";
-                  return 0; 
-              }
-              
-              G_Pairs[idx].state_machine = 4; // CONFIRMATION
-              G_Pairs[idx].rev_status = "TRIGGER";
-              
-              LogReversalDecision(idx, dir, "ENTRY", "", score);
-              return dir;
-          }
+         if(rejectReason == "DXY_CONFLICT")
+         {
+            // DXY conflict → reset hoàn toàn
+            LogReversalDecision(idx, dir, "REJECT", rejectReason, score);
+            ResetReversalSetup(idx, rejectReason);
+            return 0;
+         }
+         else if(rejectReason == "DXY_NOT_READY")
+         {
+            // DXY chưa sẵn sàng → chờ (không reset)
+            G_Pairs[idx].rev_status = "WAIT_DXY";
+         }
+         else
+         {
+            // Các lý do khác → log và reject
+            LogReversalDecision(idx, dir, "REJECT", rejectReason, score);
+            G_Pairs[idx].rev_status = "REJECTED: " + rejectReason;
+         }
       }
    }
    

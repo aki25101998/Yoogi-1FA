@@ -38,6 +38,15 @@ const double InpTrimPercentage    = 100.0;
 // ==================================================================
 // STRUCT QUẢN LÝ TRẠNG THÁI TỪNG CẶP
 // ==================================================================
+#define STATE_NO_SETUP        0
+#define STATE_HTF_LOCATION    1
+#define STATE_EXHAUSTION      2
+#define STATE_LIQUIDITY       3
+#define STATE_REVERSAL_CONF   4
+#define STATE_STRUCTURE_SHIFT 5
+#define STATE_RETEST          6
+#define STATE_ENTRY_READY     7
+
 enum ENUM_MARKET_REGIME { 
    REGIME_UNKNOWN = 0, 
    REGIME_TREND_BULL, 
@@ -48,12 +57,13 @@ enum ENUM_MARKET_REGIME {
 
 struct PairContext
 {
-   // --- Reversal Engine State ---
+   // --- Reversal Engine V2 State ---
    ENUM_MARKET_REGIME regime;
    double           htf_ext;
    bool             htf_div;
    bool             htf_exh;
    bool             htf_reversal_zone;
+   bool             htf_conflict;
    
    bool             ltf_divergence;
    bool             ltf_mss;
@@ -66,6 +76,37 @@ struct PairContext
    string           rev_status;
    double           last_swing_high;
    double           last_swing_low;
+   
+   // --- Reversal Engine V2 New Fields ---
+   int              setup_direction;      // 1=BUY, -1=SELL, 0=NONE
+   int              setup_start_bar;      // Bar index when setup started
+   int              setup_bar_count;      // LTF bars since setup began
+   
+   // Layer B - Exhaustion
+   bool             exh_divergence;       // Divergence detected
+   bool             exh_rejection;        // Candle rejection detected
+   bool             exh_failed_cont;      // Failed continuation detected
+   
+   // Layer C - Confirmation
+   bool             conf_sweep;           // Liquidity sweep detected
+   bool             conf_displacement;    // Displacement detected
+   bool             conf_mss;             // Structure shift confirmed (quality)
+   bool             conf_retest;          // Retest confirmed
+   double           sweep_level;          // Swing level that was swept
+   double           mss_break_level;      // Swing level that was broken (MSS)
+   int              retest_bar_count;     // Bars waited for retest
+   
+   // Qualified Swings
+   double           qual_swing_high;      // Qualified swing high (filtered)
+   double           qual_swing_low;       // Qualified swing low (filtered)
+   
+   // Score Breakdown
+   double           score_location;
+   double           score_exhaustion;
+   double           score_sweep;
+   double           score_displacement;
+   double           score_mss;
+   double           score_momentum;
    
 
    string           symbol;       // Tên thực tế (VD: EURUSD.pro)
@@ -312,16 +353,40 @@ void InitGlobals()
       G_Pairs[i].htf_div = false;
       G_Pairs[i].htf_exh = false;
       G_Pairs[i].htf_reversal_zone = false;
+      G_Pairs[i].htf_conflict = false;
       G_Pairs[i].ltf_divergence = false;
       G_Pairs[i].ltf_mss = false;
       G_Pairs[i].ltf_exh = false;
       G_Pairs[i].ltf_cci_recov = 0;
       G_Pairs[i].ltf_rf_state = 0;
       G_Pairs[i].reversal_score = 0.0;
-      G_Pairs[i].state_machine = 0;
+      G_Pairs[i].state_machine = STATE_NO_SETUP;
       G_Pairs[i].rev_status = "NO SETUP";
       G_Pairs[i].last_swing_high = 0.0;
       G_Pairs[i].last_swing_low = 0.0;
+      
+      // Reset Reversal Engine V2 fields
+      G_Pairs[i].setup_direction = 0;
+      G_Pairs[i].setup_start_bar = 0;
+      G_Pairs[i].setup_bar_count = 0;
+      G_Pairs[i].exh_divergence = false;
+      G_Pairs[i].exh_rejection = false;
+      G_Pairs[i].exh_failed_cont = false;
+      G_Pairs[i].conf_sweep = false;
+      G_Pairs[i].conf_displacement = false;
+      G_Pairs[i].conf_mss = false;
+      G_Pairs[i].conf_retest = false;
+      G_Pairs[i].sweep_level = 0.0;
+      G_Pairs[i].mss_break_level = 0.0;
+      G_Pairs[i].retest_bar_count = 0;
+      G_Pairs[i].qual_swing_high = 0.0;
+      G_Pairs[i].qual_swing_low = 0.0;
+      G_Pairs[i].score_location = 0.0;
+      G_Pairs[i].score_exhaustion = 0.0;
+      G_Pairs[i].score_sweep = 0.0;
+      G_Pairs[i].score_displacement = 0.0;
+      G_Pairs[i].score_mss = 0.0;
+      G_Pairs[i].score_momentum = 0.0;
 
 
       // Reset HTF State

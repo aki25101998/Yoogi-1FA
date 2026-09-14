@@ -153,7 +153,7 @@ void OpenMasterTrade_Multi(int idx, int signal)
 
    if(!IsTradable(sym)) return;
 
-   ulong new_chain_id = (ulong)TimeCurrent(); // Tạo ID mới dựa trên thời gian
+   ulong new_chain_id = EA_MAGIC_NUMBER * 1000 + idx;
    trade.SetExpertMagicNumber(new_chain_id);
 
    // --- CẬP NHẬT COMMENT TẠI ĐÂY ---
@@ -212,9 +212,10 @@ void OpenMasterTrade_Multi(int idx, int signal)
       // Lưu Balance lấy tính Lot làm mốc để DCA sau này
       G_Pairs[idx].locked_balance = lot_calculation_bal;
 
-      // Reset HTF trap sau khi vào lệnh thành công
+      // Reset Reversal Engine sau khi vào lệnh thành công
       G_Pairs[idx].htf_trap_signal = 0;
-      G_Pairs[idx].state_machine = 0;
+      G_Pairs[idx].state_machine = STATE_NO_SETUP;
+      G_Pairs[idx].setup_direction = 0;
       G_Pairs[idx].rev_status = "NO SETUP";
 
       SaveChainState_Multi(idx);
@@ -444,6 +445,8 @@ void ManagePairs()
       ulong  master_ticket = 0;
       long   oldest_time   = LONG_MAX;
 
+      ulong expected_chain_id = EA_MAGIC_NUMBER * 1000 + i;
+
       for(int k = PositionsTotal()-1; k >= 0; --k)
       {
          ulong t = PositionGetTicket(k);
@@ -451,18 +454,19 @@ void ManagePairs()
          {
             if(PositionGetString(POSITION_SYMBOL) == sym)
             {
-               count++;
-               pnl += ProfitOf(t);
                ulong pos_magic = (ulong)PositionGetInteger(POSITION_MAGIC);
-               if(pos_magic != 0)
-                  found_chain_id = pos_magic;
-
-               long t_time = (long)PositionGetInteger(POSITION_TIME);
-               if(t_time < oldest_time)
+               if(pos_magic == expected_chain_id || pos_magic == 0)
                {
-                  oldest_time = t_time;
-                  master_ticket = t;
-                  m_type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+                   count++;
+                   pnl += ProfitOf(t);
+                   
+                   long t_time = (long)PositionGetInteger(POSITION_TIME);
+                   if(t_time < oldest_time)
+                   {
+                      oldest_time = t_time;
+                      master_ticket = t;
+                      m_type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+                   }
                }
             }
          }
@@ -473,14 +477,10 @@ void ManagePairs()
       {
          activeChainsCount++;
 
-         // Neu chi co lenh tay (magic=0), tao chain_id gia de EA quan ly
-         if(found_chain_id == 0)
-            found_chain_id = (ulong)TimeCurrent();
-
          if(G_Pairs[i].active_chain_id == 0)
          {
-            G_Pairs[i].active_chain_id = found_chain_id;
-            LoadChainState_Multi(i, found_chain_id);
+            G_Pairs[i].active_chain_id = expected_chain_id;
+            LoadChainState_Multi(i, expected_chain_id);
          }
 
          double working_balance = (G_Pairs[i].locked_balance > 0) ? G_Pairs[i].locked_balance : real_balance;
@@ -507,34 +507,22 @@ void ManagePairs()
             if(InpUseReversalEngine)
             {
                // =============================================
-               // REVERSAL ENGINE V1 (NEW LOGIC)
+               // REVERSAL ENGINE V2 (4-Layer Architecture)
+               // DXY đã được kiểm tra bên trong engine
                // =============================================
                int revSignal = CheckReversalSignal(i);
                
                if(revSignal != 0)
                {
-                  int signal = 0;
-                  if(G_Pairs[i].isUSDPair && g_dxy_available && InpUseDXYReference)
-                  {
-                     // === DXY TRAP (CHI CAP USD) ===
-                     G_Pairs[i].trapSignal = revSignal;
-                     signal = CheckDXYConvergence_Dual(i);
-                  }
-                  else
-                  {
-                     // === KHONG USD (EURGBP) -> Binh thuong ===
-                     signal = revSignal;
-                  }
+                  // DXY đã pass trong ValidateHardRequirements()
+                  int signal = revSignal;
                   
-                  if(signal != 0)
-                  {
-                     if(signal == 1  && !InpAllowBuy) continue;
-                     if(signal == -1 && !InpAllowSell) continue;
+                  if(signal == 1  && !InpAllowBuy) continue;
+                  if(signal == -1 && !InpAllowSell) continue;
 
-                     PrintFormat("[%s] >>> REVERSAL ENGINE CONFIRMED: Opening %s trade...",
-                                 sym, (signal == 1 ? "BUY" : "SELL"));
-                     OpenMasterTrade_Multi(i, signal);
-                  }
+                  PrintFormat("[%s] >>> REVERSAL ENGINE V2 CONFIRMED: Opening %s trade...",
+                              sym, (signal == 1 ? "BUY" : "SELL"));
+                  OpenMasterTrade_Multi(i, signal);
                }
             }
             else

@@ -58,27 +58,49 @@ input double InpUSDCHF_Risk = 0.3; // USDCHF % Lot
 input ENUM_TIMEFRAMES InpUSDCHF_HTF = PERIOD_H1; // USDCHF TF Lớn (Xu hướng)
 input ENUM_TIMEFRAMES InpUSDCHF_LTF = PERIOD_M5; // USDCHF TF Nhỏ (Entry)
 
-//--- Reversal Engine Settings ---
-input group "=== REVERSAL ENGINE ==="
-input bool   InpUseReversalEngine = true;
-input int    InpReversal_ATR_Period = 14;
-input int    InpReversal_EquilibriumPeriod = 50;
-input double InpReversal_Extension_Normal = 1.0;
-input double InpReversal_Extension_Strong = 1.5;
-input double InpReversal_Extension_Extreme = 2.0;
-input int    InpReversal_SwingLeft = 2;
-input int    InpReversal_SwingRight = 2;
-input int    InpReversal_LookbackBars = 100;
-input double InpScore_Divergence = 25.0;
-input double InpScore_Structure = 25.0;
-input double InpScore_Extension = 20.0;
-input double InpScore_Exhaustion = 15.0;
-input double InpScore_DXY = 10.0;
-input double InpScore_HTF = 5.0;
-input double InpReversal_MinScore = 70.0;
-input double InpReversal_HighScore = 80.0;
-input bool   InpReversal_RequireStructureShift = true;
-input bool   InpReversal_RequireClosedBars = true;
+//--- Reversal Engine V2 Settings ---
+input group "=== REVERSAL ENGINE V2 ==="
+input bool   InpUseReversalEngine = true;           // Bật/tắt Reversal Engine
+input int    InpReversal_ATR_Period = 14;            // ATR Period
+input int    InpReversal_EquilibriumPeriod = 50;     // EMA Period (Equilibrium)
+input double InpReversal_Extension_Normal = 1.0;     // Extension Level: Normal (x ATR)
+input double InpReversal_Extension_Strong = 1.5;     // Extension Level: Strong (x ATR)
+input double InpReversal_Extension_Extreme = 2.0;    // Extension Level: Extreme (x ATR)
+input int    InpReversal_SwingLeft = 2;              // Swing Left Bars
+input int    InpReversal_SwingRight = 2;             // Swing Right Bars
+input int    InpReversal_LookbackBars = 100;         // Lookback Bars
+input bool   InpReversal_RequireStructureShift = true; // Bắt buộc MSS
+input bool   InpReversal_RequireClosedBars = true;   // Chỉ dùng candle đã đóng
+
+input group "=== LIQUIDITY SWEEP ==="
+input bool   InpEnableLiquiditySweep = true;         // Bật/tắt Liquidity Sweep
+input int    InpLiquiditySweepLookback = 50;         // Số bar tìm swing cho sweep
+input double InpLiquiditySweepToleranceATR = 0.1;    // Dung sai quét (x ATR)
+
+input group "=== DISPLACEMENT ==="
+input bool   InpEnableDisplacement = true;           // Bật/tắt Displacement
+input double InpDisplacementMinBodyATR = 0.8;        // Body tối thiểu (x ATR)
+input double InpDisplacementClosePercent = 70.0;     // Close position (% range)
+
+input group "=== MSS QUALITY ==="
+input double InpMSSMinBreakATR = 0.2;                // Khoảng phá tối thiểu (x ATR)
+
+input group "=== RETEST ==="
+input bool   InpEnableRetest = true;                 // Bật/tắt Retest module
+input bool   InpRequireRetest = false;               // Bắt buộc Retest trước entry?
+input double InpRetestToleranceATR = 0.5;            // Dung sai retest (x ATR)
+input int    InpRetestMaxBars = 10;                  // Số bar tối đa chờ retest
+
+input group "=== SWING & SETUP ==="
+input double InpMinSwingDistanceATR = 0.5;           // Khoảng cách swing tối thiểu (x ATR)
+input int    InpSafetyMaxSetupBars = 150;            // Safety expiration only - not a trading filter
+
+input group "=== SCORE & ENTRY ==="
+input double InpReversalMinScore = 70.0;             // Score tối thiểu cho entry
+input double InpReversal_HighScore = 80.0;           // Score cao (entry ưu tiên)
+
+input group "=== DEBUG ==="
+input bool   InpReversalDebug = false;               // Bật/tắt debug logging chi tiết
 
 //--- Tester Withdrawal Settings ---
 input group "--- Tester Withdrawal Settings ---"

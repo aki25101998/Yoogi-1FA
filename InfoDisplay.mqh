@@ -27,37 +27,36 @@ const int    VAL_OFFSET      = 100;  // Khoảng cách số liệu
 const int    HEAD_OFF_X      = 42;
 const int    FOOT_OFF_X      = 30;
 
+#include "ReversalDisplayData.mqh"
+
 // --- HEADER POSITIONS (X) ---
 const int    H_PAIR_X        = 0;
-const int    H_ORDS_X        = 100;
-const int    H_PNL_X         = 160;
-const int    H_DEBT_X        = 240;
-const int    H_SCORE_X       = 310;
-const int    H_ZONE_X        = 360;
-const int    H_DIV_X         = 410;
-const int    H_MSS_X         = 460;
-const int    H_STAT_X        = 510;
+const int    H_TREND_X       = 60;
+const int    H_BIAS_X        = 140;
+const int    H_SCORE_X       = 200;
+const int    H_PROG_X        = 250;
+const int    H_STAT_X        = 300;
+const int    H_WAIT_X        = 420;
+const int    H_ENTRY_X       = 560;
 
 // --- SEPARATOR POSITIONS (X) ---
-const int    SEP_ORDS_X      = 85;
-const int    SEP_PNL_X       = 145;
-const int    SEP_DEBT_X      = 225;
-const int    SEP_SCORE_X     = 295;
-const int    SEP_ZONE_X      = 345;
-const int    SEP_DIV_X       = 395;
-const int    SEP_MSS_X       = 445;
-const int    SEP_STAT_X      = 495;
+const int    SEP_TREND_X     = 50;
+const int    SEP_BIAS_X      = 130;
+const int    SEP_SCORE_X     = 190;
+const int    SEP_PROG_X      = 240;
+const int    SEP_STAT_X      = 290;
+const int    SEP_WAIT_X      = 410;
+const int    SEP_ENTRY_X     = 550;
 
 // --- DATA POSITIONS (X) ---
 const int    D_PAIR_X        = 0;
-const int    D_ORDS_X        = 100;
-const int    D_PNL_X         = 160;
-const int    D_DEBT_X        = 240;
-const int    D_SCORE_X       = 310;
-const int    D_ZONE_X        = 360;
-const int    D_DIV_X         = 410;
-const int    D_MSS_X         = 460;
-const int    D_STAT_X        = 510;
+const int    D_TREND_X       = 60;
+const int    D_BIAS_X        = 140;
+const int    D_SCORE_X       = 200;
+const int    D_PROG_X        = 250;
+const int    D_STAT_X        = 300;
+const int    D_WAIT_X        = 420;
+const int    D_ENTRY_X       = 560;
 
 // --- BACKGROUND ---
 const bool   USE_BACK        = true;
@@ -99,14 +98,13 @@ const string TXT_SEP_SYM     = "|";
 const string TXT_FOOTER      = "YOOGI 1FA - TRADE FOR LIVING";
 
 const string TXT_H_PAIR      = "PAIR";
-const string TXT_H_ORDS      = "ORDS";
-const string TXT_H_PNL       = "PnL";
-const string TXT_H_DEBT      = "DEBT";
+const string TXT_H_TREND     = "TREND";
+const string TXT_H_BIAS      = "BIAS";
 const string TXT_H_SCORE     = "SCORE";
-const string TXT_H_ZONE      = "ZONE";
-const string TXT_H_DIV       = "DIV";
-const string TXT_H_MSS       = "MSS";
+const string TXT_H_PROG      = "PROG";
 const string TXT_H_STAT      = "STATE";
+const string TXT_H_WAIT      = "WAITING FOR";
+const string TXT_H_ENTRY     = "ENTRY";
 
 const string TXT_STAT_RUN    = "Running";
 const string TXT_STAT_LOW    = "Balance cần > 10k";
@@ -181,24 +179,22 @@ void CreateDisplay()
 
    // 4. TABLE HEADER (TIÊU ĐỀ BẢNG)
    CreateLabel(INFO_PREFIX + "H_Pair", TXT_H_PAIR, x_base + H_PAIR_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Ords", TXT_H_ORDS, x_base + H_ORDS_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_PnL",  TXT_H_PNL,  x_base + H_PNL_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Debt", TXT_H_DEBT, x_base + H_DEBT_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Trend", TXT_H_TREND, x_base + H_TREND_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Bias",  TXT_H_BIAS,  x_base + H_BIAS_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
    CreateLabel(INFO_PREFIX + "H_Score", TXT_H_SCORE, x_base + H_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Zone",  TXT_H_ZONE,  x_base + H_ZONE_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Div",   TXT_H_DIV,   x_base + H_DIV_X,   y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Mss",   TXT_H_MSS,   x_base + H_MSS_X,   y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Prog",  TXT_H_PROG,  x_base + H_PROG_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
    CreateLabel(INFO_PREFIX + "H_Stat",  TXT_H_STAT,  x_base + H_STAT_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Wait",  TXT_H_WAIT,  x_base + H_WAIT_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Entry", TXT_H_ENTRY, x_base + H_ENTRY_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
    
    // Dấu phân cách Header
-   CreateLabel(INFO_PREFIX + "H_Sep1", TXT_SEP_SYM, x_base + SEP_ORDS_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep2", TXT_SEP_SYM, x_base + SEP_PNL_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep3", TXT_SEP_SYM, x_base + SEP_DEBT_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep4", TXT_SEP_SYM, x_base + SEP_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep5", TXT_SEP_SYM, x_base + SEP_ZONE_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep6", TXT_SEP_SYM, x_base + SEP_DIV_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep7", TXT_SEP_SYM, x_base + SEP_MSS_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep8", TXT_SEP_SYM, x_base + SEP_STAT_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep1", TXT_SEP_SYM, x_base + SEP_TREND_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep2", TXT_SEP_SYM, x_base + SEP_BIAS_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep3", TXT_SEP_SYM, x_base + SEP_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep4", TXT_SEP_SYM, x_base + SEP_PROG_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep5", TXT_SEP_SYM, x_base + SEP_STAT_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep6", TXT_SEP_SYM, x_base + SEP_WAIT_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep7", TXT_SEP_SYM, x_base + SEP_ENTRY_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
 
    y -= (DASH_LINE_H + 2);
 
@@ -209,24 +205,22 @@ void CreateDisplay()
       
       // -- DATA COLUMNS --
       CreateLabel(INFO_PREFIX + "R"+r+"_Pair", TXT_WAIT, x_base + D_PAIR_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Ords", "-",      x_base + D_ORDS_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_PnL",  "-",      x_base + D_PNL_X,  y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Debt", "-",      x_base + D_DEBT_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Trend", "-",     x_base + D_TREND_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Bias",  "-",     x_base + D_BIAS_X,  y, DASH_CORNER, FONT_SIZE, C_TEXT);
       CreateLabel(INFO_PREFIX + "R"+r+"_Score", "-",     x_base + D_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Zone",  "-",     x_base + D_ZONE_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Div",   "-",     x_base + D_DIV_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Mss",   "-",     x_base + D_MSS_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Prog",  "-",     x_base + D_PROG_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
       CreateLabel(INFO_PREFIX + "R"+r+"_Stat",  "-",     x_base + D_STAT_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Wait",  "-",     x_base + D_WAIT_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Entry", "-",     x_base + D_ENTRY_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
       
       // -- SEPARATORS --
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep1", TXT_SEP_SYM, x_base + SEP_ORDS_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep2", TXT_SEP_SYM, x_base + SEP_PNL_X,  y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep3", TXT_SEP_SYM, x_base + SEP_DEBT_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep4", TXT_SEP_SYM, x_base + SEP_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep5", TXT_SEP_SYM, x_base + SEP_ZONE_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep6", TXT_SEP_SYM, x_base + SEP_DIV_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep7", TXT_SEP_SYM, x_base + SEP_MSS_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep8", TXT_SEP_SYM, x_base + SEP_STAT_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep1", TXT_SEP_SYM, x_base + SEP_TREND_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep2", TXT_SEP_SYM, x_base + SEP_BIAS_X,  y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep3", TXT_SEP_SYM, x_base + SEP_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep4", TXT_SEP_SYM, x_base + SEP_PROG_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep5", TXT_SEP_SYM, x_base + SEP_STAT_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep6", TXT_SEP_SYM, x_base + SEP_WAIT_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep7", TXT_SEP_SYM, x_base + SEP_ENTRY_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
 
       y -= TABLE_ROW_H;
    }
@@ -342,29 +336,25 @@ void UpdateDisplay()
 
       // Chuẩn bị Text
       string s_pair = StringFormat("%-6s", short_name);
-      string s_ords, s_pnl, s_debt;
-      string s_score = "-", s_zone = "-", s_div = "-", s_mss = "-", s_stat = "-";
+      string s_trend = "-", s_bias = "-", s_score = "-", s_prog = "-", s_stat = "-", s_wait = "-", s_entry = "-";
 
-      if(risk <= 0.001 && count == 0)
-      {
-         s_ords = "--";
-         s_pnl  = TXT_OFF;
-         s_debt = StringFormat("%.1f", debt);
-      }
-      else
-      {
-         s_ords = StringFormat("%d", count); 
-         s_pnl  = StringFormat("%.1f", pnl);
-         s_debt = StringFormat("%.1f", debt);
-      }
-      
       if(InpUseReversalEngine)
       {
-         s_score = StringFormat("%.0f", G_Pairs[i].reversal_score);
-         s_zone  = G_Pairs[i].htf_reversal_zone ? "YES" : "NO";
-         s_div   = G_Pairs[i].ltf_divergence ? "YES" : "NO";
-         s_mss   = G_Pairs[i].ltf_mss ? "YES" : "NO";
-         s_stat  = G_Pairs[i].rev_status;
+         ReversalDisplayData data;
+         if(BuildReversalDisplayData(i, data))
+         {
+            s_trend = data.htfTrend;
+            s_bias  = data.reversalBias;
+            s_score = StringFormat("%.0f%%", data.reversalScore);
+            s_prog  = StringFormat("%d/%d", data.progressCompleted, data.progressTotal);
+            s_stat  = data.state;
+            
+            // Block reason overrides wait state if blocked
+            if(data.blockReason != "NONE") s_wait = "BLK: " + data.blockReason;
+            else s_wait = data.waitingFor;
+            
+            s_entry = data.masterEntry;
+         }
       }
 
       string r = IntegerToString(i);
@@ -373,29 +363,26 @@ void UpdateDisplay()
       ObjectSetString(0, INFO_PREFIX + "R"+r+"_Pair", OBJPROP_TEXT, s_pair);
       ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Pair", OBJPROP_COLOR, row_color);
       
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Ords", OBJPROP_TEXT, s_ords);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Ords", OBJPROP_COLOR, row_color);
+      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Trend", OBJPROP_TEXT, s_trend);
+      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Trend", OBJPROP_COLOR, row_color);
       
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_PnL",  OBJPROP_TEXT, s_pnl);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_PnL",  OBJPROP_COLOR, row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Debt", OBJPROP_TEXT, s_debt);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Debt", OBJPROP_COLOR, row_color);
+      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Bias",  OBJPROP_TEXT, s_bias);
+      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Bias",  OBJPROP_COLOR, (s_bias == "CONFLICT") ? C_WARN : row_color);
       
       ObjectSetString(0, INFO_PREFIX + "R"+r+"_Score", OBJPROP_TEXT, s_score);
       ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Score", OBJPROP_COLOR, row_color);
       
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Zone",  OBJPROP_TEXT, s_zone);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Zone",  OBJPROP_COLOR, row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Div",   OBJPROP_TEXT, s_div);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Div",   OBJPROP_COLOR, row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Mss",   OBJPROP_TEXT, s_mss);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Mss",   OBJPROP_COLOR, row_color);
+      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Prog", OBJPROP_TEXT, s_prog);
+      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Prog", OBJPROP_COLOR, row_color);
       
       ObjectSetString(0, INFO_PREFIX + "R"+r+"_Stat",  OBJPROP_TEXT, s_stat);
       ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Stat",  OBJPROP_COLOR, row_color);
+      
+      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Wait",   OBJPROP_TEXT, s_wait);
+      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Wait",   OBJPROP_COLOR, (s_wait == "NONE") ? C_VALUE : (StringFind(s_wait, "BLK:") >= 0 ? C_WARN : row_color));
+      
+      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Entry",   OBJPROP_TEXT, s_entry);
+      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Entry",   OBJPROP_COLOR, (s_entry == "BUY READY" || s_entry == "SELL READY") ? C_VALUE : (s_entry == "BLOCKED" ? C_WARN : row_color));
 
       // Cập nhật màu dấu phân cách
       ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep1", OBJPROP_COLOR, row_color); 
@@ -405,7 +392,6 @@ void UpdateDisplay()
       ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep5", OBJPROP_COLOR, row_color);
       ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep6", OBJPROP_COLOR, row_color);
       ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep7", OBJPROP_COLOR, row_color);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep8", OBJPROP_COLOR, row_color);
    }
 
    ChartRedraw();
