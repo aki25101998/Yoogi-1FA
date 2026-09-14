@@ -497,6 +497,35 @@ bool DetectDisplacement(string sym, ENUM_TIMEFRAMES tf, int direction)
    return false;
 }
 
+// ==================================================================
+// MSS STRUCTURE SEQUENCE VALIDATION
+// ==================================================================
+// BUY sequence: PrevHigh → ProtectedLow(LL) → CandidateLH → Break LH
+// SELL sequence: PrevLow → ProtectedHigh(HH) → CandidateHL → Break HL
+//
+// Array orientation: ReadHighLow_Generic uses ArraySetAsSeries(true)
+// so index 0 = newest closed bar, higher index = older bar.
+// Chronology: older event has HIGHER index, newer event has LOWER index.
+// ==================================================================
+
+// Helper: detect if bar index i is a valid swing high
+bool IsSwingHigh(const double &highs[], int i, int left, int right, int arraySize)
+{
+   if(i < right || i >= arraySize - left) return false;
+   for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) return false;
+   for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) return false;
+   return true;
+}
+
+// Helper: detect if bar index i is a valid swing low
+bool IsSwingLow(const double &lows[], int i, int left, int right, int arraySize)
+{
+   if(i < right || i >= arraySize - left) return false;
+   for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) return false;
+   for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) return false;
+   return true;
+}
+
 bool ValidateBuyStructure(int idx, string sym, ENUM_TIMEFRAMES tf, double &breakLevel, string &rejectReason)
 {
    int lookback = InpReversal_LookbackBars;
@@ -515,88 +544,135 @@ bool ValidateBuyStructure(int idx, string sym, ENUM_TIMEFRAMES tf, double &break
    int left = InpReversal_SwingLeft;
    int right = InpReversal_SwingRight;
    
-   // A. Identify the meaningful protected low (LL)
-   double protectedLow = 0.0;
-   int protectedLowIdx = -1;
+   // ============================================================
+   // BUY MSS requires proving the full sequence:
+   //   PreviousHigh (oldest) → ProtectedLow/LL → CandidateLH → Break
+   //
+   // Strategy: collect swing highs and swing lows, then search
+   // for valid triplets from newest to oldest.
+   // ============================================================
    
-   // Find the first valid swing low from right to left (newest to oldest)
+   // Collect all swing highs (newest first, index ascending = older)
+   double swHighPrices[];
+   int    swHighIdxs[];
+   int    swHighCount = 0;
+   ArrayResize(swHighPrices, 0);
+   ArrayResize(swHighIdxs, 0);
+   
    for(int i = right; i < lookback - left; i++)
    {
-      bool isSwing = true;
-      for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
-      if(!isSwing) continue;
-      for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
-      
-      if(isSwing)
+      if(IsSwingHigh(highs, i, left, right, lookback))
       {
-         protectedLow = lows[i];
-         protectedLowIdx = i;
-         break;
+         ArrayResize(swHighPrices, swHighCount + 1);
+         ArrayResize(swHighIdxs, swHighCount + 1);
+         swHighPrices[swHighCount] = highs[i];
+         swHighIdxs[swHighCount] = i;
+         swHighCount++;
       }
    }
    
-   if(protectedLowIdx == -1) { rejectReason = "MSS_NO_PROTECTED_LOW"; return false; }
+   // Collect all swing lows (newest first)
+   double swLowPrices[];
+   int    swLowIdxs[];
+   int    swLowCount = 0;
+   ArrayResize(swLowPrices, 0);
+   ArrayResize(swLowIdxs, 0);
    
-   // B. Find the candidate Lower High (LH) that occurred AFTER the protected low
-   // Meaning LH index MUST BE < protectedLowIdx (since smaller index is newer bar)
-   double candidateLH = 0.0;
-   int candidateLHIdx = -1;
-   
-   for(int i = right; i < protectedLowIdx; i++)
+   for(int i = right; i < lookback - left; i++)
    {
-      bool isSwing = true;
-      for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
-      if(!isSwing) continue;
-      for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
-      
-      if(isSwing)
+      if(IsSwingLow(lows, i, left, right, lookback))
       {
-         candidateLH = highs[i];
-         candidateLHIdx = i;
-         break;
+         ArrayResize(swLowPrices, swLowCount + 1);
+         ArrayResize(swLowIdxs, swLowCount + 1);
+         swLowPrices[swLowCount] = lows[i];
+         swLowIdxs[swLowCount] = i;
+         swLowCount++;
       }
    }
    
-   if(candidateLHIdx == -1) { rejectReason = "MSS_NO_LH"; return false; }
-   if(candidateLHIdx >= protectedLowIdx) { rejectReason = "MSS_INVALID_SEQUENCE"; return false; } // LH occurred before/on Low
+   // Need at least 2 swing highs (candidateLH + prevHigh) and 1 swing low (protectedLow)
+   if(swHighCount < 2) { rejectReason = (swHighCount == 0) ? "MSS_NO_LH" : "MSS_NO_PREVIOUS_HIGH"; return false; }
+   if(swLowCount < 1) { rejectReason = "MSS_NO_PROTECTED_LOW"; return false; }
    
-   // Structural distance check between Protected Low and LH (micro-structure filter)
-   if(MathAbs(candidateLH - protectedLow) < minDistance) { rejectReason = "MSS_MICRO_STRUCTURE"; return false; }
+   // ============================================================
+   // Search for the best (most recent) valid triplet:
+   //   prevHigh(older) → protectedLow(middle) → candidateLH(newer)
+   //
+   // Iterate candidate LH from newest to oldest (swHighPrices[0..n])
+   // For each candidate LH, find a protectedLow OLDER than it,
+   // then find a prevHigh OLDER than the protectedLow.
+   // ============================================================
    
-   // Check if it's actually a LOWER high compared to a previous swing high
-   double prevHigh = 0.0;
-   int prevHighIdx = -1;
-   
-   for(int i = candidateLHIdx + 1; i < lookback - left; i++)
+   for(int lhI = 0; lhI < swHighCount - 1; lhI++)
    {
-      bool isSwing = true;
-      for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
-      if(!isSwing) continue;
-      for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
+      double candidateLH = swHighPrices[lhI];
+      int    candidateLHIdx = swHighIdxs[lhI];
       
-      if(isSwing)
+      // Find the nearest protectedLow that is OLDER than candidateLH
+      // (protectedLowIdx > candidateLHIdx since higher index = older)
+      double protectedLow = 0.0;
+      int    protectedLowIdx = -1;
+      
+      for(int lowI = 0; lowI < swLowCount; lowI++)
       {
-         // Ensure it's structurally separate from the candidate LH
-         if(MathAbs(highs[i] - candidateLH) >= minDistance)
+         if(swLowIdxs[lowI] > candidateLHIdx) // older than LH
          {
-            prevHigh = highs[i];
-            prevHighIdx = i;
-            break;
+            // Micro-structure filter: distance between LH and protected low
+            if(MathAbs(candidateLH - swLowPrices[lowI]) >= minDistance)
+            {
+               protectedLow = swLowPrices[lowI];
+               protectedLowIdx = swLowIdxs[lowI];
+               break;
+            }
          }
       }
+      
+      if(protectedLowIdx == -1) continue; // no valid protected low for this LH
+      
+      // Find the nearest prevHigh that is OLDER than protectedLow
+      // (prevHighIdx > protectedLowIdx)
+      // AND prevHigh must be structurally separate from candidateLH
+      // AND candidateLH must be LOWER than prevHigh
+      double prevHigh = 0.0;
+      int    prevHighIdx = -1;
+      
+      for(int phI = lhI + 1; phI < swHighCount; phI++)
+      {
+         if(swHighIdxs[phI] > protectedLowIdx) // older than protected low
+         {
+            if(MathAbs(swHighPrices[phI] - candidateLH) >= minDistance)
+            {
+               prevHigh = swHighPrices[phI];
+               prevHighIdx = swHighIdxs[phI];
+               break;
+            }
+         }
+      }
+      
+      if(prevHighIdx == -1) continue; // MANDATORY: cannot prove previous structure
+      
+      // Validate: candidateLH must be LOWER than prevHigh (bearish structure)
+      if(candidateLH >= prevHigh) continue;
+      
+      // Validate chronology: prevHighIdx > protectedLowIdx > candidateLHIdx
+      if(!(prevHighIdx > protectedLowIdx && protectedLowIdx > candidateLHIdx))
+         continue;
+      
+      // Validate break: closed candle must break above candidateLH
+      if(close[0] <= candidateLH) { rejectReason = "MSS_BREAK_NOT_CLOSED"; return false; }
+      
+      double breakDistance = close[0] - candidateLH;
+      if(breakDistance < minBreak) { rejectReason = "MSS_BREAK_TOO_WEAK"; return false; }
+      
+      // All validations passed
+      breakLevel = candidateLH;
+      rejectReason = "MSS_VALID";
+      return true;
    }
    
-   if(prevHighIdx != -1 && candidateLH >= prevHigh) { rejectReason = "MSS_INVALID_SEQUENCE"; return false; }
-   
-   // Check Break
-   if(close[0] <= candidateLH) { rejectReason = "MSS_BREAK_NOT_CLOSED"; return false; }
-   
-   double breakDistance = close[0] - candidateLH;
-   if(breakDistance < minBreak) { rejectReason = "MSS_BREAK_TOO_WEAK"; return false; }
-   
-   breakLevel = candidateLH;
-   rejectReason = "MSS_VALID";
-   return true;
+   // No valid triplet found
+   rejectReason = "MSS_INVALID_SEQUENCE";
+   return false;
 }
 
 bool ValidateSellStructure(int idx, string sym, ENUM_TIMEFRAMES tf, double &breakLevel, string &rejectReason)
@@ -617,87 +693,132 @@ bool ValidateSellStructure(int idx, string sym, ENUM_TIMEFRAMES tf, double &brea
    int left = InpReversal_SwingLeft;
    int right = InpReversal_SwingRight;
    
-   // A. Identify the meaningful protected high (HH)
-   double protectedHigh = 0.0;
-   int protectedHighIdx = -1;
+   // ============================================================
+   // SELL MSS requires proving the full sequence:
+   //   PreviousLow (oldest) → ProtectedHigh/HH → CandidateHL → Break
+   // ============================================================
+   
+   // Collect all swing lows (newest first)
+   double swLowPrices[];
+   int    swLowIdxs[];
+   int    swLowCount = 0;
+   ArrayResize(swLowPrices, 0);
+   ArrayResize(swLowIdxs, 0);
    
    for(int i = right; i < lookback - left; i++)
    {
-      bool isSwing = true;
-      for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
-      if(!isSwing) continue;
-      for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
-      
-      if(isSwing)
+      if(IsSwingLow(lows, i, left, right, lookback))
       {
-         protectedHigh = highs[i];
-         protectedHighIdx = i;
-         break;
+         ArrayResize(swLowPrices, swLowCount + 1);
+         ArrayResize(swLowIdxs, swLowCount + 1);
+         swLowPrices[swLowCount] = lows[i];
+         swLowIdxs[swLowCount] = i;
+         swLowCount++;
       }
    }
    
-   if(protectedHighIdx == -1) { rejectReason = "MSS_NO_PROTECTED_HIGH"; return false; }
+   // Collect all swing highs (newest first)
+   double swHighPrices[];
+   int    swHighIdxs[];
+   int    swHighCount = 0;
+   ArrayResize(swHighPrices, 0);
+   ArrayResize(swHighIdxs, 0);
    
-   // B. Find the candidate Higher Low (HL) that occurred AFTER the protected high
-   // Meaning HL index MUST BE < protectedHighIdx (since smaller index is newer bar)
-   double candidateHL = 0.0;
-   int candidateHLIdx = -1;
-   
-   for(int i = right; i < protectedHighIdx; i++)
+   for(int i = right; i < lookback - left; i++)
    {
-      bool isSwing = true;
-      for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
-      if(!isSwing) continue;
-      for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
-      
-      if(isSwing)
+      if(IsSwingHigh(highs, i, left, right, lookback))
       {
-         candidateHL = lows[i];
-         candidateHLIdx = i;
-         break;
+         ArrayResize(swHighPrices, swHighCount + 1);
+         ArrayResize(swHighIdxs, swHighCount + 1);
+         swHighPrices[swHighCount] = highs[i];
+         swHighIdxs[swHighCount] = i;
+         swHighCount++;
       }
    }
    
-   if(candidateHLIdx == -1) { rejectReason = "MSS_NO_HL"; return false; }
-   if(candidateHLIdx >= protectedHighIdx) { rejectReason = "MSS_INVALID_SEQUENCE"; return false; } // HL occurred before/on High
+   // Need at least 2 swing lows (candidateHL + prevLow) and 1 swing high (protectedHigh)
+   if(swLowCount < 2) { rejectReason = (swLowCount == 0) ? "MSS_NO_HL" : "MSS_NO_PREVIOUS_LOW"; return false; }
+   if(swHighCount < 1) { rejectReason = "MSS_NO_PROTECTED_HIGH"; return false; }
    
-   // Structural distance check between Protected High and HL (micro-structure filter)
-   if(MathAbs(protectedHigh - candidateHL) < minDistance) { rejectReason = "MSS_MICRO_STRUCTURE"; return false; }
+   // ============================================================
+   // Search for the best (most recent) valid triplet:
+   //   prevLow(older) → protectedHigh(middle) → candidateHL(newer)
+   //
+   // Iterate candidate HL from newest to oldest
+   // For each candidate HL, find a protectedHigh OLDER than it,
+   // then find a prevLow OLDER than the protectedHigh.
+   // ============================================================
    
-   // Check if it's actually a HIGHER low compared to a previous swing low
-   double prevLow = 0.0;
-   int prevLowIdx = -1;
-   
-   for(int i = candidateHLIdx + 1; i < lookback - left; i++)
+   for(int hlI = 0; hlI < swLowCount - 1; hlI++)
    {
-      bool isSwing = true;
-      for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
-      if(!isSwing) continue;
-      for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
+      double candidateHL = swLowPrices[hlI];
+      int    candidateHLIdx = swLowIdxs[hlI];
       
-      if(isSwing)
+      // Find the nearest protectedHigh that is OLDER than candidateHL
+      // (protectedHighIdx > candidateHLIdx)
+      double protectedHigh = 0.0;
+      int    protectedHighIdx = -1;
+      
+      for(int highI = 0; highI < swHighCount; highI++)
       {
-         // Ensure it's structurally separate from the candidate HL
-         if(MathAbs(lows[i] - candidateHL) >= minDistance)
+         if(swHighIdxs[highI] > candidateHLIdx) // older than HL
          {
-            prevLow = lows[i];
-            prevLowIdx = i;
-            break;
+            // Micro-structure filter
+            if(MathAbs(swHighPrices[highI] - candidateHL) >= minDistance)
+            {
+               protectedHigh = swHighPrices[highI];
+               protectedHighIdx = swHighIdxs[highI];
+               break;
+            }
          }
       }
+      
+      if(protectedHighIdx == -1) continue; // no valid protected high for this HL
+      
+      // Find the nearest prevLow that is OLDER than protectedHigh
+      // (prevLowIdx > protectedHighIdx)
+      // AND prevLow must be structurally separate from candidateHL
+      // AND candidateHL must be HIGHER than prevLow
+      double prevLow = 0.0;
+      int    prevLowIdx = -1;
+      
+      for(int plI = hlI + 1; plI < swLowCount; plI++)
+      {
+         if(swLowIdxs[plI] > protectedHighIdx) // older than protected high
+         {
+            if(MathAbs(swLowPrices[plI] - candidateHL) >= minDistance)
+            {
+               prevLow = swLowPrices[plI];
+               prevLowIdx = swLowIdxs[plI];
+               break;
+            }
+         }
+      }
+      
+      if(prevLowIdx == -1) continue; // MANDATORY: cannot prove previous structure
+      
+      // Validate: candidateHL must be HIGHER than prevLow (bullish structure)
+      if(candidateHL <= prevLow) continue;
+      
+      // Validate chronology: prevLowIdx > protectedHighIdx > candidateHLIdx
+      if(!(prevLowIdx > protectedHighIdx && protectedHighIdx > candidateHLIdx))
+         continue;
+      
+      // Validate break: closed candle must break below candidateHL
+      if(close[0] >= candidateHL) { rejectReason = "MSS_BREAK_NOT_CLOSED"; return false; }
+      
+      double breakDistance = candidateHL - close[0];
+      if(breakDistance < minBreak) { rejectReason = "MSS_BREAK_TOO_WEAK"; return false; }
+      
+      // All validations passed
+      breakLevel = candidateHL;
+      rejectReason = "MSS_VALID";
+      return true;
    }
    
-   if(prevLowIdx != -1 && candidateHL <= prevLow) { rejectReason = "MSS_INVALID_SEQUENCE"; return false; }
-   
-   // Check Break
-   if(close[0] >= candidateHL) { rejectReason = "MSS_BREAK_NOT_CLOSED"; return false; }
-   
-   double breakDistance = candidateHL - close[0];
-   if(breakDistance < minBreak) { rejectReason = "MSS_BREAK_TOO_WEAK"; return false; }
-   
-   breakLevel = candidateHL;
-   rejectReason = "MSS_VALID";
-   return true;
+   // No valid triplet found
+   rejectReason = "MSS_INVALID_SEQUENCE";
+   return false;
 }
 
 // --- C3. STRUCTURE SHIFT (Quality MSS) ---
