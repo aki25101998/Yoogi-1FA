@@ -35,6 +35,55 @@ const bool   InpUseSmartTrim      = true;
 const int    InpTrimTriggerOrders = 3;
 const double InpTrimPercentage    = 100.0;
 
+//==================================================
+// INTERNAL REVERSAL ENGINE CONFIGURATION
+// DO NOT EXPOSE TO USER
+//==================================================
+enum ENUM_STRATEGY_MODE {
+   STRATEGY_AUTO,
+   STRATEGY_MANUAL
+};
+
+const ENUM_STRATEGY_MODE InpStrategyMode = STRATEGY_AUTO;
+const bool   InpEnableBalanceLimit = true;
+const bool   InpManual_DCA      = true;
+const int    InpManual_MaxOrders= 0;
+const int    InpManual_SL_Pips  = 0;
+const int    InpManual_TP_Pips  = 0;
+const int    InpManual_StepPips = 0;
+
+const bool   InpUseDXYReference = true;
+const bool   InpUseReversalEngine = true;
+const int    InpReversal_ATR_Period = 14;
+const int    InpReversal_EquilibriumPeriod = 50;
+const double InpReversal_Extension_Normal = 1.0;
+const double InpReversal_Extension_Strong = 1.5;
+const double InpReversal_Extension_Extreme = 2.0;
+const int    InpReversal_SwingLeft = 2;
+const int    InpReversal_SwingRight = 2;
+const int    InpReversal_LookbackBars = 100;
+const bool   InpReversal_RequireStructureShift = true;
+const bool   InpReversal_RequireClosedBars = true;
+const bool   InpEnableLiquiditySweep = true;
+const int    InpLiquiditySweepLookback = 50;
+const double InpLiquiditySweepToleranceATR = 0.1;
+const bool   InpEnableDisplacement = true;
+const double InpDisplacementMinBodyATR = 0.8;
+const double InpDisplacementClosePercent = 70.0;
+const double InpMSSMinBreakATR = 0.2;
+const bool   InpEnableRetest = true;
+const bool   InpRequireRetest = false;
+const double InpRetestToleranceATR = 0.5;
+const int    InpRetestMaxBars = 10;
+const double InpMinSwingDistanceATR = 0.5;
+const int    InpSafetyMaxSetupBars = 150;
+const double InpReversal_HighScore = 80.0;
+const int    InpExhaustionMaxAgeBars = 10;
+const int    InpSweepMaxAgeBars = 10;
+const int    InpDisplacementMaxAgeBars = 5;
+const int    InpMSSMaxAgeBars = 15;
+const bool   InpReversalDebug = false;
+
 // ==================================================================
 // STRUCT QUẢN LÝ TRẠNG THÁI TỪNG CẶP
 // ==================================================================
@@ -321,37 +370,11 @@ void InitGlobals()
       else
          G_Pairs[i].pip_value = 1.0 * G_Pairs[i].point;
 
-      if(InpStrategyMode == STRATEGY_MANUAL)
-      {
-         // --- CHE DO THU CONG: Doc HTF/LTF tu Input ---
-         if(G_Pairs[i].base_name == "EURUSD")      { G_Pairs[i].risk_percent = InpEURUSD_Risk; G_Pairs[i].htf = InpEURUSD_HTF; G_Pairs[i].ltf = InpEURUSD_LTF; G_Pairs[i].enabled = InpEURUSD_On; }
-         else if(G_Pairs[i].base_name == "AUDUSD") { G_Pairs[i].risk_percent = InpAUDUSD_Risk; G_Pairs[i].htf = InpAUDUSD_HTF; G_Pairs[i].ltf = InpAUDUSD_LTF; G_Pairs[i].enabled = InpAUDUSD_On; }
-         else if(G_Pairs[i].base_name == "USDCAD") { G_Pairs[i].risk_percent = InpUSDCAD_Risk; G_Pairs[i].htf = InpUSDCAD_HTF; G_Pairs[i].ltf = InpUSDCAD_LTF; G_Pairs[i].enabled = InpUSDCAD_On; }
-         else if(G_Pairs[i].base_name == "EURGBP") { G_Pairs[i].risk_percent = InpEURGBP_Risk; G_Pairs[i].htf = InpEURGBP_HTF; G_Pairs[i].ltf = InpEURGBP_LTF; G_Pairs[i].enabled = InpEURGBP_On; }
-         else if(G_Pairs[i].base_name == "USDCHF") { G_Pairs[i].risk_percent = InpUSDCHF_Risk; G_Pairs[i].htf = InpUSDCHF_HTF; G_Pairs[i].ltf = InpUSDCHF_LTF; G_Pairs[i].enabled = InpUSDCHF_On; }
-         else { G_Pairs[i].risk_percent = 0.0; G_Pairs[i].htf = PERIOD_H1; G_Pairs[i].ltf = PERIOD_M5; G_Pairs[i].enabled = false; }
-      }
-      else
-      {
-         // --- CHE DO TU DONG: Mac dinh H1/M5 cho tat ca, doc HTF/LTF tu Input ---
-         G_Pairs[i].htf = InpEURUSD_HTF;  // Mac dinh lay tu EURUSD input
-         G_Pairs[i].ltf = InpEURUSD_LTF;
-         
-         // Override neu user set rieng cho tung cap
-         if(G_Pairs[i].base_name == "EURUSD")      { G_Pairs[i].htf = InpEURUSD_HTF; G_Pairs[i].ltf = InpEURUSD_LTF; }
-         else if(G_Pairs[i].base_name == "AUDUSD") { G_Pairs[i].htf = InpAUDUSD_HTF; G_Pairs[i].ltf = InpAUDUSD_LTF; }
-         else if(G_Pairs[i].base_name == "USDCAD") { G_Pairs[i].htf = InpUSDCAD_HTF; G_Pairs[i].ltf = InpUSDCAD_LTF; }
-         else if(G_Pairs[i].base_name == "EURGBP") { G_Pairs[i].htf = InpEURGBP_HTF; G_Pairs[i].ltf = InpEURGBP_LTF; }
-         else if(G_Pairs[i].base_name == "USDCHF") { G_Pairs[i].htf = InpUSDCHF_HTF; G_Pairs[i].ltf = InpUSDCHF_LTF; }
-
-         if(G_Pairs[i].base_name == "EURUSD")      G_Pairs[i].risk_percent = 0.4;
-         else if(G_Pairs[i].base_name == "AUDUSD") G_Pairs[i].risk_percent = 0.6;
-         else if(G_Pairs[i].base_name == "EURGBP") G_Pairs[i].risk_percent = 0.5;
-         else if(G_Pairs[i].base_name == "USDCAD") G_Pairs[i].risk_percent = 0.4;
-         else if(G_Pairs[i].base_name == "USDCHF") G_Pairs[i].risk_percent = 0.3;
-         else G_Pairs[i].risk_percent = 0.0;
-         G_Pairs[i].enabled = true; // Auto mode: tat ca cap deu bat
-      }
+      // --- CHE DO TU DONG (DUY NHAT): Mac dinh H1/M5, Risk 0.5% cho tat ca ---
+      G_Pairs[i].htf = PERIOD_H1;
+      G_Pairs[i].ltf = PERIOD_M5;
+      G_Pairs[i].risk_percent = 0.5;
+      G_Pairs[i].enabled = true;
 
       // Reset LTF State
       G_Pairs[i].handle_cci = INVALID_HANDLE;

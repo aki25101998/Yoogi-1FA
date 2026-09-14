@@ -165,9 +165,9 @@ void OpenMasterTrade_Multi(int idx, int signal)
    double current_bal = AccountInfoDouble(ACCOUNT_BALANCE);
    double lot_calculation_bal = current_bal;
 
-   if(InpStrategyMode == STRATEGY_MANUAL && InpManual_Balance > 0.0)
+   if(InpSetBalance > 0.0)
    {
-      lot_calculation_bal = InpManual_Balance;
+      lot_calculation_bal = InpSetBalance;
    }
 
    // Gọi hàm tính Lot từ Globals (Đã gán cứng Risk%)
@@ -276,9 +276,9 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
       // 3. Tính Lot (Dùng Locked Balance hoặc Fallback về Actual Balance)
       double working_balance = (G_Pairs[idx].locked_balance > 0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
 
-      if(InpStrategyMode == STRATEGY_MANUAL && InpManual_Balance > 0.0)
+      if(InpSetBalance > 0.0)
       {
-         working_balance = InpManual_Balance;
+         working_balance = InpSetBalance;
       }
 
       double base_lot = CalculateAutoLot(idx, working_balance);
