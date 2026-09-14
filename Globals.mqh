@@ -86,12 +86,18 @@ struct PairContext
    bool             exh_divergence;       // Divergence detected
    bool             exh_rejection;        // Candle rejection detected
    bool             exh_failed_cont;      // Failed continuation detected
+   int              exh_divergence_age;
+   int              exh_rejection_age;
+   int              exh_failed_cont_age;
    
    // Layer C - Confirmation
    bool             conf_sweep;           // Liquidity sweep detected
    bool             conf_displacement;    // Displacement detected
    bool             conf_mss;             // Structure shift confirmed (quality)
    bool             conf_retest;          // Retest confirmed
+   int              conf_sweep_age;
+   int              conf_displacement_age;
+   int              conf_mss_age;
    double           sweep_level;          // Swing level that was swept
    double           mss_break_level;      // Swing level that was broken (MSS)
    int              retest_bar_count;     // Bars waited for retest
@@ -372,10 +378,16 @@ void InitGlobals()
       G_Pairs[i].exh_divergence = false;
       G_Pairs[i].exh_rejection = false;
       G_Pairs[i].exh_failed_cont = false;
+      G_Pairs[i].exh_divergence_age = 0;
+      G_Pairs[i].exh_rejection_age = 0;
+      G_Pairs[i].exh_failed_cont_age = 0;
       G_Pairs[i].conf_sweep = false;
       G_Pairs[i].conf_displacement = false;
       G_Pairs[i].conf_mss = false;
       G_Pairs[i].conf_retest = false;
+      G_Pairs[i].conf_sweep_age = 0;
+      G_Pairs[i].conf_displacement_age = 0;
+      G_Pairs[i].conf_mss_age = 0;
       G_Pairs[i].sweep_level = 0.0;
       G_Pairs[i].mss_break_level = 0.0;
       G_Pairs[i].retest_bar_count = 0;

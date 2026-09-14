@@ -99,6 +99,12 @@ input group "=== SCORE & ENTRY ==="
 input double InpReversalMinScore = 70.0;             // Score tối thiểu cho entry
 input double InpReversal_HighScore = 80.0;           // Score cao (entry ưu tiên)
 
+input group "=== FRESHNESS (AGE) LIMITS ==="
+input int    InpExhaustionMaxAgeBars = 10;           // Max bars exhaustion is valid
+input int    InpSweepMaxAgeBars = 10;                // Max bars sweep is valid
+input int    InpDisplacementMaxAgeBars = 5;          // Max bars displacement is valid
+input int    InpMSSMaxAgeBars = 15;                  // Max bars MSS is valid
+
 input group "=== DEBUG ==="
 input bool   InpReversalDebug = false;               // Bật/tắt debug logging chi tiết
 

@@ -32,11 +32,17 @@ void ResetReversalSetup(int idx, string reason)
    G_Pairs[idx].exh_divergence = false;
    G_Pairs[idx].exh_rejection = false;
    G_Pairs[idx].exh_failed_cont = false;
+   G_Pairs[idx].exh_divergence_age = 0;
+   G_Pairs[idx].exh_rejection_age = 0;
+   G_Pairs[idx].exh_failed_cont_age = 0;
    
    G_Pairs[idx].conf_sweep = false;
    G_Pairs[idx].conf_displacement = false;
    G_Pairs[idx].conf_mss = false;
    G_Pairs[idx].conf_retest = false;
+   G_Pairs[idx].conf_sweep_age = 0;
+   G_Pairs[idx].conf_displacement_age = 0;
+   G_Pairs[idx].conf_mss_age = 0;
    G_Pairs[idx].sweep_level = 0.0;
    G_Pairs[idx].mss_break_level = 0.0;
    G_Pairs[idx].retest_bar_count = 0;
@@ -171,7 +177,9 @@ void EvaluateHTFZone(int idx, int &direction)
    
    // HTF Reversal Zone = giá extended khỏi equilibrium
    // BUY zone: đang downtrend/sideway VÀ extension đủ (giá dưới EMA)
+   // HOẶC uptrend nhưng có extension extreme + exhaustion
    // SELL zone: đang uptrend/sideway VÀ extension đủ (giá trên EMA)
+   // HOẶC downtrend nhưng có extension extreme + exhaustion
    double ema = CalculateEMA_Generic(sym, htf, InpReversal_EquilibriumPeriod, 1);
    double close[];
    if(CopyClose(sym, htf, 1, 1, close) < 1) { direction = 0; return; }
@@ -182,21 +190,27 @@ void EvaluateHTFZone(int idx, int &direction)
    bool bullish_zone = false;
    bool bearish_zone = false;
    
+   G_Pairs[idx].htf_div = DetectDivergence(sym, htf, price_below_ema ? 1 : -1);
+   G_Pairs[idx].htf_exh = DetectCandleRejection(sym, htf, price_below_ema ? 1 : -1);
+   bool htf_exhaustion = (G_Pairs[idx].htf_div || G_Pairs[idx].htf_exh);
+   
    // BUY zone: giá extended phía dưới
    if(price_below_ema && ext >= InpReversal_Extension_Normal)
    {
-      bullish_zone = true;
+      if(G_Pairs[idx].regime != REGIME_TREND_BULL || (ext >= InpReversal_Extension_Extreme && htf_exhaustion))
+      {
+         bullish_zone = true;
+      }
    }
    
    // SELL zone: giá extended phía trên
    if(price_above_ema && ext >= InpReversal_Extension_Normal)
    {
-      bearish_zone = true;
+      if(G_Pairs[idx].regime != REGIME_TREND_BEAR || (ext >= InpReversal_Extension_Extreme && htf_exhaustion))
+      {
+         bearish_zone = true;
+      }
    }
-   
-   // Bổ sung: kiểm tra HTF divergence và exhaustion (dùng làm evidence, không quyết định zone)
-   G_Pairs[idx].htf_div = DetectDivergence(sym, htf, price_below_ema ? 1 : -1);
-   G_Pairs[idx].htf_exh = DetectCandleRejection(sym, htf, price_below_ema ? 1 : -1);
    
    // Conflict Resolution
    G_Pairs[idx].htf_conflict = false;
@@ -401,16 +415,17 @@ bool DetectLiquiditySweep(string sym, ENUM_TIMEFRAMES tf, int direction, double 
    
    if(direction == 1) // BUY: sweep below swing low
    {
-      // Low phải quét dưới swing low (có thể + tolerance)
-      bool swept = (low[0] <= swingLevel + tolerance);
-      // Close phải quay lại trên swing low
+      // Low phải quét dưới swing low (có thể + tolerance nhỏ để xử lý nhiễu nếu cần, 
+      // nhưng ở đây bắt buộc phải phá xuống)
+      bool swept = (low[0] < swingLevel + tolerance);
+      // Close BẮT BUỘC phải quay lại trên swing low
       bool closedBack = (close[0] > swingLevel);
       
       return (swept && closedBack);
    }
    else if(direction == -1) // SELL: sweep above swing high
    {
-      bool swept = (high[0] >= swingLevel - tolerance);
+      bool swept = (high[0] > swingLevel - tolerance);
       bool closedBack = (close[0] < swingLevel);
       
       return (swept && closedBack);
@@ -723,8 +738,8 @@ bool CheckSetupInvalidation(int idx, string sym, ENUM_TIMEFRAMES tf)
       // Nếu giá phá qua dưới qualified swing low → cấu trúc mất
       if(G_Pairs[idx].qual_swing_low > 0.0 && close[0] < G_Pairs[idx].qual_swing_low)
       {
-         // Chỉ invalidate nếu đã qua state exhaustion (tức đã có evidence)
-         if(G_Pairs[idx].state_machine >= STATE_EXHAUSTION)
+         // Chỉ invalidate nếu đã có exhaustion
+         if(G_Pairs[idx].exh_divergence || G_Pairs[idx].exh_rejection || G_Pairs[idx].exh_failed_cont)
             return true;
       }
    }
@@ -732,12 +747,22 @@ bool CheckSetupInvalidation(int idx, string sym, ENUM_TIMEFRAMES tf)
    {
       if(G_Pairs[idx].qual_swing_high > 0.0 && close[0] > G_Pairs[idx].qual_swing_high)
       {
-         if(G_Pairs[idx].state_machine >= STATE_EXHAUSTION)
+         if(G_Pairs[idx].exh_divergence || G_Pairs[idx].exh_rejection || G_Pairs[idx].exh_failed_cont)
             return true;
       }
    }
    
    return false;
+}
+
+// Check if evidence meets hard requirements (excluding DXY and Retest)
+bool IsEvidenceReady(int idx, int direction)
+{
+   if(!G_Pairs[idx].htf_reversal_zone) return false;
+   if(!G_Pairs[idx].exh_divergence && !G_Pairs[idx].exh_rejection && !G_Pairs[idx].exh_failed_cont) return false;
+   if(InpReversal_RequireStructureShift && !G_Pairs[idx].conf_mss) return false;
+   if(CalculateReversalScore(idx, direction) < InpReversalMinScore) return false;
+   return true;
 }
 
 // ==================================================================
@@ -861,121 +886,93 @@ int CheckReversalSignal(int idx)
       return 0;
    }
    
-   // === STATE 1: HTF_LOCATION → EXHAUSTION ===
-   if(G_Pairs[idx].state_machine == STATE_HTF_LOCATION)
+   // --- FRESHNESS UPDATE ---
+   if(G_Pairs[idx].exh_divergence) { G_Pairs[idx].exh_divergence_age++; if(G_Pairs[idx].exh_divergence_age > InpExhaustionMaxAgeBars) { G_Pairs[idx].exh_divergence = false; G_Pairs[idx].exh_divergence_age = 0; } }
+   if(G_Pairs[idx].exh_rejection) { G_Pairs[idx].exh_rejection_age++; if(G_Pairs[idx].exh_rejection_age > InpExhaustionMaxAgeBars) { G_Pairs[idx].exh_rejection = false; G_Pairs[idx].exh_rejection_age = 0; } }
+   if(G_Pairs[idx].exh_failed_cont) { G_Pairs[idx].exh_failed_cont_age++; if(G_Pairs[idx].exh_failed_cont_age > InpExhaustionMaxAgeBars) { G_Pairs[idx].exh_failed_cont = false; G_Pairs[idx].exh_failed_cont_age = 0; } }
+   
+   if(G_Pairs[idx].conf_sweep) { G_Pairs[idx].conf_sweep_age++; if(G_Pairs[idx].conf_sweep_age > InpSweepMaxAgeBars) { G_Pairs[idx].conf_sweep = false; G_Pairs[idx].conf_sweep_age = 0; } }
+   if(G_Pairs[idx].conf_displacement) { G_Pairs[idx].conf_displacement_age++; if(G_Pairs[idx].conf_displacement_age > InpDisplacementMaxAgeBars) { G_Pairs[idx].conf_displacement = false; G_Pairs[idx].conf_displacement_age = 0; } }
+   if(G_Pairs[idx].conf_mss) { G_Pairs[idx].conf_mss_age++; if(G_Pairs[idx].conf_mss_age > InpMSSMaxAgeBars) { G_Pairs[idx].conf_mss = false; G_Pairs[idx].conf_mss_age = 0; } }
+
+   // === STATE: EVIDENCE ACCUMULATION ===
+   if(G_Pairs[idx].state_machine >= STATE_HTF_LOCATION && G_Pairs[idx].state_machine < STATE_RETEST)
    {
-      // Cập nhật qualified swings
+      // Cập nhật qualified swings liên tục
       FindQualifiedSwings(sym, ltf, InpLiquiditySweepLookback,
                           G_Pairs[idx].qual_swing_high, G_Pairs[idx].qual_swing_low);
       
-      // Kiểm tra exhaustion signals
-      G_Pairs[idx].exh_divergence = DetectDivergence(sym, ltf, dir);
-      G_Pairs[idx].exh_rejection = DetectCandleRejection(sym, ltf, dir);
-      G_Pairs[idx].exh_failed_cont = DetectFailedContinuation(sym, ltf, dir);
+      // Kiểm tra Exhaustion (independent)
+      if(!G_Pairs[idx].exh_divergence) { if(DetectDivergence(sym, ltf, dir)) { G_Pairs[idx].exh_divergence = true; G_Pairs[idx].exh_divergence_age = 0; } }
+      if(!G_Pairs[idx].exh_rejection) { if(DetectCandleRejection(sym, ltf, dir)) { G_Pairs[idx].exh_rejection = true; G_Pairs[idx].exh_rejection_age = 0; } }
+      if(!G_Pairs[idx].exh_failed_cont) { if(DetectFailedContinuation(sym, ltf, dir)) { G_Pairs[idx].exh_failed_cont = true; G_Pairs[idx].exh_failed_cont_age = 0; } }
       
-      bool hasExhaustion = (G_Pairs[idx].exh_divergence || 
-                            G_Pairs[idx].exh_rejection || 
-                            G_Pairs[idx].exh_failed_cont);
-      
-      if(hasExhaustion)
-      {
-         G_Pairs[idx].state_machine = STATE_EXHAUSTION;
-         G_Pairs[idx].rev_status = "EXHAUSTION";
-         LogReversalDecision(idx, dir, "EXHAUSTION", "Exhaustion detected", 0);
-      }
-      else
-      {
-         G_Pairs[idx].rev_status = "WAIT_EXHAUSTION";
-      }
-   }
-   
-   // === STATE 2: EXHAUSTION → LIQUIDITY ===
-   if(G_Pairs[idx].state_machine == STATE_EXHAUSTION)
-   {
-      // Liên tục cập nhật exhaustion (có thể thêm evidence)
-      if(!G_Pairs[idx].exh_divergence) G_Pairs[idx].exh_divergence = DetectDivergence(sym, ltf, dir);
-      if(!G_Pairs[idx].exh_rejection) G_Pairs[idx].exh_rejection = DetectCandleRejection(sym, ltf, dir);
-      if(!G_Pairs[idx].exh_failed_cont) G_Pairs[idx].exh_failed_cont = DetectFailedContinuation(sym, ltf, dir);
-      
-      // Check liquidity sweep
+      // Kiểm tra Sweep (independent)
       double sweepTarget = (dir == 1) ? G_Pairs[idx].qual_swing_low : G_Pairs[idx].qual_swing_high;
-      bool swept = DetectLiquiditySweep(sym, ltf, dir, sweepTarget);
+      if(!G_Pairs[idx].conf_sweep) {
+         if(DetectLiquiditySweep(sym, ltf, dir, sweepTarget)) {
+            G_Pairs[idx].conf_sweep = true;
+            G_Pairs[idx].conf_sweep_age = 0;
+            G_Pairs[idx].sweep_level = sweepTarget;
+            LogReversalDecision(idx, dir, "LIQUIDITY", "Sweep detected", 0);
+         }
+      }
       
-      if(swept)
+      // Kiểm tra Displacement (independent)
+      if(!G_Pairs[idx].conf_displacement) {
+         if(DetectDisplacement(sym, ltf, dir)) {
+            G_Pairs[idx].conf_displacement = true;
+            G_Pairs[idx].conf_displacement_age = 0;
+            LogReversalDecision(idx, dir, "DISPLACEMENT", "Displacement candle detected", 0);
+         }
+      }
+      
+      // Kiểm tra MSS (independent)
+      if(!G_Pairs[idx].conf_mss) {
+         double breakLvl = 0.0;
+         if(DetectStructureShift(sym, ltf, dir, breakLvl)) {
+            G_Pairs[idx].conf_mss = true;
+            G_Pairs[idx].conf_mss_age = 0;
+            G_Pairs[idx].mss_break_level = breakLvl;
+            LogReversalDecision(idx, dir, "MSS_CONFIRMED", "Structure shifted (quality)", 0);
+         }
+      }
+      
+      // Kiểm tra xem đã đủ Evidence chưa
+      if(IsEvidenceReady(idx, dir))
       {
-         G_Pairs[idx].conf_sweep = true;
-         G_Pairs[idx].sweep_level = sweepTarget;
-         G_Pairs[idx].state_machine = STATE_LIQUIDITY;
-         G_Pairs[idx].rev_status = "SWEEP";
-         LogReversalDecision(idx, dir, "LIQUIDITY", "Sweep detected", 0);
+         G_Pairs[idx].state_machine = STATE_RETEST;
+         G_Pairs[idx].retest_bar_count = 0;
+         G_Pairs[idx].rev_status = "EVIDENCE_READY_FOR_RETEST";
+         LogReversalDecision(idx, dir, "EVIDENCE_READY", "All evidence gathered", CalculateReversalScore(idx, dir));
       }
       else
       {
-         G_Pairs[idx].rev_status = "WAIT_SWEEP";
+         G_Pairs[idx].rev_status = "ACCUMULATING";
       }
    }
    
-   // === STATE 3: LIQUIDITY → REVERSAL_CONF (Displacement) ===
-   if(G_Pairs[idx].state_machine == STATE_LIQUIDITY)
-   {
-      bool displaced = DetectDisplacement(sym, ltf, dir);
-      
-      if(displaced)
-      {
-         G_Pairs[idx].conf_displacement = true;
-         G_Pairs[idx].state_machine = STATE_REVERSAL_CONF;
-         G_Pairs[idx].rev_status = "DISPLACEMENT";
-         LogReversalDecision(idx, dir, "DISPLACEMENT", "Displacement candle detected", 0);
-      }
-      else
-      {
-         G_Pairs[idx].rev_status = "WAIT_DISPLACEMENT";
-      }
-   }
-   
-   // === STATE 4: REVERSAL_CONF → STRUCTURE_SHIFT (Quality MSS) ===
-   if(G_Pairs[idx].state_machine == STATE_REVERSAL_CONF)
-   {
-      double breakLvl = 0.0;
-      bool mssConfirmed = DetectStructureShift(sym, ltf, dir, breakLvl);
-      
-      if(mssConfirmed)
-      {
-         G_Pairs[idx].conf_mss = true;
-         G_Pairs[idx].ltf_mss = true;
-         G_Pairs[idx].mss_break_level = breakLvl;
-         G_Pairs[idx].state_machine = STATE_STRUCTURE_SHIFT;
-         G_Pairs[idx].rev_status = "MSS";
-         LogReversalDecision(idx, dir, "MSS_CONFIRMED", "Structure shifted (quality)", 0);
-      }
-      else
-      {
-         G_Pairs[idx].rev_status = "WAIT_MSS";
-      }
-   }
-   
-   // === STATE 5: STRUCTURE_SHIFT → RETEST (or skip) ===
-   if(G_Pairs[idx].state_machine == STATE_STRUCTURE_SHIFT)
+   // === STATE 6: RETEST ===
+   if(G_Pairs[idx].state_machine == STATE_RETEST)
    {
       if(InpRequireRetest && InpEnableRetest)
       {
-         // Chờ retest
          bool retested = DetectRetest(sym, ltf, dir, G_Pairs[idx].mss_break_level,
                                       G_Pairs[idx].retest_bar_count);
          
          if(retested)
          {
             G_Pairs[idx].conf_retest = true;
-            G_Pairs[idx].state_machine = STATE_RETEST;
+            G_Pairs[idx].state_machine = STATE_ENTRY_READY;
             G_Pairs[idx].rev_status = "RETEST OK";
             LogReversalDecision(idx, dir, "RETEST", "Retest confirmed", 0);
          }
          else if(G_Pairs[idx].retest_bar_count > InpRetestMaxBars)
          {
-            // Retest timeout → vẫn cho qua nhưng không có bonus retest
-            G_Pairs[idx].state_machine = STATE_RETEST;
-            G_Pairs[idx].rev_status = "RETEST TIMEOUT";
-            LogReversalDecision(idx, dir, "RETEST_SKIP", "Retest timeout, proceeding", 0);
+            // Retest timeout BẮT BUỘC (Fix #4)
+            LogReversalDecision(idx, dir, "RETEST_TIMEOUT", "Retest timeout, rejecting", 0);
+            ResetReversalSetup(idx, "RETEST_TIMEOUT");
+            return 0;
          }
          else
          {
@@ -984,29 +981,23 @@ int CheckReversalSignal(int idx)
       }
       else
       {
-         // Skip retest
-         G_Pairs[idx].state_machine = STATE_RETEST;
+         G_Pairs[idx].state_machine = STATE_ENTRY_READY;
          G_Pairs[idx].rev_status = "RETEST SKIP";
       }
    }
    
-   // === STATE 6: RETEST → ENTRY_READY (Final Gate) ===
-   if(G_Pairs[idx].state_machine == STATE_RETEST)
+   // === STATE 7: ENTRY_READY (Final Gate) ===
+   if(G_Pairs[idx].state_machine == STATE_ENTRY_READY)
    {
-      // Calculate final score
       double score = CalculateReversalScore(idx, dir);
-      
-      // Validate Hard Requirements
       string rejectReason = "";
       bool hardPass = ValidateHardRequirements(idx, dir, rejectReason);
       
       if(hardPass)
       {
-         G_Pairs[idx].state_machine = STATE_ENTRY_READY;
          G_Pairs[idx].rev_status = "TRIGGER";
          LogReversalDecision(idx, dir, "ENTRY_READY", "All Gates Passed", score);
          
-         // Reset state machine ngay sau khi return
          int result = dir;
          ResetReversalSetup(idx, "Entry Triggered - Reset");
          return result;
@@ -1015,24 +1006,25 @@ int CheckReversalSignal(int idx)
       {
          if(rejectReason == "DXY_CONFLICT")
          {
-            // DXY conflict → reset hoàn toàn
             LogReversalDecision(idx, dir, "REJECT", rejectReason, score);
             ResetReversalSetup(idx, rejectReason);
             return 0;
          }
          else if(rejectReason == "DXY_NOT_READY")
          {
-            // DXY chưa sẵn sàng → chờ (không reset)
             G_Pairs[idx].rev_status = "WAIT_DXY";
          }
          else
          {
-            // Các lý do khác → log và reject
+            // Evidence timeout can make hardPass false again
             LogReversalDecision(idx, dir, "REJECT", rejectReason, score);
-            G_Pairs[idx].rev_status = "REJECTED: " + rejectReason;
+            G_Pairs[idx].state_machine = STATE_HTF_LOCATION; // Go back to accumulating
+            G_Pairs[idx].rev_status = "RE-ACCUMULATING: " + rejectReason;
          }
       }
    }
+   
+   return 0;
    
    return 0;
 }
