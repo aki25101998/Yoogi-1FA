@@ -39,18 +39,7 @@ const double InpTrimPercentage    = 100.0;
 // INTERNAL REVERSAL ENGINE CONFIGURATION
 // DO NOT EXPOSE TO USER
 //==================================================
-enum ENUM_STRATEGY_MODE {
-   STRATEGY_AUTO,
-   STRATEGY_MANUAL
-};
-
-const ENUM_STRATEGY_MODE InpStrategyMode = STRATEGY_AUTO;
 const bool   InpEnableBalanceLimit = true;
-const bool   InpManual_DCA      = true;
-const int    InpManual_MaxOrders= 0;
-const int    InpManual_SL_Pips  = 0;
-const int    InpManual_TP_Pips  = 0;
-const int    InpManual_StepPips = 0;
 
 const bool   InpUseDXYReference = true;
 const bool   InpUseReversalEngine = true;
@@ -181,7 +170,7 @@ struct PairContext
 
    // --- Cấu hình Risk (Gán cứng trong Init) ---
    double           risk_percent;
-   bool             enabled;       // Bật/Tắt cặp tiền (Manual mode)
+   bool             enabled;       // Bật/Tắt cặp tiền
 
    // --- LTF Indicator (Entry - logic gốc) ---
    int      handle_cci;

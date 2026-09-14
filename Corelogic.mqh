@@ -54,7 +54,7 @@ bool OpenChildOrder_Multi(int idx, ENUM_POSITION_TYPE ptype, double lot, const s
 
    bool res=false;
    double sl = 0.0;
-   int sl_pips = (InpStrategyMode == STRATEGY_MANUAL) ? InpManual_SL_Pips : 0;
+   int sl_pips = 0;
 
    if(ptype == POSITION_TYPE_BUY)
    {
@@ -179,11 +179,6 @@ void OpenMasterTrade_Multi(int idx, int signal)
    // --- XAC DINH TP VA SL THEO CHE DO ---
    int tp_pips = InpMasterTPPips;  // Mac dinh Auto
    int sl_pips = 0;
-   if(InpStrategyMode == STRATEGY_MANUAL)
-   {
-      tp_pips = InpManual_TP_Pips;
-      sl_pips = InpManual_SL_Pips;
-   }
 
    if(signal == 1)
    {
@@ -243,14 +238,8 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
       return;
    }
 
-   // 2. Logic Khoảng cách (Manual cho phep tuy chinh, Auto dung mac dinh)
+   // 2. Logic Khoảng cách (Auto dung mac dinh)
    int step_pips = InpKhoangMoPip; // Mac dinh Auto = 30
-   if(InpStrategyMode == STRATEGY_MANUAL)
-   {
-      if(!InpManual_DCA) return;          // Manual tắt DCA -> Tắt tính năng nhồi
-      if(InpManual_StepPips <= 0) return; // Manual + Step=0 -> Tắt DCA
-      step_pips = InpManual_StepPips;
-   }
    double step = step_pips * G_Pairs[idx].pip_value;
    double current_price = (master_type==POSITION_TYPE_BUY) ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK);
 
@@ -261,17 +250,6 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
    if(enough)
    {
       int next_step_index = G_Pairs[idx].virtual_step + 1;
-
-      // KIỂM TRA GIỚI HẠN SỐ LỆNH VÀ CẮT LỖ CHUỖI NẾU VƯỢT QUÁ (CHẾ ĐỘ THỦ CÔNG)
-      if(InpStrategyMode == STRATEGY_MANUAL && InpManual_MaxOrders > 0)
-      {
-         if(next_step_index >= InpManual_MaxOrders)
-         {
-             PrintFormat("[%s] >>> Gia tiep tuc di nguoc. Dat muc mo lenh thu %d nhung MaxOrders chi la %d. Tien hanh cat lo chuoi!", sym, next_step_index + 1, InpManual_MaxOrders);
-             CloseAllInChain_Multi(idx);
-             return;
-         }
-      }
 
       // 3. Tính Lot (Dùng Locked Balance hoặc Fallback về Actual Balance)
       double working_balance = (G_Pairs[idx].locked_balance > 0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);

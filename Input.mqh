@@ -11,7 +11,7 @@
 // bên trong file InfoDisplay.mqh
 
 input group "=== TÙY CHỈNH CHUNG ==="
-input double InpSetBalance = 0.0; // Set Balance tính Lot (0 = Auto)
+input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = dùng ACCOUNT_BALANCE thực tế)
 
 input group "=== CHẤT LƯỢNG TÍN HIỆU ==="
 input double InpReversalMinScore = 70.0;             // Score tối thiểu cho entry (Reversal Quality)
