@@ -23,7 +23,6 @@
 // ==================================================================
 // Các thông số này được cố định, người dùng không thể chỉnh sửa
 const bool   InpAutoSignalTrading = true;
-const bool   InpAutoManualTrading = true;
 const bool   InpAllowBuy          = true;
 const bool   InpAllowSell         = true;
 

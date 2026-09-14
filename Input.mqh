@@ -6,9 +6,11 @@
 //+------------------------------------------------------------------+
 #property strict
 
-// Hiện tại không có Input nào được khai báo.
-// Toàn bộ cấu hình giao diện đã được chuyển thành Hằng số (CONST) 
-// bên trong file InfoDisplay.mqh
+// ================================================================
+// USER INPUTS
+// Chỉ giữ lại các tham số người dùng được phép tùy chỉnh.
+// Các cấu hình chiến lược khác được cố định nội bộ.
+// ================================================================
 
 input group "=== TÙY CHỈNH CHUNG ==="
 input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = dùng ACCOUNT_BALANCE thực tế)
