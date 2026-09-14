@@ -105,6 +105,8 @@ struct PairContext
    // Qualified Swings
    double           qual_swing_high;      // Qualified swing high (filtered)
    double           qual_swing_low;       // Qualified swing low (filtered)
+   double           prev_swing_high;      // Previous valid swing high (for MSS context)
+   double           prev_swing_low;       // Previous valid swing low (for MSS context)
    
    // Score Breakdown
    double           score_location;
@@ -393,6 +395,8 @@ void InitGlobals()
       G_Pairs[i].retest_bar_count = 0;
       G_Pairs[i].qual_swing_high = 0.0;
       G_Pairs[i].qual_swing_low = 0.0;
+      G_Pairs[i].prev_swing_high = 0.0;
+      G_Pairs[i].prev_swing_low = 0.0;
       G_Pairs[i].score_location = 0.0;
       G_Pairs[i].score_exhaustion = 0.0;
       G_Pairs[i].score_sweep = 0.0;

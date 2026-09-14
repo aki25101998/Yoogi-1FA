@@ -47,6 +47,11 @@ void ResetReversalSetup(int idx, string reason)
    G_Pairs[idx].mss_break_level = 0.0;
    G_Pairs[idx].retest_bar_count = 0;
    
+   G_Pairs[idx].qual_swing_high = 0.0;
+   G_Pairs[idx].qual_swing_low = 0.0;
+   G_Pairs[idx].prev_swing_high = 0.0;
+   G_Pairs[idx].prev_swing_low = 0.0;
+   
    G_Pairs[idx].reversal_score = 0.0;
    G_Pairs[idx].score_location = 0.0;
    G_Pairs[idx].score_exhaustion = 0.0;
@@ -75,10 +80,13 @@ double CalculateExtension(string sym, ENUM_TIMEFRAMES tf)
 // --- A2. QUALIFIED SWING DETECTION ---
 // Tìm swing points đủ chất lượng (lọc bỏ swing quá nhỏ / nhiễu)
 void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
-                          double &qSwingHigh, double &qSwingLow)
+                          double &qSwingHigh, double &qSwingLow,
+                          double &prevSwingHigh, double &prevSwingLow)
 {
    qSwingHigh = 0.0;
    qSwingLow = 0.0;
+   prevSwingHigh = 0.0;
+   prevSwingLow = 0.0;
    
    int left = InpReversal_SwingLeft;
    int right = InpReversal_SwingRight;
@@ -86,13 +94,7 @@ void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
    double highs[], lows[];
    if(!ReadHighLow_Generic(sym, tf, 1, lookback, highs, lows)) return;
    
-   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
-   if(atr <= 0) return;
-   
-   double minDist = InpMinSwingDistanceATR * atr;
-   
-   // Tìm Swing High đủ chất lượng (gần nhất)
-   double prevSwingH = 0.0;
+   // Tìm Swing High (gần nhất -> cũ hơn)
    for(int i = right; i < lookback - left; i++)
    {
       bool isSwing = true;
@@ -102,25 +104,19 @@ void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
       
       if(isSwing)
       {
-         if(prevSwingH == 0.0)
+         if(qSwingHigh == 0.0)
          {
-            // Swing đầu tiên luôn chấp nhận
-            prevSwingH = highs[i];
             qSwingHigh = highs[i];
          }
-         else if(MathAbs(highs[i] - prevSwingH) >= minDist)
+         else if(prevSwingHigh == 0.0)
          {
-            // Swing tiếp theo phải đủ xa swing trước
-            qSwingHigh = highs[i];
-            break;
+            prevSwingHigh = highs[i];
+            break; // Đã tìm đủ 2 swing high
          }
       }
    }
-   // Nếu chỉ tìm được 1 swing, giữ nó
-   if(qSwingHigh == 0.0 && prevSwingH > 0.0) qSwingHigh = prevSwingH;
    
-   // Tìm Swing Low đủ chất lượng (gần nhất)
-   double prevSwingL = 0.0;
+   // Tìm Swing Low (gần nhất -> cũ hơn)
    for(int i = right; i < lookback - left; i++)
    {
       bool isSwing = true;
@@ -130,19 +126,17 @@ void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
       
       if(isSwing)
       {
-         if(prevSwingL == 0.0)
+         if(qSwingLow == 0.0)
          {
-            prevSwingL = lows[i];
             qSwingLow = lows[i];
          }
-         else if(MathAbs(lows[i] - prevSwingL) >= minDist)
+         else if(prevSwingLow == 0.0)
          {
-            qSwingLow = lows[i];
-            break;
+            prevSwingLow = lows[i];
+            break; // Đã tìm đủ 2 swing low
          }
       }
    }
-   if(qSwingLow == 0.0 && prevSwingL > 0.0) qSwingLow = prevSwingL;
 }
 
 // --- A3. MARKET REGIME DETECTION ---
@@ -415,9 +409,8 @@ bool DetectLiquiditySweep(string sym, ENUM_TIMEFRAMES tf, int direction, double 
    
    if(direction == 1) // BUY: sweep below swing low
    {
-      // Low phải quét dưới swing low (có thể + tolerance nhỏ để xử lý nhiễu nếu cần, 
-      // nhưng ở đây bắt buộc phải phá xuống)
-      bool swept = (low[0] < swingLevel + tolerance);
+      // Low bắt buộc phải phá qua swing low
+      bool swept = (low[0] <= swingLevel - tolerance);
       // Close BẮT BUỘC phải quay lại trên swing low
       bool closedBack = (close[0] > swingLevel);
       
@@ -425,7 +418,9 @@ bool DetectLiquiditySweep(string sym, ENUM_TIMEFRAMES tf, int direction, double 
    }
    else if(direction == -1) // SELL: sweep above swing high
    {
-      bool swept = (high[0] > swingLevel - tolerance);
+      // High bắt buộc phải phá qua swing high
+      bool swept = (high[0] >= swingLevel + tolerance);
+      // Close BẮT BUỘC phải quay lại dưới swing high
       bool closedBack = (close[0] < swingLevel);
       
       return (swept && closedBack);
@@ -479,18 +474,13 @@ bool DetectDisplacement(string sym, ENUM_TIMEFRAMES tf, int direction)
 }
 
 // --- C3. STRUCTURE SHIFT (Quality MSS) ---
-// Cải thiện: thêm quality check (khoảng phá + displacement preference)
-bool DetectStructureShift(string sym, ENUM_TIMEFRAMES tf, int direction,
+// Cải thiện: dùng nearest protected structure thay vì global extremes
+bool DetectStructureShift(int idx, string sym, ENUM_TIMEFRAMES tf, int direction,
                            double &breakLevel)
 {
    if(!InpReversal_RequireStructureShift) { breakLevel = 0.0; return true; }
    
-   int lookback = InpReversal_LookbackBars;
-   int left = InpReversal_SwingLeft;
-   int right = InpReversal_SwingRight;
-   
-   double highs[], lows[], close[];
-   if(!ReadHighLow_Generic(sym, tf, 1, lookback, highs, lows)) return false;
+   double close[];
    if(CopyClose(sym, tf, 1, 1, close) < 1) return false;
    
    double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
@@ -498,67 +488,41 @@ bool DetectStructureShift(string sym, ENUM_TIMEFRAMES tf, int direction,
    
    double minBreak = InpMSSMinBreakATR * atr;
    
-   if(direction == 1) // Bullish MSS: LL → LH → Break LH
+   if(direction == 1) // Bullish MSS: Break above recent Lower High (LH)
    {
-      // 1. Find Lowest Low (LL)
-      int ll_idx = right;
-      double lowest_low = lows[ll_idx];
-      for(int i = right + 1; i < lookback; i++) 
-      {
-         if(lows[i] < lowest_low) { lowest_low = lows[i]; ll_idx = i; }
-      }
+      double recent_swing_high = G_Pairs[idx].qual_swing_high;
+      double prev_swing_high = G_Pairs[idx].prev_swing_high;
       
-      // 2. Find Lower High (LH) between LL and now
-      int lh_idx = -1;
-      for(int i = right; i < ll_idx - left; i++)
+      if(recent_swing_high > 0.0 && prev_swing_high > 0.0)
       {
-         bool isSwing = true;
-         for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
-         if(!isSwing) continue;
-         for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
-         if(isSwing) { lh_idx = i; break; }
-      }
-      
-      // 3. Check break with quality
-      if(lh_idx != -1)
-      {
-         double breakDistance = close[0] - highs[lh_idx];
-         if(breakDistance >= minBreak) // Phá đủ xa, không phải wick spike
+         // Verify it's a Lower High (LH)
+         if(recent_swing_high < prev_swing_high)
          {
-            breakLevel = highs[lh_idx];
-            return true;
+            double breakDistance = close[0] - recent_swing_high;
+            if(breakDistance >= minBreak)
+            {
+               breakLevel = recent_swing_high;
+               return true;
+            }
          }
       }
    }
-   else if(direction == -1) // Bearish MSS: HH → HL → Break HL
+   else if(direction == -1) // Bearish MSS: Break below recent Higher Low (HL)
    {
-      // 1. Find Highest High (HH)
-      int hh_idx = right;
-      double highest_high = highs[hh_idx];
-      for(int i = right + 1; i < lookback; i++) 
-      {
-         if(highs[i] > highest_high) { highest_high = highs[i]; hh_idx = i; }
-      }
+      double recent_swing_low = G_Pairs[idx].qual_swing_low;
+      double prev_swing_low = G_Pairs[idx].prev_swing_low;
       
-      // 2. Find Higher Low (HL) between HH and now
-      int hl_idx = -1;
-      for(int i = right; i < hh_idx - left; i++)
+      if(recent_swing_low > 0.0 && prev_swing_low > 0.0)
       {
-         bool isSwing = true;
-         for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
-         if(!isSwing) continue;
-         for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
-         if(isSwing) { hl_idx = i; break; }
-      }
-      
-      // 3. Check break with quality
-      if(hl_idx != -1)
-      {
-         double breakDistance = lows[hl_idx] - close[0];
-         if(breakDistance >= minBreak)
+         // Verify it's a Higher Low (HL)
+         if(recent_swing_low > prev_swing_low)
          {
-            breakLevel = lows[hl_idx];
-            return true;
+            double breakDistance = recent_swing_low - close[0];
+            if(breakDistance >= minBreak)
+            {
+               breakLevel = recent_swing_low;
+               return true;
+            }
          }
       }
    }
@@ -760,7 +724,13 @@ bool IsEvidenceReady(int idx, int direction)
 {
    if(!G_Pairs[idx].htf_reversal_zone) return false;
    if(!G_Pairs[idx].exh_divergence && !G_Pairs[idx].exh_rejection && !G_Pairs[idx].exh_failed_cont) return false;
-   if(InpReversal_RequireStructureShift && !G_Pairs[idx].conf_mss) return false;
+   
+   if(InpReversal_RequireStructureShift)
+   {
+      if(!G_Pairs[idx].conf_mss) return false;
+      if(InpEnableDisplacement && !G_Pairs[idx].conf_displacement) return false;
+   }
+   
    if(CalculateReversalScore(idx, direction) < InpReversalMinScore) return false;
    return true;
 }
@@ -900,7 +870,8 @@ int CheckReversalSignal(int idx)
    {
       // Cập nhật qualified swings liên tục
       FindQualifiedSwings(sym, ltf, InpLiquiditySweepLookback,
-                          G_Pairs[idx].qual_swing_high, G_Pairs[idx].qual_swing_low);
+                          G_Pairs[idx].qual_swing_high, G_Pairs[idx].qual_swing_low,
+                          G_Pairs[idx].prev_swing_high, G_Pairs[idx].prev_swing_low);
       
       // Kiểm tra Exhaustion (independent)
       if(!G_Pairs[idx].exh_divergence) { if(DetectDivergence(sym, ltf, dir)) { G_Pairs[idx].exh_divergence = true; G_Pairs[idx].exh_divergence_age = 0; } }
@@ -930,7 +901,7 @@ int CheckReversalSignal(int idx)
       // Kiểm tra MSS (independent)
       if(!G_Pairs[idx].conf_mss) {
          double breakLvl = 0.0;
-         if(DetectStructureShift(sym, ltf, dir, breakLvl)) {
+         if(DetectStructureShift(idx, sym, ltf, dir, breakLvl)) {
             G_Pairs[idx].conf_mss = true;
             G_Pairs[idx].conf_mss_age = 0;
             G_Pairs[idx].mss_break_level = breakLvl;
