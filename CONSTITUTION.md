@@ -6,7 +6,7 @@ Tài liệu này đóng vai trò là "Hiến pháp" cốt lõi của Yoogi-1FA. 
 
 ## ĐIỀU 1: LUẬT BACKUP BẮT BUỘC (GIT PUSH RULE)
 
-1. **Bắt buộc**: Bất kỳ thay đổi, cập nhật, hay sửa lỗi nào đối với source code (dù là nhỏ nhất) đều phải được commit và push lên GitHub ngay lập tức sau khi xác nhận compile thành công và hoạt động tốt.
+1. **Bắt buộc**: Bất kỳ thay đổi, cập nhật, hay sửa lỗi nào đối với source code (dù là nhỏ nhất) đều phải được Agent (hệ thống) TỰ ĐỘNG commit và push lên GitHub ngay lập tức sau khi hoàn thành task. Tuyệt đối không cần đợi người dùng nhắc nhở lệnh "push".
 2. **Quy trình**: 
    - Sử dụng lệnh Git hoặc workflow `/backup` (đã được cấu hình trong `.agents/workflows/backup.md`) để tự động hóa quá trình này.
    - Message commit phải miêu tả ngắn gọn và chính xác thay đổi.
@@ -90,6 +90,17 @@ Setup không diễn ra trong 1 nến mà là 1 quá trình tiến triển. Trạ
 2. **Safety Expiration**: Chỉ sử dụng ngưỡng timeout rất lớn (VD: 150 bars) như một cơ chế "fail-safe" chống kẹt state do bug.
 3. **Invalidation (Hủy setup logic)**: Setup bị reset về 0 (NO_SETUP) nếu "Giả thuyết đảo chiều" không còn hợp lệ. Ví dụ: Đang setup BUY (giá đi xuống sâu), nhưng giá tiếp tục giảm cực mạnh, phá thủng luôn swing low được bảo vệ mà không hề có nến rút chân -> Setup BUY thất bại -> Hủy setup.
 4. **Không tự xẹp điểm (Decay)**: Không trừ điểm setup chỉ vì thời gian trôi qua.
+
+---
+
+## ĐIỀU 7: KIẾN TRÚC AUTO-ONLY VÀ QUẢN LÝ VỐN
+
+1. **Auto-Only Architecture**: EA hiện tại đã được thiết kế lại thành hệ thống 100% AUTO. Mọi logic, tham số, cấu trúc rẽ nhánh liên quan đến Manual Mode (như `InpStrategyMode`, `MaxOrders`, `Manual TP/SL`...) đã bị loại bỏ vĩnh viễn và **tuyệt đối không được khôi phục lại**.
+2. **InpSetBalance**: Bắt buộc phải được giữ nguyên là biến User Input. Hành vi quy định:
+   - `InpSetBalance == 0`: Master/DCA lot được tính theo `ACCOUNT_BALANCE` thực tế.
+   - `InpSetBalance > 0`: Master/DCA lot được tính theo giá trị tham chiếu mà người dùng thiết lập.
+3. **Master Order**: Cố định TP Auto = 60 pips, SL = 0.
+4. **Không giới hạn DCA (Unlimited DCA)**: Khẳng định lại lần 2, DCA tuyệt đối không được gài các chốt chặn `MaxOrders`, giới hạn tổng position, giới hạn theo step, hay dùng thủ thuật ẩn để block DCA. Step cố định = 30 pip, Multiplier = 1.3.
 
 ---
 
