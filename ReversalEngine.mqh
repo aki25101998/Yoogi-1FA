@@ -51,6 +51,10 @@ void ResetReversalSetup(int idx, string reason)
    G_Pairs[idx].qual_swing_low = 0.0;
    G_Pairs[idx].prev_swing_high = 0.0;
    G_Pairs[idx].prev_swing_low = 0.0;
+   G_Pairs[idx].qual_swing_high_idx = -1;
+   G_Pairs[idx].qual_swing_low_idx = -1;
+   G_Pairs[idx].prev_swing_high_idx = -1;
+   G_Pairs[idx].prev_swing_low_idx = -1;
    
    G_Pairs[idx].reversal_score = 0.0;
    G_Pairs[idx].score_location = 0.0;
@@ -79,14 +83,16 @@ double CalculateExtension(string sym, ENUM_TIMEFRAMES tf)
 
 // --- A2. QUALIFIED SWING DETECTION ---
 // Tìm swing points đủ chất lượng (lọc bỏ swing quá nhỏ / nhiễu)
-void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
-                          double &qSwingHigh, double &qSwingLow,
-                          double &prevSwingHigh, double &prevSwingLow)
+void FindQualifiedSwings(int idx, string sym, ENUM_TIMEFRAMES tf, int lookback)
 {
-   qSwingHigh = 0.0;
-   qSwingLow = 0.0;
-   prevSwingHigh = 0.0;
-   prevSwingLow = 0.0;
+   G_Pairs[idx].qual_swing_high = 0.0;
+   G_Pairs[idx].qual_swing_low = 0.0;
+   G_Pairs[idx].prev_swing_high = 0.0;
+   G_Pairs[idx].prev_swing_low = 0.0;
+   G_Pairs[idx].qual_swing_high_idx = -1;
+   G_Pairs[idx].qual_swing_low_idx = -1;
+   G_Pairs[idx].prev_swing_high_idx = -1;
+   G_Pairs[idx].prev_swing_low_idx = -1;
    
    int left = InpReversal_SwingLeft;
    int right = InpReversal_SwingRight;
@@ -109,16 +115,18 @@ void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
       
       if(isSwing)
       {
-         if(qSwingHigh == 0.0)
+         if(G_Pairs[idx].qual_swing_high == 0.0)
          {
-            qSwingHigh = highs[i];
+            G_Pairs[idx].qual_swing_high = highs[i];
+            G_Pairs[idx].qual_swing_high_idx = i;
          }
-         else if(prevSwingHigh == 0.0)
+         else if(G_Pairs[idx].prev_swing_high == 0.0)
          {
             // Noise filter: swing thứ 2 phải cách swing 1 một khoảng >= minDistance
-            if(MathAbs(qSwingHigh - highs[i]) >= minDistance)
+            if(MathAbs(G_Pairs[idx].qual_swing_high - highs[i]) >= minDistance)
             {
-               prevSwingHigh = highs[i];
+               G_Pairs[idx].prev_swing_high = highs[i];
+               G_Pairs[idx].prev_swing_high_idx = i;
                break; // Đã tìm đủ 2 swing high
             }
          }
@@ -135,16 +143,18 @@ void FindQualifiedSwings(string sym, ENUM_TIMEFRAMES tf, int lookback,
       
       if(isSwing)
       {
-         if(qSwingLow == 0.0)
+         if(G_Pairs[idx].qual_swing_low == 0.0)
          {
-            qSwingLow = lows[i];
+            G_Pairs[idx].qual_swing_low = lows[i];
+            G_Pairs[idx].qual_swing_low_idx = i;
          }
-         else if(prevSwingLow == 0.0)
+         else if(G_Pairs[idx].prev_swing_low == 0.0)
          {
             // Noise filter: swing thứ 2 phải cách swing 1 một khoảng >= minDistance
-            if(MathAbs(qSwingLow - lows[i]) >= minDistance)
+            if(MathAbs(G_Pairs[idx].qual_swing_low - lows[i]) >= minDistance)
             {
-               prevSwingLow = lows[i];
+               G_Pairs[idx].prev_swing_low = lows[i];
+               G_Pairs[idx].prev_swing_low_idx = i;
                break; // Đã tìm đủ 2 swing low
             }
          }
@@ -487,67 +497,227 @@ bool DetectDisplacement(string sym, ENUM_TIMEFRAMES tf, int direction)
    return false;
 }
 
+bool ValidateBuyStructure(int idx, string sym, ENUM_TIMEFRAMES tf, double &breakLevel, string &rejectReason)
+{
+   int lookback = InpReversal_LookbackBars;
+   double highs[], lows[];
+   if(!ReadHighLow_Generic(sym, tf, 1, lookback, highs, lows)) { rejectReason = "NO_DATA"; return false; }
+   
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) { rejectReason = "NO_ATR"; return false; }
+   
+   double minBreak = InpMSSMinBreakATR * atr;
+   double minDistance = InpMinSwingDistanceATR * atr;
+   
+   double close[];
+   if(CopyClose(sym, tf, 1, 1, close) < 1) { rejectReason = "NO_DATA"; return false; }
+   
+   int left = InpReversal_SwingLeft;
+   int right = InpReversal_SwingRight;
+   
+   // A. Identify the meaningful protected low (LL)
+   double protectedLow = 0.0;
+   int protectedLowIdx = -1;
+   
+   // Find the first valid swing low from right to left (newest to oldest)
+   for(int i = right; i < lookback - left; i++)
+   {
+      bool isSwing = true;
+      for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
+      if(!isSwing) continue;
+      for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
+      
+      if(isSwing)
+      {
+         protectedLow = lows[i];
+         protectedLowIdx = i;
+         break;
+      }
+   }
+   
+   if(protectedLowIdx == -1) { rejectReason = "MSS_NO_PROTECTED_LOW"; return false; }
+   
+   // B. Find the candidate Lower High (LH) that occurred AFTER the protected low
+   // Meaning LH index MUST BE < protectedLowIdx (since smaller index is newer bar)
+   double candidateLH = 0.0;
+   int candidateLHIdx = -1;
+   
+   for(int i = right; i < protectedLowIdx; i++)
+   {
+      bool isSwing = true;
+      for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
+      if(!isSwing) continue;
+      for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
+      
+      if(isSwing)
+      {
+         candidateLH = highs[i];
+         candidateLHIdx = i;
+         break;
+      }
+   }
+   
+   if(candidateLHIdx == -1) { rejectReason = "MSS_NO_LH"; return false; }
+   if(candidateLHIdx >= protectedLowIdx) { rejectReason = "MSS_INVALID_SEQUENCE"; return false; } // LH occurred before/on Low
+   
+   // Structural distance check between Protected Low and LH (micro-structure filter)
+   if(MathAbs(candidateLH - protectedLow) < minDistance) { rejectReason = "MSS_MICRO_STRUCTURE"; return false; }
+   
+   // Check if it's actually a LOWER high compared to a previous swing high
+   double prevHigh = 0.0;
+   int prevHighIdx = -1;
+   
+   for(int i = candidateLHIdx + 1; i < lookback - left; i++)
+   {
+      bool isSwing = true;
+      for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
+      if(!isSwing) continue;
+      for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
+      
+      if(isSwing)
+      {
+         // Ensure it's structurally separate from the candidate LH
+         if(MathAbs(highs[i] - candidateLH) >= minDistance)
+         {
+            prevHigh = highs[i];
+            prevHighIdx = i;
+            break;
+         }
+      }
+   }
+   
+   if(prevHighIdx != -1 && candidateLH >= prevHigh) { rejectReason = "MSS_INVALID_SEQUENCE"; return false; }
+   
+   // Check Break
+   if(close[0] <= candidateLH) { rejectReason = "MSS_BREAK_NOT_CLOSED"; return false; }
+   
+   double breakDistance = close[0] - candidateLH;
+   if(breakDistance < minBreak) { rejectReason = "MSS_BREAK_TOO_WEAK"; return false; }
+   
+   breakLevel = candidateLH;
+   rejectReason = "MSS_VALID";
+   return true;
+}
+
+bool ValidateSellStructure(int idx, string sym, ENUM_TIMEFRAMES tf, double &breakLevel, string &rejectReason)
+{
+   int lookback = InpReversal_LookbackBars;
+   double highs[], lows[];
+   if(!ReadHighLow_Generic(sym, tf, 1, lookback, highs, lows)) { rejectReason = "NO_DATA"; return false; }
+   
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) { rejectReason = "NO_ATR"; return false; }
+   
+   double minBreak = InpMSSMinBreakATR * atr;
+   double minDistance = InpMinSwingDistanceATR * atr;
+   
+   double close[];
+   if(CopyClose(sym, tf, 1, 1, close) < 1) { rejectReason = "NO_DATA"; return false; }
+   
+   int left = InpReversal_SwingLeft;
+   int right = InpReversal_SwingRight;
+   
+   // A. Identify the meaningful protected high (HH)
+   double protectedHigh = 0.0;
+   int protectedHighIdx = -1;
+   
+   for(int i = right; i < lookback - left; i++)
+   {
+      bool isSwing = true;
+      for(int j = 1; j <= left; j++) if(highs[i] <= highs[i+j]) { isSwing = false; break; }
+      if(!isSwing) continue;
+      for(int j = 1; j <= right; j++) if(highs[i] < highs[i-j]) { isSwing = false; break; }
+      
+      if(isSwing)
+      {
+         protectedHigh = highs[i];
+         protectedHighIdx = i;
+         break;
+      }
+   }
+   
+   if(protectedHighIdx == -1) { rejectReason = "MSS_NO_PROTECTED_HIGH"; return false; }
+   
+   // B. Find the candidate Higher Low (HL) that occurred AFTER the protected high
+   // Meaning HL index MUST BE < protectedHighIdx (since smaller index is newer bar)
+   double candidateHL = 0.0;
+   int candidateHLIdx = -1;
+   
+   for(int i = right; i < protectedHighIdx; i++)
+   {
+      bool isSwing = true;
+      for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
+      if(!isSwing) continue;
+      for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
+      
+      if(isSwing)
+      {
+         candidateHL = lows[i];
+         candidateHLIdx = i;
+         break;
+      }
+   }
+   
+   if(candidateHLIdx == -1) { rejectReason = "MSS_NO_HL"; return false; }
+   if(candidateHLIdx >= protectedHighIdx) { rejectReason = "MSS_INVALID_SEQUENCE"; return false; } // HL occurred before/on High
+   
+   // Structural distance check between Protected High and HL (micro-structure filter)
+   if(MathAbs(protectedHigh - candidateHL) < minDistance) { rejectReason = "MSS_MICRO_STRUCTURE"; return false; }
+   
+   // Check if it's actually a HIGHER low compared to a previous swing low
+   double prevLow = 0.0;
+   int prevLowIdx = -1;
+   
+   for(int i = candidateHLIdx + 1; i < lookback - left; i++)
+   {
+      bool isSwing = true;
+      for(int j = 1; j <= left; j++) if(lows[i] >= lows[i+j]) { isSwing = false; break; }
+      if(!isSwing) continue;
+      for(int j = 1; j <= right; j++) if(lows[i] > lows[i-j]) { isSwing = false; break; }
+      
+      if(isSwing)
+      {
+         // Ensure it's structurally separate from the candidate HL
+         if(MathAbs(lows[i] - candidateHL) >= minDistance)
+         {
+            prevLow = lows[i];
+            prevLowIdx = i;
+            break;
+         }
+      }
+   }
+   
+   if(prevLowIdx != -1 && candidateHL <= prevLow) { rejectReason = "MSS_INVALID_SEQUENCE"; return false; }
+   
+   // Check Break
+   if(close[0] >= candidateHL) { rejectReason = "MSS_BREAK_NOT_CLOSED"; return false; }
+   
+   double breakDistance = candidateHL - close[0];
+   if(breakDistance < minBreak) { rejectReason = "MSS_BREAK_TOO_WEAK"; return false; }
+   
+   breakLevel = candidateHL;
+   rejectReason = "MSS_VALID";
+   return true;
+}
+
 // --- C3. STRUCTURE SHIFT (Quality MSS) ---
 // Cải thiện: dùng nearest protected structure thay vì global extremes
 bool DetectStructureShift(int idx, string sym, ENUM_TIMEFRAMES tf, int direction,
-                           double &breakLevel)
+                           double &breakLevel, string &rejectReason)
 {
-   if(!InpReversal_RequireStructureShift) { breakLevel = 0.0; return true; }
+   if(!InpReversal_RequireStructureShift) { breakLevel = 0.0; rejectReason = "MSS_NOT_REQUIRED"; return true; }
    
-   double close[];
-   if(CopyClose(sym, tf, 1, 1, close) < 1) return false;
-   
-   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
-   if(atr <= 0) return false;
-   
-   double minBreak = InpMSSMinBreakATR * atr;
-   
-   if(direction == 1) // Bullish MSS: Break above recent Lower High (LH)
+   if(direction == 1) // Bullish MSS
    {
-      double recent_swing_high = G_Pairs[idx].qual_swing_high;
-      double prev_swing_high = G_Pairs[idx].prev_swing_high;
-      double recent_swing_low = G_Pairs[idx].qual_swing_low;
-      
-      // Phải có đủ dữ kiện: swing high gần nhất, swing high trước đó (để xác nhận LH),
-      // và một swing low gần nhất (chứng tỏ đã có pullback tạo LH)
-      if(recent_swing_high > 0.0 && prev_swing_high > 0.0 && recent_swing_low > 0.0)
-      {
-         // Verify it's a true Lower High (LH) in a bearish structure
-         if(recent_swing_high < prev_swing_high)
-         {
-            double breakDistance = close[0] - recent_swing_high;
-            if(breakDistance >= minBreak)
-            {
-               breakLevel = recent_swing_high;
-               return true;
-            }
-         }
-      }
+      return ValidateBuyStructure(idx, sym, tf, breakLevel, rejectReason);
    }
-   else if(direction == -1) // Bearish MSS: Break below recent Higher Low (HL)
+   else if(direction == -1) // Bearish MSS
    {
-      double recent_swing_low = G_Pairs[idx].qual_swing_low;
-      double prev_swing_low = G_Pairs[idx].prev_swing_low;
-      double recent_swing_high = G_Pairs[idx].qual_swing_high;
-      
-      // Phải có đủ dữ kiện: swing low gần nhất, swing low trước đó (để xác nhận HL),
-      // và một swing high gần nhất (chứng tỏ đã có pullback tạo HL)
-      if(recent_swing_low > 0.0 && prev_swing_low > 0.0 && recent_swing_high > 0.0)
-      {
-         // Verify it's a true Higher Low (HL) in a bullish structure
-         if(recent_swing_low > prev_swing_low)
-         {
-            double breakDistance = recent_swing_low - close[0];
-            if(breakDistance >= minBreak)
-            {
-               breakLevel = recent_swing_low;
-               return true;
-            }
-         }
-      }
+      return ValidateSellStructure(idx, sym, tf, breakLevel, rejectReason);
    }
    
    breakLevel = 0.0;
+   rejectReason = "INVALID_DIRECTION";
    return false;
 }
 
@@ -902,9 +1072,7 @@ int CheckReversalSignal(int idx)
    if(G_Pairs[idx].state_machine >= STATE_HTF_LOCATION && G_Pairs[idx].state_machine < STATE_RETEST)
    {
       // Cập nhật qualified swings liên tục
-      FindQualifiedSwings(sym, ltf, InpLiquiditySweepLookback,
-                          G_Pairs[idx].qual_swing_high, G_Pairs[idx].qual_swing_low,
-                          G_Pairs[idx].prev_swing_high, G_Pairs[idx].prev_swing_low);
+      FindQualifiedSwings(idx, sym, ltf, InpLiquiditySweepLookback);
       
       // Kiểm tra Exhaustion (independent)
       if(!G_Pairs[idx].exh_divergence) { if(DetectDivergence(sym, ltf, dir)) { G_Pairs[idx].exh_divergence = true; G_Pairs[idx].exh_divergence_age = 0; } }
@@ -934,11 +1102,16 @@ int CheckReversalSignal(int idx)
       // Kiểm tra MSS (independent)
       if(!G_Pairs[idx].conf_mss) {
          double breakLvl = 0.0;
-         if(DetectStructureShift(idx, sym, ltf, dir, breakLvl)) {
+         string mssRejectReason = "";
+         if(DetectStructureShift(idx, sym, ltf, dir, breakLvl, mssRejectReason)) {
             G_Pairs[idx].conf_mss = true;
             G_Pairs[idx].conf_mss_age = 0;
             G_Pairs[idx].mss_break_level = breakLvl;
             LogReversalDecision(idx, dir, "MSS_CONFIRMED", "Structure shifted (quality)", 0);
+         } else if (InpReversalDebug && mssRejectReason != "" && mssRejectReason != "MSS_BREAK_NOT_CLOSED") {
+            // Log rejection reasons periodically or minimally to avoid spam (maybe only when something significant changes)
+            // But we will log them for visibility
+            // LogReversalDecision(idx, dir, "MSS_REJECTED", mssRejectReason, 0);
          }
       }
       

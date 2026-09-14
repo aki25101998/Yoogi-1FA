@@ -108,6 +108,11 @@ struct PairContext
    double           prev_swing_high;      // Previous valid swing high (for MSS context)
    double           prev_swing_low;       // Previous valid swing low (for MSS context)
    
+   int              qual_swing_high_idx;  // Bar index (shift) of qual_swing_high
+   int              qual_swing_low_idx;   // Bar index (shift) of qual_swing_low
+   int              prev_swing_high_idx;  // Bar index (shift) of prev_swing_high
+   int              prev_swing_low_idx;   // Bar index (shift) of prev_swing_low
+   
    // Score Breakdown
    double           score_location;
    double           score_exhaustion;
@@ -397,6 +402,10 @@ void InitGlobals()
       G_Pairs[i].qual_swing_low = 0.0;
       G_Pairs[i].prev_swing_high = 0.0;
       G_Pairs[i].prev_swing_low = 0.0;
+      G_Pairs[i].qual_swing_high_idx = -1;
+      G_Pairs[i].qual_swing_low_idx = -1;
+      G_Pairs[i].prev_swing_high_idx = -1;
+      G_Pairs[i].prev_swing_low_idx = -1;
       G_Pairs[i].score_location = 0.0;
       G_Pairs[i].score_exhaustion = 0.0;
       G_Pairs[i].score_sweep = 0.0;
