@@ -143,7 +143,7 @@ void CloseAllInChain_Multi(int idx)
 // ==================================================================
 // MỞ LỆNH MASTER (TẠO CHUỖI MỚI)
 // ==================================================================
-void OpenMasterTrade_Multi(int idx, int signal)
+void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 {
    string sym = G_Pairs[idx].symbol;
 
@@ -156,8 +156,10 @@ void OpenMasterTrade_Multi(int idx, int signal)
    ulong new_chain_id = EA_MAGIC_NUMBER * 1000 + idx;
    trade.SetExpertMagicNumber(new_chain_id);
 
-   // --- CẬP NHẬT COMMENT TẠI ĐÂY ---
-   string comment = " Yoogi One For All ";
+   // --- COMMENT VỚI ENTRY MODE ---
+   string comment = "Yoogi 1FA";
+   if(entry_mode != "") comment += " [" + entry_mode + "]";
+   
    bool   res     = false;
    double sl=0.0, tp=0.0;
 
@@ -173,7 +175,7 @@ void OpenMasterTrade_Multi(int idx, int signal)
    // Gọi hàm tính Lot từ Globals (Đã gán cứng Risk%)
    double initial_lot = CalculateAutoLot(idx, lot_calculation_bal);
 
-   // --- [QUAN TRỌNG] NẾU LOT = 0 (DO RISK = 0%), DỪNG NGAY ---
+   // --- [QUAN TRỌNG] NẾU LOT = 0 (DO RISK = 0%), DỮNG NGAY ---
    if(initial_lot <= 0.0) return;
 
    // --- XAC DINH TP VA SL THEO CHE DO ---
@@ -215,8 +217,8 @@ void OpenMasterTrade_Multi(int idx, int signal)
 
       SaveChainState_Multi(idx);
 
-      PrintFormat("[%s] >>> OPEN MASTER: %.2f lots (Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
-                  sym, initial_lot, current_bal, lot_calculation_bal, new_chain_id);
+      PrintFormat("[%s] >>> OPEN MASTER [%s]: %.2f lots (Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
+                  sym, entry_mode, initial_lot, current_bal, lot_calculation_bal, new_chain_id);
    }
 }
 
@@ -479,106 +481,70 @@ void ManagePairs()
       {
          if(G_Pairs[i].active_chain_id != 0) ClearChainState_Multi(i);
 
-         // --- TIM TIN HIEU MOI (MTF DUAL SIGNAL HOAC REVERSAL ENGINE) ---
+         // === DUAL ENTRY ENGINE — SIGNAL MANAGER ===
          if(InpAutoSignalTrading && allow_new_entry && G_Pairs[i].enabled)
          {
-            if(InpUseReversalEngine)
+            int ct_signal = 0; // Counter-Trend signal
+            int tf_signal = 0; // Trend-Following signal
+            
+            // --- Engine 1: Counter-Trend ---
+            if(InpEnableCounterTrend && InpUseReversalEngine)
             {
-               // =============================================
-               // REVERSAL ENGINE V2 (4-Layer Architecture)
-               // DXY đã được kiểm tra bên trong engine
-               // =============================================
-               int revSignal = CheckReversalSignal(i);
-               
-               if(revSignal != 0)
+               ct_signal = CheckCounterTrendSignal(i);
+            }
+            
+            // --- Engine 2: Trend-Following ---
+            if(InpEnableTrendFollowing)
+            {
+               tf_signal = CheckTrendFollowingSignal(i);
+            }
+            
+            // --- SIGNAL MANAGER: Conflict Resolution ---
+            int final_signal = 0;
+            string entry_mode = "";
+            
+            if(ct_signal != 0 && tf_signal != 0)
+            {
+               // Both engines have signals
+               if(ct_signal == tf_signal)
                {
-                  // DXY đã pass trong ValidateHardRequirements()
-                  int signal = revSignal;
-                  
-                  if(signal == 1  && !InpAllowBuy) continue;
-                  if(signal == -1 && !InpAllowSell) continue;
-
-                  PrintFormat("[%s] >>> REVERSAL ENGINE V2 CONFIRMED: Opening %s trade...",
-                              sym, (signal == 1 ? "BUY" : "SELL"));
-                  OpenMasterTrade_Multi(i, signal);
+                  // Same direction = strong confirmation
+                  final_signal = ct_signal;
+                  entry_mode = "CT+TF";
+                  PrintFormat("[%s] >>> DUAL CONFIRMATION: CT=%s + TF=%s",
+                              sym, (ct_signal == 1 ? "BUY" : "SELL"),
+                              (tf_signal == 1 ? "BUY" : "SELL"));
+               }
+               else
+               {
+                  // Opposite directions = CONFLICT → DO NOT ENTER
+                  final_signal = 0;
+                  PrintFormat("[%s] >>> ENTRY CONFLICT: CT=%s vs TF=%s → NO ENTRY",
+                              sym, (ct_signal == 1 ? "BUY" : "SELL"),
+                              (tf_signal == 1 ? "BUY" : "SELL"));
                }
             }
-            else
+            else if(ct_signal != 0)
             {
-               // =============================================
-               // BUOC 1: CHECK HTF SIGNAL (Xu huong) - OLD LOGIC
-               // =============================================
-               int htfSignal = CheckEntrySignal_HTF(i);
-               if(htfSignal != 0)
+               final_signal = ct_signal;
+               entry_mode = "CT";
+            }
+            else if(tf_signal != 0)
+            {
+               final_signal = tf_signal;
+               entry_mode = "TF";
+            }
+            
+            // --- OPEN MASTER ORDER ---
+            if(final_signal != 0)
+            {
+               if(final_signal == 1  && !InpAllowBuy) { /* skip */ }
+               else if(final_signal == -1 && !InpAllowSell) { /* skip */ }
+               else
                {
-                  // Neu HTF phat tin hieu moi
-                  if(G_Pairs[i].htf_trap_signal != 0 && G_Pairs[i].htf_trap_signal != htfSignal)
-                  {
-                     // HTF dao chieu -> Reset bay cu
-                     PrintFormat("[%s] HTF dao chieu %s -> %s. Reset bay.",
-                                 sym,
-                                 (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"),
-                                 (htfSignal == 1 ? "BUY" : "SELL"));
-                  }
-                  G_Pairs[i].htf_trap_signal = htfSignal;
-                  PrintFormat("[%s] >>> HTF Signal: %s (Bay dat thanh cong)",
-                              sym, (htfSignal == 1 ? "BUY" : "SELL"));
-               }
-   
-               // =============================================
-               // BUOC 2: CHECK LTF SIGNAL (Entry) - Chi khi HTF da co bay
-               // =============================================
-               if(G_Pairs[i].htf_trap_signal != 0)
-               {
-                  int ltfSignal = CheckEntrySignal(i);
-   
-                  if(ltfSignal != 0 && ltfSignal == G_Pairs[i].htf_trap_signal)
-                  {
-                     // LTF xac nhan cung huong voi HTF!
-                     int confirmed_signal = ltfSignal;
-   
-                     PrintFormat("[%s] >>> LTF xac nhan %s (Cung huong HTF). Tim DXY...",
-                                 sym, (confirmed_signal == 1 ? "BUY" : "SELL"));
-   
-                     // =============================================
-                     // BUOC 3: DXY CONVERGENCE (Dual TF)
-                     // =============================================
-                     int signal = 0;
-   
-                     if(G_Pairs[i].isUSDPair && g_dxy_available && InpUseDXYReference)
-                     {
-                        // === DXY TRAP (CHI CAP USD) ===
-                        G_Pairs[i].trapSignal = confirmed_signal;
-   
-                        // DXY da duoc pre-scan, chi can check convergence
-                        signal = CheckDXYConvergence_Dual(i);
-                     }
-                     else
-                     {
-                        // === KHONG USD (EURGBP) -> Binh thuong ===
-                        signal = confirmed_signal;
-                     }
-   
-                     if(signal != 0)
-                     {
-                        if(signal == 1  && !InpAllowBuy) continue;
-                        if(signal == -1 && !InpAllowSell) continue;
-   
-                        PrintFormat("[%s] >>> MTF CONFIRMED: HTF=%s + LTF=%s. Opening trade...",
-                                    sym,
-                                    (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"),
-                                    (ltfSignal == 1 ? "BUY" : "SELL"));
-                        OpenMasterTrade_Multi(i, signal);
-                     }
-                  }
-                  else if(ltfSignal != 0 && ltfSignal != G_Pairs[i].htf_trap_signal)
-                  {
-                     // LTF phat tin hieu NGUOC huong HTF -> Bo qua
-                     PrintFormat("[%s] LTF Signal %s nguoc HTF %s -> Bo qua.",
-                                 sym,
-                                 (ltfSignal == 1 ? "BUY" : "SELL"),
-                                 (G_Pairs[i].htf_trap_signal == 1 ? "BUY" : "SELL"));
-                  }
+                  PrintFormat("[%s] >>> ENTRY ENGINE [%s] CONFIRMED: Opening %s trade...",
+                              sym, entry_mode, (final_signal == 1 ? "BUY" : "SELL"));
+                  OpenMasterTrade_Multi(i, final_signal, entry_mode);
                }
             }
          }

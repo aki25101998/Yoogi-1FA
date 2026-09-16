@@ -971,7 +971,7 @@ bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
    }
    
    // 6. Score >= MinScore
-   if(G_Pairs[idx].reversal_score < InpReversalMinScore)
+   if(G_Pairs[idx].reversal_score < ENTRY_REQUIRED_SCORE)
    {
       rejectReason = "SCORE_BELOW_MIN";
       return false;
@@ -1055,7 +1055,7 @@ bool IsEvidenceReady(int idx, int direction)
    
    if(InpReversal_RequireStructureShift && !G_Pairs[idx].conf_mss) return false;
    
-   if(CalculateReversalScore(idx, direction) < InpReversalMinScore) return false;
+   if(CalculateReversalScore(idx, direction) < ENTRY_REQUIRED_SCORE) return false;
    return true;
 }
 
@@ -1089,7 +1089,7 @@ void LogReversalDecision(int idx, int direction, string decision, string reason,
       else dxy_str = "WAITING";
    }
    
-   PrintFormat("[REVERSAL] %s", sym);
+   PrintFormat("[COUNTER-TREND] %s", sym);
    PrintFormat("  Direction=%s | State=%s | Regime=%s", dir_str, state_str, regime_str);
    PrintFormat("  Location: Ext=%.2f | Score=%.0f", G_Pairs[idx].htf_ext, G_Pairs[idx].score_location);
    PrintFormat("  Exhaustion: Div=%d | Rej=%d | FailCont=%d | Score=%.0f",
@@ -1110,7 +1110,7 @@ void LogReversalDecision(int idx, int direction, string decision, string reason,
 // CORE REVERSAL SIGNAL LOGIC (V2 STATE MACHINE)
 // ==================================================================
 // Returns: 1 = BUY Trigger, -1 = SELL Trigger, 0 = Wait/None
-int CheckReversalSignal(int idx)
+int CheckCounterTrendSignal(int idx)
 {
    if(!InpUseReversalEngine) return 0;
    

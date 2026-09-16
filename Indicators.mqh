@@ -231,6 +231,32 @@ bool IsNewBar_HTF(int idx)
    return false;
 }
 
+// --- Trend-Following: M15 New Bar Detection ---
+bool IsNewBar_M15_TF(int idx)
+{
+   datetime tm[];
+   if(CopyTime(G_Pairs[idx].symbol, PERIOD_M15, 0, 1, tm) < 1) return false;
+   if(tm[0] != G_TF[idx].m15_last_bar_time)
+   {
+      G_TF[idx].m15_last_bar_time = tm[0];
+      return true;
+   }
+   return false;
+}
+
+// --- Trend-Following: M5 New Bar Detection (separate tracking) ---
+bool IsNewBar_M5_TF(int idx)
+{
+   datetime tm[];
+   if(CopyTime(G_Pairs[idx].symbol, PERIOD_M5, 0, 1, tm) < 1) return false;
+   if(tm[0] != G_TF[idx].m5_last_bar_time_tf)
+   {
+      G_TF[idx].m5_last_bar_time_tf = tm[0];
+      return true;
+   }
+   return false;
+}
+
 // ==================================================================
 // TÍN HIỆU LTF (LOGIC GỐC - ENTRY)
 // ==================================================================

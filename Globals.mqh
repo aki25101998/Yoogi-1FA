@@ -65,7 +65,7 @@ const double InpRetestToleranceATR = 0.5;
 const int    InpRetestMaxBars = 10;
 const double InpMinSwingDistanceATR = 0.5;
 const int    InpSafetyMaxSetupBars = 150;
-const double InpReversal_HighScore = 80.0;
+const double ENTRY_REQUIRED_SCORE = 100.0; // Hard requirement - Score phải đạt 100/100 để entry
 const int    InpExhaustionMaxAgeBars = 10;
 const int    InpSweepMaxAgeBars = 10;
 const int    InpDisplacementMaxAgeBars = 5;
@@ -214,6 +214,84 @@ struct PairContext
 };
 
 PairContext G_Pairs[TOTAL_PAIRS];
+
+// ==================================================================
+// TREND-FOLLOWING ENGINE CONTEXT
+// ==================================================================
+
+// --- Trend-Following Engine States ---
+#define TF_STATE_NONE          0
+#define TF_STATE_H1_TREND      1
+#define TF_STATE_M15_PULLBACK  2
+#define TF_STATE_M5_TRIGGER    3
+#define TF_STATE_ENTRY_READY   4
+
+// --- Trend-Following Internal Constants ---
+const int    TF_MAX_EVENT_BARS         = 5;     // Sweep→Displacement→MSS must be within 5 M5 bars
+const double TF_MAX_ENTRY_DISTANCE_ATR = 2.0;   // Don't chase price beyond 2x M5 ATR
+const int    TF_MAX_SETUP_BARS         = 100;   // Setup timeout in M5 bars
+const int    TF_PULLBACK_MAX_BARS      = 30;    // M15 pullback max age
+const double TF_PULLBACK_MIN_DEPTH_ATR = 0.3;   // Min pullback depth (ATR)
+const double TF_PULLBACK_MAX_DEPTH_ATR = 3.0;   // Max pullback depth before reversal
+const int    TF_SLOPE_LOOKBACK         = 5;     // Bars to measure EMA slope
+const double TF_SIDEWAY_ATR_RATIO      = 0.5;   // Below this = sideway
+const bool   TF_REQUIRE_RETEST         = false; // Module ready, default OFF
+
+struct TrendFollowingContext
+{
+   // H1 Trend Regime
+   int    h1_trend_direction;     // 1=BUY, -1=SELL, 0=NONE
+   double h1_trend_quality;       // 0-20
+   bool   h1_ema_aligned;         // EMA20 > EMA50 (BUY) or EMA20 < EMA50 (SELL)
+   bool   h1_slope_positive;      // EMA50 slope > 0 (BUY) or < 0 (SELL)
+   bool   h1_price_above_ema;     // Price above EMA50 (BUY) or below (SELL)
+   bool   h1_structure_valid;     // HH/HL or LL/LH
+   bool   h1_not_sideway;         // Not in sideway range
+
+   // M15 Pullback
+   bool   m15_pullback_valid;
+   double m15_pullback_quality;   // 0-20
+   int    m15_pullback_bar_count;
+   double m15_pullback_depth;     // In ATR units
+   double m15_ema_distance;       // Distance to EMA in ATR units
+
+   // M5 Entry Evidence
+   bool   m5_sweep;
+   bool   m5_displacement;
+   bool   m5_mss;
+   bool   m5_momentum_cci;
+   bool   m5_momentum_rf;
+   int    m5_sweep_age;
+   int    m5_displacement_age;
+   int    m5_mss_age;
+   double m5_mss_break_level;
+   double m5_sweep_level;
+
+   // Score Breakdown
+   double score_h1_trend;         // max 20
+   double score_m15_pullback;     // max 20
+   double score_sweep;            // max 20
+   double score_displacement;     // max 15
+   double score_mss;              // max 15
+   double score_momentum;         // max 10
+   double total_score;
+
+   // State Machine
+   int    setup_state;            // TF_STATE_*
+   int    setup_bar_count;        // Total bars since setup started
+   string status;                 // Human-readable status
+
+   // Invalidation
+   double h1_protected_structure; // Level that invalidates H1 trend
+   double m15_protected_low;      // For BUY pullback invalidation
+   double m15_protected_high;     // For SELL pullback invalidation
+
+   // New bar tracking
+   datetime m15_last_bar_time;
+   datetime m5_last_bar_time_tf;  // Separate from Counter-Trend's M5 tracking
+};
+
+TrendFollowingContext G_TF[TOTAL_PAIRS];
 CTrade  trade;
 
 // --- DXY GLOBALS (DUAL TF) ---
@@ -443,6 +521,45 @@ void InitGlobals()
       G_Pairs[i].locked_balance = 0.0;
       G_Pairs[i].virtual_step = 0;
       G_Pairs[i].active_chain_id = 0;
+
+      // Reset Trend-Following Context
+      G_TF[i].h1_trend_direction = 0;
+      G_TF[i].h1_trend_quality = 0.0;
+      G_TF[i].h1_ema_aligned = false;
+      G_TF[i].h1_slope_positive = false;
+      G_TF[i].h1_price_above_ema = false;
+      G_TF[i].h1_structure_valid = false;
+      G_TF[i].h1_not_sideway = false;
+      G_TF[i].m15_pullback_valid = false;
+      G_TF[i].m15_pullback_quality = 0.0;
+      G_TF[i].m15_pullback_bar_count = 0;
+      G_TF[i].m15_pullback_depth = 0.0;
+      G_TF[i].m15_ema_distance = 0.0;
+      G_TF[i].m5_sweep = false;
+      G_TF[i].m5_displacement = false;
+      G_TF[i].m5_mss = false;
+      G_TF[i].m5_momentum_cci = false;
+      G_TF[i].m5_momentum_rf = false;
+      G_TF[i].m5_sweep_age = 0;
+      G_TF[i].m5_displacement_age = 0;
+      G_TF[i].m5_mss_age = 0;
+      G_TF[i].m5_mss_break_level = 0.0;
+      G_TF[i].m5_sweep_level = 0.0;
+      G_TF[i].score_h1_trend = 0.0;
+      G_TF[i].score_m15_pullback = 0.0;
+      G_TF[i].score_sweep = 0.0;
+      G_TF[i].score_displacement = 0.0;
+      G_TF[i].score_mss = 0.0;
+      G_TF[i].score_momentum = 0.0;
+      G_TF[i].total_score = 0.0;
+      G_TF[i].setup_state = TF_STATE_NONE;
+      G_TF[i].setup_bar_count = 0;
+      G_TF[i].status = "NO SETUP";
+      G_TF[i].h1_protected_structure = 0.0;
+      G_TF[i].m15_protected_low = 0.0;
+      G_TF[i].m15_protected_high = 0.0;
+      G_TF[i].m15_last_bar_time = 0;
+      G_TF[i].m5_last_bar_time_tf = 0;
 
       // --- PHAT HIEN USD & MAP DXY ---
       G_Pairs[i].trapSignal = 0;
