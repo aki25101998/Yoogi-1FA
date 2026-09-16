@@ -33,6 +33,9 @@ void ResetTFSetup(int idx, string reason)
    G_TF[idx].m15_pullback_bar_count = 0;
    G_TF[idx].m15_pullback_depth = 0.0;
    G_TF[idx].m15_ema_distance = 0.0;
+   G_TF[idx].m15_pullback_start_time = 0;
+   G_TF[idx].m15_impulse_high = 0.0;
+   G_TF[idx].m15_impulse_low = 0.0;
    
    ResetTFM5Evidence(idx);
    
@@ -179,7 +182,7 @@ int EvaluateH1TrendRegime(int idx)
    
    int direction = 0;
    
-   if(buy_quality >= 10.0 && buy_quality > sell_quality && not_sideway)
+   if(buy_quality == 20.0 && not_sideway)
    {
       direction = 1;
       G_TF[idx].h1_ema_aligned = buy_ema;
@@ -187,13 +190,13 @@ int EvaluateH1TrendRegime(int idx)
       G_TF[idx].h1_price_above_ema = buy_price;
       G_TF[idx].h1_structure_valid = buy_structure;
       G_TF[idx].h1_not_sideway = not_sideway;
-      G_TF[idx].h1_trend_quality = MathMin(buy_quality, 20.0);
-      G_TF[idx].score_h1_trend = G_TF[idx].h1_trend_quality;
+      G_TF[idx].h1_trend_quality = 20.0;
+      G_TF[idx].score_h1_trend = 20.0;
       
       // Set protected structure: if price breaks below recent swing low, trend invalid
       if(slCount >= 1) G_TF[idx].h1_protected_structure = swL[0];
    }
-   else if(sell_quality >= 10.0 && sell_quality > buy_quality && not_sideway)
+   else if(sell_quality == 20.0 && not_sideway)
    {
       direction = -1;
       G_TF[idx].h1_ema_aligned = sell_ema;
@@ -201,8 +204,8 @@ int EvaluateH1TrendRegime(int idx)
       G_TF[idx].h1_price_above_ema = sell_price;
       G_TF[idx].h1_structure_valid = sell_structure;
       G_TF[idx].h1_not_sideway = not_sideway;
-      G_TF[idx].h1_trend_quality = MathMin(sell_quality, 20.0);
-      G_TF[idx].score_h1_trend = G_TF[idx].h1_trend_quality;
+      G_TF[idx].h1_trend_quality = 20.0;
+      G_TF[idx].score_h1_trend = 20.0;
       
       // Set protected structure: if price breaks above recent swing high, trend invalid
       if(shCount >= 1) G_TF[idx].h1_protected_structure = swH[0];
@@ -229,9 +232,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
    double atr = CalculateATR_Generic(sym, m15, InpReversal_ATR_Period, 1);
    if(atr <= 0) return false;
    
-   double ema20 = CalculateEMA_Generic(sym, m15, 20, 1);
    double ema50 = CalculateEMA_Generic(sym, m15, 50, 1);
-   if(ema20 <= 0 || ema50 <= 0) return false;
+   if(ema50 <= 0) return false;
    
    double close[];
    if(CopyClose(sym, m15, 1, 1, close) < 1) return false;
@@ -243,64 +245,58 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
    G_TF[idx].m15_pullback_valid = false;
    G_TF[idx].m15_pullback_quality = 0.0;
    
+   double m15_highs[], m15_lows[];
+   int pb_lookback = 100;
+   if(!ReadHighLow_Generic(sym, m15, 1, pb_lookback, m15_highs, m15_lows)) return false;
+   
+   int left = InpReversal_SwingLeft;
+   int right = InpReversal_SwingRight;
+   
    if(trend_dir == 1) // BUY trend → look for pullback DOWN
    {
-      // Pullback: price pulls back toward or below EMA
       double distance_to_ema = (ema50 - close[0]) / atr;
       G_TF[idx].m15_ema_distance = distance_to_ema;
       
-      // Price must be near or below EMA50 (distance > 0 means price is below EMA)
-      // But not too far below (that would be reversal, not pullback)
       bool depth_ok = false;
       double depth = 0.0;
       
-      // Find recent M15 swing high to measure pullback depth
-      double m15_highs[], m15_lows[];
-      int pb_lookback = 30;
-      if(ReadHighLow_Generic(sym, m15, 1, pb_lookback, m15_highs, m15_lows))
-      {
-         // Find highest point in recent bars
-         double recent_high = m15_highs[0];
-         for(int i = 1; i < pb_lookback; i++)
-            if(m15_highs[i] > recent_high) recent_high = m15_highs[i];
-         
-         depth = (recent_high - close[0]) / atr;
-         G_TF[idx].m15_pullback_depth = depth;
-         
-         depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
-         
-         // Set protected low: recent swing low on M15
-         double recent_low = m15_lows[0];
-         for(int i = 1; i < pb_lookback; i++)
-            if(m15_lows[i] < recent_low) recent_low = m15_lows[i];
-         G_TF[idx].m15_protected_low = recent_low;
+      int sh_idx = -1;
+      for(int i = right; i < pb_lookback - left; i++) {
+         if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) { sh_idx = i; break; }
       }
       
-      // Pullback quality scoring (max 20)
-      double quality = 0.0;
+      if(sh_idx != -1) {
+         int sl_idx = -1;
+         for(int i = sh_idx + 1; i < pb_lookback - left; i++) {
+            if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) { sl_idx = i; break; }
+         }
+         
+         if(sl_idx != -1) {
+            G_TF[idx].m15_impulse_high = m15_highs[sh_idx];
+            G_TF[idx].m15_impulse_low = m15_lows[sl_idx];
+            G_TF[idx].m15_protected_low = m15_lows[sl_idx];
+            
+            depth = (G_TF[idx].m15_impulse_high - close[0]) / atr;
+            G_TF[idx].m15_pullback_depth = depth;
+            
+            depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
+         }
+      }
       
-      // Factor 1: Depth is meaningful (5 pts)
-      if(depth_ok) quality += 5.0;
+      bool price_above_protected = (G_TF[idx].m15_protected_low > 0.0 && close[0] > G_TF[idx].m15_protected_low);
       
-      // Factor 2: Price approaching/touching EMA zone (5 pts)
-      if(distance_to_ema >= -0.5) quality += 5.0; // Close to or below EMA
-      
-      // Factor 3: Not a reversal - price still above protected structure (5 pts)
-      if(G_TF[idx].h1_protected_structure > 0.0 && close[0] > G_TF[idx].h1_protected_structure)
-         quality += 5.0;
-      
-      // Factor 4: Swing structure on M15 suggests pullback, not breakdown (5 pts)
-      // Check if low is holding above H1 protected level
-      if(G_TF[idx].m15_protected_low > 0.0 && G_TF[idx].h1_protected_structure > 0.0 &&
-         G_TF[idx].m15_protected_low > G_TF[idx].h1_protected_structure)
-         quality += 5.0;
-      
-      G_TF[idx].m15_pullback_quality = MathMin(quality, 20.0);
-      G_TF[idx].score_m15_pullback = G_TF[idx].m15_pullback_quality;
-      
-      if(depth_ok && quality >= 10.0) // At least 2 of 4 factors
+      if(depth_ok && distance_to_ema >= -0.5 && price_above_protected)
       {
+         G_TF[idx].m15_pullback_quality = 20.0;
+         G_TF[idx].score_m15_pullback = 20.0;
          G_TF[idx].m15_pullback_valid = true;
+         // Set start time to current time so M5 triggers must be after this
+         if (G_TF[idx].m15_pullback_start_time == 0) {
+            datetime m15_tm[];
+            if (CopyTime(sym, PERIOD_M15, 0, 1, m15_tm) >= 1) {
+               G_TF[idx].m15_pullback_start_time = m15_tm[0];
+            }
+         }
          return true;
       }
    }
@@ -312,43 +308,42 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       bool depth_ok = false;
       double depth = 0.0;
       
-      double m15_highs[], m15_lows[];
-      int pb_lookback = 30;
-      if(ReadHighLow_Generic(sym, m15, 1, pb_lookback, m15_highs, m15_lows))
-      {
-         // Find lowest point in recent bars
-         double recent_low = m15_lows[0];
-         for(int i = 1; i < pb_lookback; i++)
-            if(m15_lows[i] < recent_low) recent_low = m15_lows[i];
-         
-         depth = (close[0] - recent_low) / atr;
-         G_TF[idx].m15_pullback_depth = depth;
-         
-         depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
-         
-         // Set protected high
-         double recent_high = m15_highs[0];
-         for(int i = 1; i < pb_lookback; i++)
-            if(m15_highs[i] > recent_high) recent_high = m15_highs[i];
-         G_TF[idx].m15_protected_high = recent_high;
+      int sl_idx = -1;
+      for(int i = right; i < pb_lookback - left; i++) {
+         if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) { sl_idx = i; break; }
       }
       
-      double quality = 0.0;
+      if(sl_idx != -1) {
+         int sh_idx = -1;
+         for(int i = sl_idx + 1; i < pb_lookback - left; i++) {
+            if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) { sh_idx = i; break; }
+         }
+         
+         if(sh_idx != -1) {
+            G_TF[idx].m15_impulse_low = m15_lows[sl_idx];
+            G_TF[idx].m15_impulse_high = m15_highs[sh_idx];
+            G_TF[idx].m15_protected_high = m15_highs[sh_idx];
+            
+            depth = (close[0] - G_TF[idx].m15_impulse_low) / atr;
+            G_TF[idx].m15_pullback_depth = depth;
+            
+            depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
+         }
+      }
       
-      if(depth_ok) quality += 5.0;
-      if(distance_to_ema >= -0.5) quality += 5.0;
-      if(G_TF[idx].h1_protected_structure > 0.0 && close[0] < G_TF[idx].h1_protected_structure)
-         quality += 5.0;
-      if(G_TF[idx].m15_protected_high > 0.0 && G_TF[idx].h1_protected_structure > 0.0 &&
-         G_TF[idx].m15_protected_high < G_TF[idx].h1_protected_structure)
-         quality += 5.0;
+      bool price_below_protected = (G_TF[idx].m15_protected_high > 0.0 && close[0] < G_TF[idx].m15_protected_high);
       
-      G_TF[idx].m15_pullback_quality = MathMin(quality, 20.0);
-      G_TF[idx].score_m15_pullback = G_TF[idx].m15_pullback_quality;
-      
-      if(depth_ok && quality >= 10.0)
+      if(depth_ok && distance_to_ema >= -0.5 && price_below_protected)
       {
+         G_TF[idx].m15_pullback_quality = 20.0;
+         G_TF[idx].score_m15_pullback = 20.0;
          G_TF[idx].m15_pullback_valid = true;
+         if (G_TF[idx].m15_pullback_start_time == 0) {
+            datetime m15_tm[];
+            if (CopyTime(sym, PERIOD_M15, 0, 1, m15_tm) >= 1) {
+               G_TF[idx].m15_pullback_start_time = m15_tm[0];
+            }
+         }
          return true;
       }
    }
@@ -398,6 +393,11 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       }
    }
    
+   // --- Check Pullback Start Time ---
+   datetime m5_tm[];
+   if(CopyTime(sym, m5, 0, 1, m5_tm) < 1) return;
+   if(G_TF[idx].m15_pullback_start_time > 0 && m5_tm[0] < G_TF[idx].m15_pullback_start_time) return;
+   
    // --- Find qualified swings on M5 for sweep/MSS ---
    // Use temporary swing storage (not touching Counter-Trend's G_Pairs fields)
    double m5_highs[], m5_lows[];
@@ -446,7 +446,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    }
    
    // --- Check Displacement on M5 ---
-   if(!G_TF[idx].m5_displacement)
+   if(G_TF[idx].m5_sweep && !G_TF[idx].m5_displacement)
    {
       if(DetectDisplacement(sym, m5, trend_dir))
       {
@@ -458,7 +458,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    }
    
    // --- Check MSS on M5 ---
-   if(!G_TF[idx].m5_mss)
+   if(G_TF[idx].m5_displacement && !G_TF[idx].m5_mss)
    {
       double breakLvl = 0.0;
       string mssReason = "";
@@ -495,9 +495,13 @@ bool CheckTFEventCoherence(int idx)
    if(!G_TF[idx].m5_sweep || !G_TF[idx].m5_displacement || !G_TF[idx].m5_mss)
       return false;
    
+   // Chronology: Sweep (oldest) >= Displacement >= MSS (newest)
+   if(!(G_TF[idx].m5_sweep_age >= G_TF[idx].m5_displacement_age && 
+        G_TF[idx].m5_displacement_age >= G_TF[idx].m5_mss_age))
+      return false;
+   
    // All three must be within TF_MAX_EVENT_BARS of each other
-   int max_age = MathMax(G_TF[idx].m5_sweep_age,
-                         MathMax(G_TF[idx].m5_displacement_age, G_TF[idx].m5_mss_age));
+   int max_age = G_TF[idx].m5_sweep_age; // Since sweep is the oldest
    
    return (max_age <= TF_MAX_EVENT_BARS);
 }
@@ -509,7 +513,7 @@ bool CheckTFEventCoherence(int idx)
 
 bool CheckTFEntryDistance(int idx, int direction)
 {
-   if(G_TF[idx].m5_mss_break_level <= 0.0) return true; // No break level = skip check
+   if(G_TF[idx].m5_mss_break_level <= 0.0) return false; // MUST NOT BE SKIPPED
    
    string sym = G_Pairs[idx].symbol;
    double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
@@ -604,16 +608,19 @@ double CalculateTFScore(int idx)
 bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
 {
    // 1. H1 Trend must be valid with sufficient quality
-   if(G_TF[idx].h1_trend_direction != direction || G_TF[idx].h1_trend_quality < 10.0)
+   if(G_TF[idx].h1_trend_direction != direction || G_TF[idx].h1_trend_quality < 20.0)
    {
-      rejectReason = "H1_TREND_INVALID";
+      rejectReason = "H1_TREND_NOT_STRONG";
       return false;
    }
    
    // 2. M15 Pullback must be valid
-   if(!G_TF[idx].m15_pullback_valid)
+   if(!G_TF[idx].m15_pullback_valid || G_TF[idx].m15_pullback_quality < 20.0)
    {
-      rejectReason = "M15_PULLBACK_INVALID";
+      if (G_TF[idx].m15_impulse_high == 0.0 && G_TF[idx].m15_impulse_low == 0.0)
+         rejectReason = "M15_IMPULSE_NOT_FOUND";
+      else
+         rejectReason = "M15_PULLBACK_INVALID";
       return false;
    }
    
@@ -627,14 +634,14 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    // 4. M5 Displacement
    if(!G_TF[idx].m5_displacement)
    {
-      rejectReason = "M5_DISPLACEMENT_NOT_FOUND";
+      rejectReason = "M5_DISPLACEMENT_NOT_AFTER_SWEEP";
       return false;
    }
    
    // 5. M5 MSS
    if(!G_TF[idx].m5_mss)
    {
-      rejectReason = "M5_MSS_NOT_FOUND";
+      rejectReason = "M5_MSS_NOT_AFTER_DISPLACEMENT";
       return false;
    }
    
@@ -645,14 +652,27 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
       return false;
    }
    
-   // 7. Entry Distance
+   // 7. Entry Distance and Break Level Check
+   if(G_TF[idx].m5_mss_break_level <= 0.0)
+   {
+      rejectReason = "MSS_BREAK_LEVEL_INVALID";
+      return false;
+   }
+   
    if(!CheckTFEntryDistance(idx, direction))
    {
       rejectReason = "ENTRY_DISTANCE_TOO_FAR";
       return false;
    }
    
-   // 8. Score >= 100
+   // 8. Momentum check
+   if(!G_TF[idx].m5_momentum_cci || !G_TF[idx].m5_momentum_rf)
+   {
+      rejectReason = "MOMENTUM_INCOMPLETE";
+      return false;
+   }
+   
+   // 9. Score == 100
    double score = CalculateTFScore(idx);
    if(score < ENTRY_REQUIRED_SCORE)
    {

@@ -254,6 +254,9 @@ struct TrendFollowingContext
    int    m15_pullback_bar_count;
    double m15_pullback_depth;     // In ATR units
    double m15_ema_distance;       // Distance to EMA in ATR units
+   datetime m15_pullback_start_time;
+   double m15_impulse_high;
+   double m15_impulse_low;
 
    // M5 Entry Evidence
    bool   m5_sweep;
@@ -535,6 +538,9 @@ void InitGlobals()
       G_TF[i].m15_pullback_bar_count = 0;
       G_TF[i].m15_pullback_depth = 0.0;
       G_TF[i].m15_ema_distance = 0.0;
+      G_TF[i].m15_pullback_start_time = 0;
+      G_TF[i].m15_impulse_high = 0.0;
+      G_TF[i].m15_impulse_low = 0.0;
       G_TF[i].m5_sweep = false;
       G_TF[i].m5_displacement = false;
       G_TF[i].m5_mss = false;
