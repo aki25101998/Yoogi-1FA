@@ -8,7 +8,8 @@ Tài liệu này đóng vai trò là "Hiến pháp" cốt lõi của Yoogi-1FA. 
 
 1. **Bắt buộc**: Bất kỳ thay đổi, cập nhật, hay sửa lỗi nào đối với source code (dù là nhỏ nhất) đều phải được Agent (hệ thống) TỰ ĐỘNG commit và push lên GitHub ngay lập tức sau khi hoàn thành task. Tuyệt đối không cần đợi người dùng nhắc nhở lệnh "push".
 2. **Quy trình**: 
-   - Sử dụng lệnh Git hoặc workflow `/backup` (đã được cấu hình trong `.agents/workflows/backup.md`) để tự động hóa quá trình này.
+   - Sử dụng lệnh `run_command` trên PowerShell để chạy: `git add . ; git commit -m "Tóm tắt ngắn gọn" ; git push`
+   - Hoặc có thể sử dụng workflow `/backup`.
    - Message commit phải miêu tả ngắn gọn và chính xác thay đổi.
 3. **Mục tiêu**: Đảm bảo source code không bao giờ bị mất, dễ dàng rollback nếu cập nhật gây lỗi, và đồng bộ hóa công việc.
 
