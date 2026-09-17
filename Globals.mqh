@@ -259,6 +259,9 @@ struct TrendFollowingContext
    datetime m15_pullback_start_time;
    double m15_impulse_high;
    double m15_impulse_low;
+   datetime m15_impulse_start_time;
+   datetime m15_impulse_end_time;
+   datetime m15_protected_time;
 
    // M5 Entry Evidence
    bool   m5_sweep;
@@ -271,6 +274,7 @@ struct TrendFollowingContext
    datetime m5_sweep_time;
    datetime m5_displacement_time;
    datetime m5_mss_time;
+   datetime m5_momentum_time;
    
    double m5_sweep_price;
    double m5_displacement_price;
@@ -554,6 +558,9 @@ void InitGlobals()
       G_TF[i].m15_pullback_start_time = 0;
       G_TF[i].m15_impulse_high = 0.0;
       G_TF[i].m15_impulse_low = 0.0;
+      G_TF[i].m15_impulse_start_time = 0;
+      G_TF[i].m15_impulse_end_time = 0;
+      G_TF[i].m15_protected_time = 0;
       G_TF[i].m5_sweep = false;
       G_TF[i].m5_displacement = false;
       G_TF[i].m5_mss = false;
@@ -562,6 +569,7 @@ void InitGlobals()
       G_TF[i].m5_sweep_time = 0;
       G_TF[i].m5_displacement_time = 0;
       G_TF[i].m5_mss_time = 0;
+      G_TF[i].m5_momentum_time = 0;
       G_TF[i].m5_sweep_price = 0.0;
       G_TF[i].m5_displacement_price = 0.0;
       G_TF[i].m5_sweep_age = 0;
