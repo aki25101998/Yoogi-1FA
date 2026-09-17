@@ -220,11 +220,13 @@ PairContext G_Pairs[TOTAL_PAIRS];
 // ==================================================================
 
 // --- Trend-Following Engine States ---
-#define TF_STATE_NONE          0
-#define TF_STATE_H1_TREND      1
-#define TF_STATE_M15_PULLBACK  2
-#define TF_STATE_M5_TRIGGER    3
-#define TF_STATE_ENTRY_READY   4
+#define TF_STATE_NONE                 0
+#define TF_STATE_H1_TREND             1
+#define TF_STATE_M15_PULLBACK         2
+#define TF_STATE_M5_WAIT_SWEEP        3
+#define TF_STATE_M5_WAIT_DISPLACEMENT 4
+#define TF_STATE_M5_WAIT_MSS          5
+#define TF_STATE_ENTRY_READY          6
 
 // --- Trend-Following Internal Constants ---
 const int    TF_MAX_EVENT_BARS         = 5;     // Sweep→Displacement→MSS must be within 5 M5 bars
@@ -264,6 +266,15 @@ struct TrendFollowingContext
    bool   m5_mss;
    bool   m5_momentum_cci;
    bool   m5_momentum_rf;
+   
+   // Real timestamp tracking for chronological validation
+   datetime m5_sweep_time;
+   datetime m5_displacement_time;
+   datetime m5_mss_time;
+   
+   double m5_sweep_price;
+   double m5_displacement_price;
+   
    int    m5_sweep_age;
    int    m5_displacement_age;
    int    m5_mss_age;
@@ -273,11 +284,13 @@ struct TrendFollowingContext
    // Score Breakdown
    double score_h1_trend;         // max 20
    double score_m15_pullback;     // max 20
-   double score_sweep;            // max 20
-   double score_displacement;     // max 15
-   double score_mss;              // max 15
+   double score_sweep;            // max 10
+   double score_displacement;     // max 10
+   double score_mss;              // max 10
+   double score_event_coherence;  // max 10
    double score_momentum;         // max 10
-   double total_score;
+   double score_entry_distance;   // max 10
+   double total_score;            // must be exactly 100
 
    // State Machine
    int    setup_state;            // TF_STATE_*
@@ -546,6 +559,11 @@ void InitGlobals()
       G_TF[i].m5_mss = false;
       G_TF[i].m5_momentum_cci = false;
       G_TF[i].m5_momentum_rf = false;
+      G_TF[i].m5_sweep_time = 0;
+      G_TF[i].m5_displacement_time = 0;
+      G_TF[i].m5_mss_time = 0;
+      G_TF[i].m5_sweep_price = 0.0;
+      G_TF[i].m5_displacement_price = 0.0;
       G_TF[i].m5_sweep_age = 0;
       G_TF[i].m5_displacement_age = 0;
       G_TF[i].m5_mss_age = 0;
@@ -556,7 +574,9 @@ void InitGlobals()
       G_TF[i].score_sweep = 0.0;
       G_TF[i].score_displacement = 0.0;
       G_TF[i].score_mss = 0.0;
+      G_TF[i].score_event_coherence = 0.0;
       G_TF[i].score_momentum = 0.0;
+      G_TF[i].score_entry_distance = 0.0;
       G_TF[i].total_score = 0.0;
       G_TF[i].setup_state = TF_STATE_NONE;
       G_TF[i].setup_bar_count = 0;

@@ -242,8 +242,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
    if(CopyLow(sym, m15, 1, 1, low) < 1) return false;
    if(CopyHigh(sym, m15, 1, 1, high) < 1) return false;
    
-   G_TF[idx].m15_pullback_valid = false;
-   G_TF[idx].m15_pullback_quality = 0.0;
+   // G_TF[idx].m15_pullback_valid = false; // Do not invalidate blindly
+   // G_TF[idx].m15_pullback_quality = 0.0;
    
    double m15_highs[], m15_lows[];
    int pb_lookback = 100;
@@ -252,52 +252,57 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
    int left = InpReversal_SwingLeft;
    int right = InpReversal_SwingRight;
    
+   // If we don't have an impulse yet, or pullback was invalidated, find a new one
+   bool find_new_impulse = (G_TF[idx].m15_impulse_high == 0.0 && G_TF[idx].m15_impulse_low == 0.0) || !G_TF[idx].m15_pullback_valid;
+   
    if(trend_dir == 1) // BUY trend → look for pullback DOWN
    {
       double distance_to_ema = (ema50 - close[0]) / atr;
       G_TF[idx].m15_ema_distance = distance_to_ema;
       
-      bool depth_ok = false;
-      double depth = 0.0;
-      
-      int sh_idx = -1;
-      for(int i = right; i < pb_lookback - left; i++) {
-         if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) { sh_idx = i; break; }
-      }
-      
-      if(sh_idx != -1) {
-         int sl_idx = -1;
-         for(int i = sh_idx + 1; i < pb_lookback - left; i++) {
-            if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) { sl_idx = i; break; }
+      if(find_new_impulse)
+      {
+         int sh_idx = -1;
+         for(int i = right; i < pb_lookback - left; i++) {
+            if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) { sh_idx = i; break; }
          }
          
-         if(sl_idx != -1) {
-            G_TF[idx].m15_impulse_high = m15_highs[sh_idx];
-            G_TF[idx].m15_impulse_low = m15_lows[sl_idx];
-            G_TF[idx].m15_protected_low = m15_lows[sl_idx];
+         if(sh_idx != -1) {
+            int sl_idx = -1;
+            for(int i = sh_idx + 1; i < pb_lookback - left; i++) {
+               if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) { sl_idx = i; break; }
+            }
             
-            depth = (G_TF[idx].m15_impulse_high - close[0]) / atr;
-            G_TF[idx].m15_pullback_depth = depth;
-            
-            depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
+            // Validate it's a true expansion
+            if(sl_idx != -1 && m15_highs[sh_idx] > m15_lows[sl_idx]) {
+               G_TF[idx].m15_impulse_high = m15_highs[sh_idx];
+               G_TF[idx].m15_impulse_low = m15_lows[sl_idx];
+               G_TF[idx].m15_protected_low = m15_lows[sl_idx];
+            }
          }
       }
       
-      bool price_above_protected = (G_TF[idx].m15_protected_low > 0.0 && close[0] > G_TF[idx].m15_protected_low);
-      
-      if(depth_ok && distance_to_ema >= -0.5 && price_above_protected)
+      if(G_TF[idx].m15_impulse_high > 0.0)
       {
-         G_TF[idx].m15_pullback_quality = 20.0;
-         G_TF[idx].score_m15_pullback = 20.0;
-         G_TF[idx].m15_pullback_valid = true;
-         // Set start time to current time so M5 triggers must be after this
-         if (G_TF[idx].m15_pullback_start_time == 0) {
-            datetime m15_tm[];
-            if (CopyTime(sym, PERIOD_M15, 0, 1, m15_tm) >= 1) {
-               G_TF[idx].m15_pullback_start_time = m15_tm[0];
+         double depth = (G_TF[idx].m15_impulse_high - close[0]) / atr;
+         G_TF[idx].m15_pullback_depth = depth;
+         
+         bool depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
+         bool price_above_protected = (G_TF[idx].m15_protected_low > 0.0 && close[0] > G_TF[idx].m15_protected_low);
+         
+         if(depth_ok && distance_to_ema >= -0.5 && price_above_protected)
+         {
+            G_TF[idx].m15_pullback_quality = 20.0;
+            G_TF[idx].score_m15_pullback = 20.0;
+            G_TF[idx].m15_pullback_valid = true;
+            if (G_TF[idx].m15_pullback_start_time == 0) {
+               datetime m15_tm[];
+               if (CopyTime(sym, PERIOD_M15, 0, 1, m15_tm) >= 1) {
+                  G_TF[idx].m15_pullback_start_time = m15_tm[0];
+               }
             }
+            return true;
          }
-         return true;
       }
    }
    else if(trend_dir == -1) // SELL trend → look for pullback UP
@@ -305,46 +310,49 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       double distance_to_ema = (close[0] - ema50) / atr;
       G_TF[idx].m15_ema_distance = distance_to_ema;
       
-      bool depth_ok = false;
-      double depth = 0.0;
-      
-      int sl_idx = -1;
-      for(int i = right; i < pb_lookback - left; i++) {
-         if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) { sl_idx = i; break; }
-      }
-      
-      if(sl_idx != -1) {
-         int sh_idx = -1;
-         for(int i = sl_idx + 1; i < pb_lookback - left; i++) {
-            if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) { sh_idx = i; break; }
+      if(find_new_impulse)
+      {
+         int sl_idx = -1;
+         for(int i = right; i < pb_lookback - left; i++) {
+            if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) { sl_idx = i; break; }
          }
          
-         if(sh_idx != -1) {
-            G_TF[idx].m15_impulse_low = m15_lows[sl_idx];
-            G_TF[idx].m15_impulse_high = m15_highs[sh_idx];
-            G_TF[idx].m15_protected_high = m15_highs[sh_idx];
+         if(sl_idx != -1) {
+            int sh_idx = -1;
+            for(int i = sl_idx + 1; i < pb_lookback - left; i++) {
+               if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) { sh_idx = i; break; }
+            }
             
-            depth = (close[0] - G_TF[idx].m15_impulse_low) / atr;
-            G_TF[idx].m15_pullback_depth = depth;
-            
-            depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
+            // Validate it's a true expansion
+            if(sh_idx != -1 && m15_lows[sl_idx] < m15_highs[sh_idx]) {
+               G_TF[idx].m15_impulse_low = m15_lows[sl_idx];
+               G_TF[idx].m15_impulse_high = m15_highs[sh_idx];
+               G_TF[idx].m15_protected_high = m15_highs[sh_idx];
+            }
          }
       }
       
-      bool price_below_protected = (G_TF[idx].m15_protected_high > 0.0 && close[0] < G_TF[idx].m15_protected_high);
-      
-      if(depth_ok && distance_to_ema >= -0.5 && price_below_protected)
+      if(G_TF[idx].m15_impulse_low > 0.0)
       {
-         G_TF[idx].m15_pullback_quality = 20.0;
-         G_TF[idx].score_m15_pullback = 20.0;
-         G_TF[idx].m15_pullback_valid = true;
-         if (G_TF[idx].m15_pullback_start_time == 0) {
-            datetime m15_tm[];
-            if (CopyTime(sym, PERIOD_M15, 0, 1, m15_tm) >= 1) {
-               G_TF[idx].m15_pullback_start_time = m15_tm[0];
+         double depth = (close[0] - G_TF[idx].m15_impulse_low) / atr;
+         G_TF[idx].m15_pullback_depth = depth;
+         
+         bool depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
+         bool price_below_protected = (G_TF[idx].m15_protected_high > 0.0 && close[0] < G_TF[idx].m15_protected_high);
+         
+         if(depth_ok && distance_to_ema >= -0.5 && price_below_protected)
+         {
+            G_TF[idx].m15_pullback_quality = 20.0;
+            G_TF[idx].score_m15_pullback = 20.0;
+            G_TF[idx].m15_pullback_valid = true;
+            if (G_TF[idx].m15_pullback_start_time == 0) {
+               datetime m15_tm[];
+               if (CopyTime(sym, PERIOD_M15, 0, 1, m15_tm) >= 1) {
+                  G_TF[idx].m15_pullback_start_time = m15_tm[0];
+               }
             }
+            return true;
          }
-         return true;
       }
    }
    
@@ -355,134 +363,123 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
 // LAYER 3: M5 ENTRY TRIGGER
 // ==================================================================
 
-// Evaluate all M5 evidence for trend-following entry
 void EvaluateM5Trigger(int idx, int trend_dir)
 {
    string sym = G_Pairs[idx].symbol;
    ENUM_TIMEFRAMES m5 = PERIOD_M5;
    
+   datetime m5_tm[];
+   if(CopyTime(sym, m5, 0, 1, m5_tm) < 1) return;
+   datetime current_time = m5_tm[0];
+   
    // --- FRESHNESS UPDATE: Age existing evidence ---
    if(G_TF[idx].m5_sweep)
    {
       G_TF[idx].m5_sweep_age++;
-      if(G_TF[idx].m5_sweep_age > TF_MAX_EVENT_BARS)
-      {
-         G_TF[idx].m5_sweep = false;
-         G_TF[idx].m5_sweep_age = 0;
-         G_TF[idx].score_sweep = 0.0;
-      }
+      if(G_TF[idx].m5_sweep_age > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); G_TF[idx].setup_state = TF_STATE_M5_WAIT_SWEEP; return; }
    }
    if(G_TF[idx].m5_displacement)
    {
       G_TF[idx].m5_displacement_age++;
-      if(G_TF[idx].m5_displacement_age > TF_MAX_EVENT_BARS)
-      {
-         G_TF[idx].m5_displacement = false;
-         G_TF[idx].m5_displacement_age = 0;
-         G_TF[idx].score_displacement = 0.0;
-      }
+      if(G_TF[idx].m5_displacement_age > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); G_TF[idx].setup_state = TF_STATE_M5_WAIT_SWEEP; return; }
    }
    if(G_TF[idx].m5_mss)
    {
       G_TF[idx].m5_mss_age++;
-      if(G_TF[idx].m5_mss_age > TF_MAX_EVENT_BARS)
-      {
-         G_TF[idx].m5_mss = false;
-         G_TF[idx].m5_mss_age = 0;
-         G_TF[idx].score_mss = 0.0;
-      }
+      if(G_TF[idx].m5_mss_age > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); G_TF[idx].setup_state = TF_STATE_M5_WAIT_SWEEP; return; }
    }
    
-   // --- Check Pullback Start Time ---
-   datetime m5_tm[];
-   if(CopyTime(sym, m5, 0, 1, m5_tm) < 1) return;
-   if(G_TF[idx].m15_pullback_start_time > 0 && m5_tm[0] < G_TF[idx].m15_pullback_start_time) return;
-   
-   // --- Find qualified swings on M5 for sweep/MSS ---
-   // Use temporary swing storage (not touching Counter-Trend's G_Pairs fields)
+   // --- Find qualified swings on M5 ---
    double m5_highs[], m5_lows[];
    int m5_lookback = InpLiquiditySweepLookback;
    if(!ReadHighLow_Generic(sym, m5, 1, m5_lookback, m5_highs, m5_lows)) return;
-   
    int left = InpReversal_SwingLeft;
    int right = InpReversal_SwingRight;
    
-   // Find nearest qualified swing for sweep target
-   double sweep_target = 0.0;
-   if(trend_dir == 1) // BUY: sweep below M5 swing low
+   // === STATE MACHINE ===
+   if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_SWEEP)
    {
-      for(int i = right; i < m5_lookback - left; i++)
-      {
-         if(IsSwingLow(m5_lows, i, left, right, m5_lookback))
-         {
-            sweep_target = m5_lows[i];
-            break;
+      double sweep_target = 0.0;
+      if(trend_dir == 1) {
+         for(int i = right; i < m5_lookback - left; i++) {
+            if(IsSwingLow(m5_lows, i, left, right, m5_lookback)) { sweep_target = m5_lows[i]; break; }
+         }
+      } else {
+         for(int i = right; i < m5_lookback - left; i++) {
+            if(IsSwingHigh(m5_highs, i, left, right, m5_lookback)) { sweep_target = m5_highs[i]; break; }
          }
       }
-   }
-   else if(trend_dir == -1) // SELL: sweep above M5 swing high
-   {
-      for(int i = right; i < m5_lookback - left; i++)
+      
+      if(sweep_target > 0.0)
       {
-         if(IsSwingHigh(m5_highs, i, left, right, m5_lookback))
+         // Zone Validation: Sweep must be inside M15 Pullback Zone
+         bool in_zone = false;
+         if(trend_dir == 1 && sweep_target >= G_TF[idx].m15_protected_low && sweep_target <= G_TF[idx].m15_impulse_high) in_zone = true;
+         if(trend_dir == -1 && sweep_target <= G_TF[idx].m15_protected_high && sweep_target >= G_TF[idx].m15_impulse_low) in_zone = true;
+         
+         if(in_zone && DetectLiquiditySweep(sym, m5, trend_dir, sweep_target))
          {
-            sweep_target = m5_highs[i];
-            break;
+            G_TF[idx].m5_sweep = true;
+            G_TF[idx].m5_sweep_time = current_time;
+            G_TF[idx].m5_sweep_price = sweep_target;
+            G_TF[idx].m5_sweep_level = sweep_target;
+            G_TF[idx].score_sweep = 10.0;
+            G_TF[idx].setup_state = TF_STATE_M5_WAIT_DISPLACEMENT;
+            G_TF[idx].status = "WAIT DISPLACEMENT";
+            PrintFormat("[TREND-FOLLOWING][%s] M5 Sweep Confirmed (dir=%d, price=%.5f)", sym, trend_dir, sweep_target);
          }
       }
+      return; // Wait for next candle for next event
    }
    
-   // --- Check Liquidity Sweep on M5 ---
-   if(!G_TF[idx].m5_sweep && sweep_target > 0.0)
+   if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_DISPLACEMENT)
    {
-      if(DetectLiquiditySweep(sym, m5, trend_dir, sweep_target))
+      if(current_time > G_TF[idx].m5_sweep_time)
       {
-         G_TF[idx].m5_sweep = true;
-         G_TF[idx].m5_sweep_age = 0;
-         G_TF[idx].m5_sweep_level = sweep_target;
-         G_TF[idx].score_sweep = 20.0;
-         PrintFormat("[TREND-FOLLOWING][%s] M5 Liquidity Sweep detected (dir=%d)", sym, trend_dir);
+         if(DetectDisplacement(sym, m5, trend_dir))
+         {
+            double close[]; CopyClose(sym, m5, 1, 1, close);
+            G_TF[idx].m5_displacement = true;
+            G_TF[idx].m5_displacement_time = current_time;
+            G_TF[idx].m5_displacement_price = close[0];
+            G_TF[idx].score_displacement = 10.0;
+            G_TF[idx].setup_state = TF_STATE_M5_WAIT_MSS;
+            G_TF[idx].status = "WAIT MSS";
+            PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d)", sym, trend_dir);
+         }
       }
+      return; // Wait for next candle for next event
    }
    
-   // --- Check Displacement on M5 ---
-   if(G_TF[idx].m5_sweep && !G_TF[idx].m5_displacement)
+   if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_MSS)
    {
-      if(DetectDisplacement(sym, m5, trend_dir))
+      if(current_time > G_TF[idx].m5_displacement_time)
       {
-         G_TF[idx].m5_displacement = true;
-         G_TF[idx].m5_displacement_age = 0;
-         G_TF[idx].score_displacement = 15.0;
-         PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement detected (dir=%d)", sym, trend_dir);
+         double breakLvl = 0.0;
+         string mssReason = "";
+         if(DetectStructureShift(idx, sym, m5, trend_dir, breakLvl, mssReason))
+         {
+            G_TF[idx].m5_mss = true;
+            G_TF[idx].m5_mss_time = current_time;
+            G_TF[idx].m5_mss_break_level = breakLvl;
+            G_TF[idx].score_mss = 10.0;
+            G_TF[idx].setup_state = TF_STATE_ENTRY_READY; // Forward to entry validation
+            G_TF[idx].status = "MSS CONFIRMED";
+            PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f)", sym, trend_dir, breakLvl);
+            
+            // Capture Momentum at MSS time
+            int cci_status = 0, rf_status = 0;
+            CheckMomentumStatus(idx, cci_status, rf_status);
+            G_TF[idx].m5_momentum_cci = (cci_status == trend_dir);
+            G_TF[idx].m5_momentum_rf = (rf_status == trend_dir);
+            double mom = 0.0;
+            if(G_TF[idx].m5_momentum_cci) mom += 5.0;
+            if(G_TF[idx].m5_momentum_rf)  mom += 5.0;
+            G_TF[idx].score_momentum = MathMin(mom, 10.0);
+         }
       }
+      return;
    }
-   
-   // --- Check MSS on M5 ---
-   if(G_TF[idx].m5_displacement && !G_TF[idx].m5_mss)
-   {
-      double breakLvl = 0.0;
-      string mssReason = "";
-      if(DetectStructureShift(idx, sym, m5, trend_dir, breakLvl, mssReason))
-      {
-         G_TF[idx].m5_mss = true;
-         G_TF[idx].m5_mss_age = 0;
-         G_TF[idx].m5_mss_break_level = breakLvl;
-         G_TF[idx].score_mss = 15.0;
-         PrintFormat("[TREND-FOLLOWING][%s] M5 MSS confirmed (dir=%d, level=%.5f)", sym, trend_dir, breakLvl);
-      }
-   }
-   
-   // --- Check Momentum on M5 ---
-   int cci_status = 0, rf_status = 0;
-   CheckMomentumStatus(idx, cci_status, rf_status);
-   
-   G_TF[idx].m5_momentum_cci = (cci_status == trend_dir);
-   G_TF[idx].m5_momentum_rf = (rf_status == trend_dir);
-   
-   double mom = 0.0;
-   if(G_TF[idx].m5_momentum_cci) mom += 5.0;
-   if(G_TF[idx].m5_momentum_rf)  mom += 5.0;
-   G_TF[idx].score_momentum = MathMin(mom, 10.0);
 }
 
 // ==================================================================
@@ -495,15 +492,15 @@ bool CheckTFEventCoherence(int idx)
    if(!G_TF[idx].m5_sweep || !G_TF[idx].m5_displacement || !G_TF[idx].m5_mss)
       return false;
    
-   // Chronology: Sweep (oldest) >= Displacement >= MSS (newest)
-   if(!(G_TF[idx].m5_sweep_age >= G_TF[idx].m5_displacement_age && 
-        G_TF[idx].m5_displacement_age >= G_TF[idx].m5_mss_age))
+   if(G_TF[idx].m5_sweep_time == 0 || G_TF[idx].m5_displacement_time == 0 || G_TF[idx].m5_mss_time == 0)
       return false;
+      
+   // Strict chronological order
+   if(G_TF[idx].m5_sweep_time >= G_TF[idx].m5_displacement_time) return false;
+   if(G_TF[idx].m5_displacement_time >= G_TF[idx].m5_mss_time) return false;
    
-   // All three must be within TF_MAX_EVENT_BARS of each other
-   int max_age = G_TF[idx].m5_sweep_age; // Since sweep is the oldest
-   
-   return (max_age <= TF_MAX_EVENT_BARS);
+   G_TF[idx].score_event_coherence = 10.0;
+   return true;
 }
 
 // ==================================================================
@@ -517,10 +514,10 @@ bool CheckTFEntryDistance(int idx, int direction)
    
    string sym = G_Pairs[idx].symbol;
    double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
-   if(atr <= 0) return true;
+   if(atr <= 0) return false; // Fail-closed
    
    double close[];
-   if(CopyClose(sym, PERIOD_M5, 1, 1, close) < 1) return true;
+   if(CopyClose(sym, PERIOD_M5, 1, 1, close) < 1) return false; // Fail-closed
    
    double distance = 0.0;
    if(direction == 1)
@@ -528,9 +525,10 @@ bool CheckTFEntryDistance(int idx, int direction)
    else
       distance = G_TF[idx].m5_mss_break_level - close[0];
    
-   if(distance < 0) return false; // Price went wrong direction
+   if(distance < 0 || distance > TF_MAX_ENTRY_DISTANCE_ATR * atr) return false;
    
-   return (distance <= TF_MAX_ENTRY_DISTANCE_ATR * atr);
+   G_TF[idx].score_entry_distance = 10.0;
+   return true;
 }
 
 // ==================================================================
@@ -596,7 +594,9 @@ double CalculateTFScore(int idx)
                          + G_TF[idx].score_sweep
                          + G_TF[idx].score_displacement
                          + G_TF[idx].score_mss
-                         + G_TF[idx].score_momentum;
+                         + G_TF[idx].score_event_coherence
+                         + G_TF[idx].score_momentum
+                         + G_TF[idx].score_entry_distance;
    
    return G_TF[idx].total_score;
 }
@@ -714,11 +714,13 @@ void LogTFDecision(int idx, int direction, string decision, string reason, doubl
    string state_str = "";
    switch(G_TF[idx].setup_state)
    {
-      case TF_STATE_NONE:         state_str = "NONE"; break;
-      case TF_STATE_H1_TREND:     state_str = "H1_TREND"; break;
-      case TF_STATE_M15_PULLBACK: state_str = "M15_PULLBACK"; break;
-      case TF_STATE_M5_TRIGGER:   state_str = "M5_TRIGGER"; break;
-      case TF_STATE_ENTRY_READY:  state_str = "ENTRY_READY"; break;
+      case TF_STATE_NONE:                 state_str = "NONE"; break;
+      case TF_STATE_H1_TREND:             state_str = "H1_TREND"; break;
+      case TF_STATE_M15_PULLBACK:         state_str = "M15_PULLBACK"; break;
+      case TF_STATE_M5_WAIT_SWEEP:        state_str = "M5_WAIT_SWEEP"; break;
+      case TF_STATE_M5_WAIT_DISPLACEMENT: state_str = "M5_WAIT_DISP"; break;
+      case TF_STATE_M5_WAIT_MSS:          state_str = "M5_WAIT_MSS"; break;
+      case TF_STATE_ENTRY_READY:          state_str = "ENTRY_READY"; break;
    }
    
    PrintFormat("[TREND-FOLLOWING] %s", sym);
@@ -796,8 +798,13 @@ int CheckTrendFollowingSignal(int idx)
                }
                else if(prev_dir != 0 && prev_dir != new_dir)
                {
-                  // H1 trend changed direction → full reset
+                  // H1 trend changed direction → full reset old, init new immediately
                   ResetTFSetup(idx, "H1 Trend Direction Changed");
+                  EvaluateH1TrendRegime(idx); // Re-evaluate to set new state
+                  G_TF[idx].setup_state = TF_STATE_H1_TREND;
+                  G_TF[idx].setup_bar_count = 0;
+                  G_TF[idx].status = "H1 TREND (FLIPPED)";
+                  LogTFDecision(idx, new_dir, "H1_TREND", "Trend flipped", 0);
                }
             }
             else
@@ -886,8 +893,11 @@ int CheckTrendFollowingSignal(int idx)
    }
    
    // Evaluate M5 evidence
-   G_TF[idx].setup_state = TF_STATE_M5_TRIGGER;
-   G_TF[idx].status = "M5 ACCUMULATING";
+   if(G_TF[idx].setup_state == TF_STATE_M15_PULLBACK)
+   {
+      G_TF[idx].setup_state = TF_STATE_M5_WAIT_SWEEP;
+      G_TF[idx].status = "WAIT SWEEP";
+   }
    EvaluateM5Trigger(idx, dir);
    
    // Check if all evidence is ready
@@ -940,7 +950,7 @@ int CheckTrendFollowingSignal(int idx)
          }
          else
          {
-            G_TF[idx].setup_state = TF_STATE_M5_TRIGGER;
+            // Do not reset setup_state here, keep it wherever it is (e.g. TF_STATE_ENTRY_READY or M5 wait state)
             G_TF[idx].status = "WAIT: " + rejectReason;
          }
       }
