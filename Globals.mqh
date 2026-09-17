@@ -262,6 +262,7 @@ struct TrendFollowingContext
    datetime m15_impulse_start_time;
    datetime m15_impulse_end_time;
    datetime m15_protected_time;
+   datetime m15_protected_confirmed_time;
 
    // M5 Entry Evidence
    bool   m5_sweep;
@@ -561,6 +562,7 @@ void InitGlobals()
       G_TF[i].m15_impulse_start_time = 0;
       G_TF[i].m15_impulse_end_time = 0;
       G_TF[i].m15_protected_time = 0;
+      G_TF[i].m15_protected_confirmed_time = 0;
       G_TF[i].m5_sweep = false;
       G_TF[i].m5_displacement = false;
       G_TF[i].m5_mss = false;

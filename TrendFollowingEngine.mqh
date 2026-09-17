@@ -39,6 +39,7 @@ void ResetTFSetup(int idx, string reason)
    G_TF[idx].m15_impulse_start_time = 0;
    G_TF[idx].m15_impulse_end_time = 0;
    G_TF[idx].m15_protected_time = 0;
+   G_TF[idx].m15_protected_confirmed_time = 0;
    
    ResetTFM5Evidence(idx);
    
@@ -285,22 +286,27 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
          
          // Validate structure: Origin Low -> HH -> Protected HL
          if(hl_idx != -1 && hh_idx != -1 && ol_idx != -1) {
-            if(m15_lows[ol_idx] < m15_highs[hh_idx] && m15_lows[hl_idx] < m15_highs[hh_idx]) {
-               datetime t_hl[], t_hh[], t_ol[];
+            if(m15_lows[ol_idx] < m15_highs[hh_idx] && m15_lows[hl_idx] < m15_highs[hh_idx] && m15_lows[hl_idx] > m15_lows[ol_idx]) {
+               datetime t_hl[], t_hh[], t_ol[], t_conf[];
                // Note: arrays from ReadHighLow_Generic start at index 1 of the chart.
                if(CopyTime(sym, m15, hl_idx + 1, 1, t_hl) == 1 && 
                   CopyTime(sym, m15, hh_idx + 1, 1, t_hh) == 1 && 
-                  CopyTime(sym, m15, ol_idx + 1, 1, t_ol) == 1)
+                  CopyTime(sym, m15, ol_idx + 1, 1, t_ol) == 1 &&
+                  CopyTime(sym, m15, hl_idx - right + 1, 1, t_conf) == 1)
                {
                   if(t_ol[0] < t_hh[0] && t_hh[0] < t_hl[0])
                   {
+                     if(G_TF[idx].m15_impulse_high != m15_highs[hh_idx] || G_TF[idx].m15_impulse_low != m15_lows[ol_idx]) {
+                        ResetTFM5Evidence(idx);
+                     }
                      G_TF[idx].m15_impulse_high = m15_highs[hh_idx];
                      G_TF[idx].m15_impulse_low = m15_lows[ol_idx];
                      G_TF[idx].m15_protected_low = m15_lows[hl_idx];
                      G_TF[idx].m15_impulse_start_time = t_ol[0];
                      G_TF[idx].m15_impulse_end_time = t_hh[0];
                      G_TF[idx].m15_protected_time = t_hl[0];
-                     G_TF[idx].m15_pullback_start_time = t_hh[0] + PeriodSeconds(m15);
+                     G_TF[idx].m15_protected_confirmed_time = t_conf[0];
+                     G_TF[idx].m15_pullback_start_time = t_hh[0];
                   }
                }
             }
@@ -347,21 +353,26 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
          
          // Validate structure: Origin High -> LL -> Protected LH
          if(lh_idx != -1 && ll_idx != -1 && oh_idx != -1) {
-            if(m15_highs[oh_idx] > m15_lows[ll_idx] && m15_highs[lh_idx] > m15_lows[ll_idx]) {
-               datetime t_lh[], t_ll[], t_oh[];
+            if(m15_highs[oh_idx] > m15_lows[ll_idx] && m15_highs[lh_idx] > m15_lows[ll_idx] && m15_highs[lh_idx] < m15_highs[oh_idx]) {
+               datetime t_lh[], t_ll[], t_oh[], t_conf[];
                if(CopyTime(sym, m15, lh_idx + 1, 1, t_lh) == 1 && 
                   CopyTime(sym, m15, ll_idx + 1, 1, t_ll) == 1 && 
-                  CopyTime(sym, m15, oh_idx + 1, 1, t_oh) == 1)
+                  CopyTime(sym, m15, oh_idx + 1, 1, t_oh) == 1 &&
+                  CopyTime(sym, m15, lh_idx - right + 1, 1, t_conf) == 1)
                {
                   if(t_oh[0] < t_ll[0] && t_ll[0] < t_lh[0])
                   {
+                     if(G_TF[idx].m15_impulse_high != m15_highs[oh_idx] || G_TF[idx].m15_impulse_low != m15_lows[ll_idx]) {
+                        ResetTFM5Evidence(idx);
+                     }
                      G_TF[idx].m15_impulse_low = m15_lows[ll_idx];
                      G_TF[idx].m15_impulse_high = m15_highs[oh_idx];
                      G_TF[idx].m15_protected_high = m15_highs[lh_idx];
                      G_TF[idx].m15_impulse_start_time = t_oh[0];
                      G_TF[idx].m15_impulse_end_time = t_ll[0];
                      G_TF[idx].m15_protected_time = t_lh[0];
-                     G_TF[idx].m15_pullback_start_time = t_ll[0] + PeriodSeconds(m15);
+                     G_TF[idx].m15_protected_confirmed_time = t_conf[0];
+                     G_TF[idx].m15_pullback_start_time = t_ll[0];
                   }
                }
             }
@@ -449,7 +460,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          if(trend_dir == -1 && sweep_target <= G_TF[idx].m15_protected_high && sweep_target >= G_TF[idx].m15_impulse_low) in_zone = true;
          
          // Event Timing: Sweep must occur AFTER the M15 Protected HL/LH is confirmed
-         if(in_zone && current_time > G_TF[idx].m15_protected_time && DetectLiquiditySweep(sym, m5, trend_dir, sweep_target))
+         if(in_zone && current_time > G_TF[idx].m15_protected_confirmed_time && DetectLiquiditySweep(sym, m5, trend_dir, sweep_target))
          {
             G_TF[idx].m5_sweep = true;
             G_TF[idx].m5_sweep_time = current_time;
@@ -531,6 +542,7 @@ bool CheckTFEventCoherence(int idx)
    // Strict chronological order
    if(G_TF[idx].m5_sweep_time >= G_TF[idx].m5_displacement_time) return false;
    if(G_TF[idx].m5_displacement_time >= G_TF[idx].m5_mss_time) return false;
+   if(G_TF[idx].m15_protected_confirmed_time >= G_TF[idx].m5_sweep_time) return false;
    
    // Strict Freshness: entire sequence must complete within TF_MAX_EVENT_BARS
    long period_sec = PeriodSeconds(PERIOD_M5);
@@ -686,7 +698,16 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    // 6. Event Coherence
    if(!CheckTFEventCoherence(idx))
    {
-      rejectReason = "EVENT_NOT_COHERENT";
+      if(G_TF[idx].m15_protected_confirmed_time >= G_TF[idx].m5_sweep_time)
+         rejectReason = "M5_SWEEP_BEFORE_PROTECTED_CONFIRMATION";
+      else if(G_TF[idx].m5_sweep_time >= G_TF[idx].m5_displacement_time || G_TF[idx].m5_displacement_time >= G_TF[idx].m5_mss_time)
+         rejectReason = "M5_EVENT_SEQUENCE_INVALID";
+      else {
+         long period_sec = PeriodSeconds(PERIOD_M5);
+         long total_sequence_bars = (G_TF[idx].m5_mss_time - G_TF[idx].m5_sweep_time) / period_sec;
+         if(total_sequence_bars > TF_MAX_EVENT_BARS) rejectReason = "M5_EVENT_STALE";
+         else rejectReason = "M5_EVENT_OUTSIDE_M15_SETUP";
+      }
       return false;
    }
    
@@ -752,51 +773,33 @@ void LogTFDecision(int idx, int direction, string decision, string reason, doubl
    string sym = G_Pairs[idx].symbol;
    string dir_str = (direction == 1) ? "BUY" : ((direction == -1) ? "SELL" : "NONE");
    
-   string state_str = "";
-   switch(G_TF[idx].setup_state)
-   {
-      case TF_STATE_NONE:                 state_str = "NONE"; break;
-      case TF_STATE_H1_TREND:             state_str = "H1_TREND"; break;
-      case TF_STATE_M15_PULLBACK:         state_str = "M15_PULLBACK"; break;
-      case TF_STATE_M5_WAIT_SWEEP:        state_str = "M5_WAIT_SWEEP"; break;
-      case TF_STATE_M5_WAIT_DISPLACEMENT: state_str = "M5_WAIT_DISP"; break;
-      case TF_STATE_M5_WAIT_MSS:          state_str = "M5_WAIT_MSS"; break;
-      case TF_STATE_ENTRY_READY:          state_str = "ENTRY_READY"; break;
-   }
-   
    PrintFormat("[TREND-FOLLOWING] %s", sym);
-   PrintFormat("  Direction=%s | State=%s", dir_str, state_str);
-   PrintFormat("  H1 Trend: EMA=%s Slope=%s Price=%s Struct=%s Sideway=%s | Quality=%.0f",
-               G_TF[idx].h1_ema_aligned ? "YES" : "NO",
-               G_TF[idx].h1_slope_positive ? "YES" : "NO",
-               G_TF[idx].h1_price_above_ema ? "YES" : "NO",
-               G_TF[idx].h1_structure_valid ? "YES" : "NO",
-               G_TF[idx].h1_not_sideway ? "YES" : "NO",
-               G_TF[idx].h1_trend_quality);
-   PrintFormat("  M15 Pullback: Valid=%s | Depth=%.2f ATR | EMA Dist=%.2f ATR | Quality=%.0f",
-               G_TF[idx].m15_pullback_valid ? "YES" : "NO",
-               G_TF[idx].m15_pullback_depth,
-               G_TF[idx].m15_ema_distance,
-               G_TF[idx].m15_pullback_quality);
-   PrintFormat("  M5 Trigger: Sweep=%s (T:%s) | Disp=%s (T:%s) | MSS=%s (T:%s)",
-               G_TF[idx].m5_sweep ? "YES" : "NO", TimeToString(G_TF[idx].m5_sweep_time, TIME_MINUTES),
-               G_TF[idx].m5_displacement ? "YES" : "NO", TimeToString(G_TF[idx].m5_displacement_time, TIME_MINUTES),
-               G_TF[idx].m5_mss ? "YES" : "NO", TimeToString(G_TF[idx].m5_mss_time, TIME_MINUTES));
-   PrintFormat("  Momentum: CCI=%s RF=%s (T:%s)",
-               G_TF[idx].m5_momentum_cci ? "YES" : "NO",
-               G_TF[idx].m5_momentum_rf ? "YES" : "NO",
-               TimeToString(G_TF[idx].m5_momentum_time, TIME_MINUTES));
-   PrintFormat("  M15 Tracking: Origin=%s | End=%s | Protected=%s | PullbackStart=%s",
-               TimeToString(G_TF[idx].m15_impulse_start_time, TIME_MINUTES),
-               TimeToString(G_TF[idx].m15_impulse_end_time, TIME_MINUTES),
-               TimeToString(G_TF[idx].m15_protected_time, TIME_MINUTES),
-               TimeToString(G_TF[idx].m15_pullback_start_time, TIME_MINUTES));
-   PrintFormat("  Score Breakdown: H1=%.0f M15=%.0f SW=%.0f DSP=%.0f MSS=%.0f COH=%.0f MOM=%.0f DIST=%.0f | TOTAL=%.0f",
-               G_TF[idx].score_h1_trend, G_TF[idx].score_m15_pullback,
-               G_TF[idx].score_sweep, G_TF[idx].score_displacement, G_TF[idx].score_mss,
-               G_TF[idx].score_event_coherence, G_TF[idx].score_momentum, G_TF[idx].score_entry_distance,
-               G_TF[idx].total_score);
-   PrintFormat("  Decision=%s | Reason=%s | Score=%.0f", decision, reason, score);
+   PrintFormat("Decision=%s | Reason=%s | Score=%.0f", decision, reason, score);
+   PrintFormat("M15:");
+   PrintFormat("Origin: %s", TimeToString(G_TF[idx].m15_impulse_start_time, TIME_MINUTES));
+   PrintFormat("Impulse: %s", TimeToString(G_TF[idx].m15_impulse_end_time, TIME_MINUTES));
+   PrintFormat("Protected: %s", TimeToString(G_TF[idx].m15_protected_time, TIME_MINUTES));
+   PrintFormat("Protected Confirmed: %s", TimeToString(G_TF[idx].m15_protected_confirmed_time, TIME_MINUTES));
+   PrintFormat("Pullback Start: %s", TimeToString(G_TF[idx].m15_pullback_start_time, TIME_MINUTES));
+   PrintFormat("M5:");
+   PrintFormat("Sweep: %s", G_TF[idx].m5_sweep ? "YES" : "NO");
+   PrintFormat("Sweep Time: %s", TimeToString(G_TF[idx].m5_sweep_time, TIME_MINUTES));
+   PrintFormat("Displacement: %s", G_TF[idx].m5_displacement ? "YES" : "NO");
+   PrintFormat("Displacement Time: %s", TimeToString(G_TF[idx].m5_displacement_time, TIME_MINUTES));
+   PrintFormat("MSS: %s", G_TF[idx].m5_mss ? "YES" : "NO");
+   PrintFormat("MSS Time: %s", TimeToString(G_TF[idx].m5_mss_time, TIME_MINUTES));
+   PrintFormat("Momentum: %s", (G_TF[idx].m5_momentum_cci && G_TF[idx].m5_momentum_rf) ? "YES" : "NO");
+   PrintFormat("Momentum Time: %s", TimeToString(G_TF[idx].m5_momentum_time, TIME_MINUTES));
+   PrintFormat("Score:");
+   PrintFormat("H1: %.0f", G_TF[idx].score_h1_trend);
+   PrintFormat("M15: %.0f", G_TF[idx].score_m15_pullback);
+   PrintFormat("Sweep: %.0f", G_TF[idx].score_sweep);
+   PrintFormat("Displacement: %.0f", G_TF[idx].score_displacement);
+   PrintFormat("MSS: %.0f", G_TF[idx].score_mss);
+   PrintFormat("Coherence: %.0f", G_TF[idx].score_event_coherence);
+   PrintFormat("Momentum: %.0f", G_TF[idx].score_momentum);
+   PrintFormat("Distance: %.0f", G_TF[idx].score_entry_distance);
+   PrintFormat("TOTAL: %.0f", G_TF[idx].total_score);
 }
 
 // ==================================================================
