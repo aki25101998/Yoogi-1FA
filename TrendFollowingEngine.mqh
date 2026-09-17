@@ -269,31 +269,38 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       
       if(find_new_impulse)
       {
-         int sh_idx = -1;
+         int hl_idx = -1; // Newest Swing Low (Protected HL)
+         int hh_idx = -1; // Older Swing High (Impulse High)
+         int ol_idx = -1; // Oldest Swing Low (Origin Low)
+         
          for(int i = right; i < pb_lookback - left; i++) {
-            if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) { sh_idx = i; break; }
+            if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) {
+               if(hl_idx == -1) hl_idx = i;
+               else if(hh_idx != -1 && ol_idx == -1) { ol_idx = i; break; }
+            }
+            else if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) {
+               if(hl_idx != -1 && hh_idx == -1) hh_idx = i;
+            }
          }
          
-         if(sh_idx != -1) {
-            int sl_idx = -1;
-            for(int i = sh_idx + 1; i < pb_lookback - left; i++) {
-               if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) { sl_idx = i; break; }
-            }
-            
-            // Validate it's a true expansion: Swing High > Swing Low
-            if(sl_idx != -1 && m15_highs[sh_idx] > m15_lows[sl_idx]) {
-               datetime t_high[], t_low[];
+         // Validate structure: Origin Low -> HH -> Protected HL
+         if(hl_idx != -1 && hh_idx != -1 && ol_idx != -1) {
+            if(m15_lows[ol_idx] < m15_highs[hh_idx] && m15_lows[hl_idx] < m15_highs[hh_idx]) {
+               datetime t_hl[], t_hh[], t_ol[];
                // Note: arrays from ReadHighLow_Generic start at index 1 of the chart.
-               if(CopyTime(sym, m15, sh_idx + 1, 1, t_high) == 1 && CopyTime(sym, m15, sl_idx + 1, 1, t_low) == 1)
+               if(CopyTime(sym, m15, hl_idx + 1, 1, t_hl) == 1 && 
+                  CopyTime(sym, m15, hh_idx + 1, 1, t_hh) == 1 && 
+                  CopyTime(sym, m15, ol_idx + 1, 1, t_ol) == 1)
                {
-                  if(t_low[0] < t_high[0]) // Origin time < Impulse High Time
+                  if(t_ol[0] < t_hh[0] && t_hh[0] < t_hl[0])
                   {
-                     G_TF[idx].m15_impulse_high = m15_highs[sh_idx];
-                     G_TF[idx].m15_impulse_low = m15_lows[sl_idx];
-                     G_TF[idx].m15_protected_low = m15_lows[sl_idx];
-                     G_TF[idx].m15_impulse_start_time = t_low[0];
-                     G_TF[idx].m15_impulse_end_time = t_high[0];
-                     G_TF[idx].m15_protected_time = t_low[0];
+                     G_TF[idx].m15_impulse_high = m15_highs[hh_idx];
+                     G_TF[idx].m15_impulse_low = m15_lows[ol_idx];
+                     G_TF[idx].m15_protected_low = m15_lows[hl_idx];
+                     G_TF[idx].m15_impulse_start_time = t_ol[0];
+                     G_TF[idx].m15_impulse_end_time = t_hh[0];
+                     G_TF[idx].m15_protected_time = t_hl[0];
+                     G_TF[idx].m15_pullback_start_time = t_hh[0] + PeriodSeconds(m15);
                   }
                }
             }
@@ -313,10 +320,6 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
             G_TF[idx].m15_pullback_quality = 20.0;
             G_TF[idx].score_m15_pullback = 20.0;
             G_TF[idx].m15_pullback_valid = true;
-            if (G_TF[idx].m15_pullback_start_time == 0) {
-               // Pullback start time is strictly the bar following the impulse end
-               G_TF[idx].m15_pullback_start_time = G_TF[idx].m15_impulse_end_time + PeriodSeconds(m15);
-            }
             return true;
          }
       }
@@ -328,30 +331,37 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       
       if(find_new_impulse)
       {
-         int sl_idx = -1;
+         int lh_idx = -1; // Newest Swing High (Protected LH)
+         int ll_idx = -1; // Older Swing Low (Impulse Low)
+         int oh_idx = -1; // Oldest Swing High (Origin High)
+         
          for(int i = right; i < pb_lookback - left; i++) {
-            if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) { sl_idx = i; break; }
+            if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) {
+               if(lh_idx == -1) lh_idx = i;
+               else if(ll_idx != -1 && oh_idx == -1) { oh_idx = i; break; }
+            }
+            else if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) {
+               if(lh_idx != -1 && ll_idx == -1) ll_idx = i;
+            }
          }
          
-         if(sl_idx != -1) {
-            int sh_idx = -1;
-            for(int i = sl_idx + 1; i < pb_lookback - left; i++) {
-               if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) { sh_idx = i; break; }
-            }
-            
-            // Validate it's a true expansion: Swing Low < Swing High
-            if(sh_idx != -1 && m15_lows[sl_idx] < m15_highs[sh_idx]) {
-               datetime t_low[], t_high[];
-               if(CopyTime(sym, m15, sl_idx + 1, 1, t_low) == 1 && CopyTime(sym, m15, sh_idx + 1, 1, t_high) == 1)
+         // Validate structure: Origin High -> LL -> Protected LH
+         if(lh_idx != -1 && ll_idx != -1 && oh_idx != -1) {
+            if(m15_highs[oh_idx] > m15_lows[ll_idx] && m15_highs[lh_idx] > m15_lows[ll_idx]) {
+               datetime t_lh[], t_ll[], t_oh[];
+               if(CopyTime(sym, m15, lh_idx + 1, 1, t_lh) == 1 && 
+                  CopyTime(sym, m15, ll_idx + 1, 1, t_ll) == 1 && 
+                  CopyTime(sym, m15, oh_idx + 1, 1, t_oh) == 1)
                {
-                  if(t_high[0] < t_low[0]) // Origin time < Impulse Low Time
+                  if(t_oh[0] < t_ll[0] && t_ll[0] < t_lh[0])
                   {
-                     G_TF[idx].m15_impulse_low = m15_lows[sl_idx];
-                     G_TF[idx].m15_impulse_high = m15_highs[sh_idx];
-                     G_TF[idx].m15_protected_high = m15_highs[sh_idx];
-                     G_TF[idx].m15_impulse_start_time = t_high[0];
-                     G_TF[idx].m15_impulse_end_time = t_low[0];
-                     G_TF[idx].m15_protected_time = t_high[0];
+                     G_TF[idx].m15_impulse_low = m15_lows[ll_idx];
+                     G_TF[idx].m15_impulse_high = m15_highs[oh_idx];
+                     G_TF[idx].m15_protected_high = m15_highs[lh_idx];
+                     G_TF[idx].m15_impulse_start_time = t_oh[0];
+                     G_TF[idx].m15_impulse_end_time = t_ll[0];
+                     G_TF[idx].m15_protected_time = t_lh[0];
+                     G_TF[idx].m15_pullback_start_time = t_ll[0] + PeriodSeconds(m15);
                   }
                }
             }
@@ -371,10 +381,6 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
             G_TF[idx].m15_pullback_quality = 20.0;
             G_TF[idx].score_m15_pullback = 20.0;
             G_TF[idx].m15_pullback_valid = true;
-            if (G_TF[idx].m15_pullback_start_time == 0) {
-               // Pullback start time is strictly the bar following the impulse end
-               G_TF[idx].m15_pullback_start_time = G_TF[idx].m15_impulse_end_time + PeriodSeconds(m15);
-            }
             return true;
          }
       }
@@ -442,7 +448,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          if(trend_dir == 1 && sweep_target >= G_TF[idx].m15_protected_low && sweep_target <= G_TF[idx].m15_impulse_high) in_zone = true;
          if(trend_dir == -1 && sweep_target <= G_TF[idx].m15_protected_high && sweep_target >= G_TF[idx].m15_impulse_low) in_zone = true;
          
-         if(in_zone && DetectLiquiditySweep(sym, m5, trend_dir, sweep_target))
+         // Event Timing: Sweep must occur AFTER the M15 Protected HL/LH is confirmed
+         if(in_zone && current_time > G_TF[idx].m15_protected_time && DetectLiquiditySweep(sym, m5, trend_dir, sweep_target))
          {
             G_TF[idx].m5_sweep = true;
             G_TF[idx].m5_sweep_time = current_time;
