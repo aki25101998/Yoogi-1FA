@@ -9,6 +9,43 @@
 #property strict
 
 // ==================================================================
+// HELPER: TF State Diagnostic Logging
+// ==================================================================
+string TFStateToString(int state)
+{
+   switch(state)
+   {
+      case TF_STATE_NONE: return "NONE";
+      case TF_STATE_H1_TREND: return "H1_TREND";
+      case TF_STATE_M15_PULLBACK: return "M15_PULLBACK";
+      case TF_STATE_M5_WAIT_SWEEP: return "M5_WAIT_SWEEP";
+      case TF_STATE_M5_WAIT_DISPLACEMENT: return "M5_WAIT_DISPLACEMENT";
+      case TF_STATE_M5_WAIT_MSS: return "M5_WAIT_MSS";
+      case TF_STATE_ENTRY_READY: return "ENTRY_READY";
+   }
+   return "UNKNOWN";
+}
+
+void SetTFState(int idx, int new_state, string reason)
+{
+   if(G_TF[idx].setup_state != new_state)
+   {
+      string sym = G_Pairs[idx].symbol;
+      string old_str = TFStateToString(G_TF[idx].setup_state);
+      string new_str = TFStateToString(new_state);
+      PrintFormat("[TF_STATE][%s] FROM=%s TO=%s REASON=%s", sym, old_str, new_str, reason);
+      G_TF[idx].setup_state = new_state;
+   }
+}
+
+void LogTFReset(int idx, string scope, string reason)
+{
+   string sym = G_Pairs[idx].symbol;
+   string prev_str = TFStateToString(G_TF[idx].setup_state);
+   PrintFormat("[TF_RESET] SYMBOL=%s SCOPE=%s PREV_STATE=%s REASON=%s", sym, scope, prev_str, reason);
+}
+
+// ==================================================================
 // HELPER: Reset toàn bộ TF Setup
 // ==================================================================
 void ResetTFSetup(int idx, string reason)
@@ -347,9 +384,10 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                       if(G_TF[idx].m15_impulse_start_time != 0) {
                          PrintFormat("[M15_IMPULSE_REFRESH][%s] direction=BUY old_protected=%.5f new_protected=%.5f reason=NEW_STRUCTURAL_IMPULSE",
                                      sym, G_TF[idx].m15_protected_low, m15_lows[best_hl]);
+                         LogTFReset(idx, "M5", "M15_IMPULSE_REFRESH");
                          ResetTFM5Evidence(idx);
                          if(G_TF[idx].setup_state > TF_STATE_M15_PULLBACK) {
-                             G_TF[idx].setup_state = TF_STATE_M15_PULLBACK; // Drop back to wait sweep
+                             SetTFState(idx, TF_STATE_M15_PULLBACK, "M15_IMPULSE_REFRESH");
                          }
                       }
                       
@@ -490,9 +528,10 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                       if(G_TF[idx].m15_impulse_start_time != 0) {
                          PrintFormat("[M15_IMPULSE_REFRESH][%s] direction=SELL old_protected=%.5f new_protected=%.5f reason=NEW_STRUCTURAL_IMPULSE",
                                      sym, G_TF[idx].m15_protected_high, m15_highs[best_lh]);
+                         LogTFReset(idx, "M5", "M15_IMPULSE_REFRESH");
                          ResetTFM5Evidence(idx);
                          if(G_TF[idx].setup_state > TF_STATE_M15_PULLBACK) {
-                             G_TF[idx].setup_state = TF_STATE_M15_PULLBACK; // Drop back to wait sweep
+                             SetTFState(idx, TF_STATE_M15_PULLBACK, "M15_IMPULSE_REFRESH");
                          }
                       }
                       
@@ -837,8 +876,15 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          G_TF[idx].m5_sweep_price = sweep_target;
          G_TF[idx].m5_sweep_level = sweep_target;
          G_TF[idx].score_sweep = 10.0;
-         G_TF[idx].setup_state = TF_STATE_M5_WAIT_DISPLACEMENT;
+         SetTFState(idx, TF_STATE_M5_WAIT_DISPLACEMENT, "M5_SWEEP_CONFIRMED");
          G_TF[idx].status = "WAIT DISPLACEMENT";
+         
+#ifdef _DEBUG
+         if(!G_TF[idx].m15_pullback_valid)
+         {
+             PrintFormat("[TF_INVARIANT_VIOLATION][%s] M5_SWEEP_EXISTS_BUT_M15_CONTEXT_INVALID", sym);
+         }
+#endif
          
          double dist_val = 0;
          double structural_relevance = 0;
@@ -1333,13 +1379,26 @@ int CheckTrendFollowingSignal(int idx)
    {
       G_TF[idx].m15_pullback_bar_count++;
       
-      // Check M15 pullback invalidation
+      // 1. Evaluate pullback FIRST to allow impulse refresh
+      if(G_TF[idx].setup_state >= TF_STATE_H1_TREND)
+      {
+         bool pb_valid = EvaluateM15Pullback(idx, dir);
+         if(pb_valid && G_TF[idx].setup_state == TF_STATE_H1_TREND)
+         {
+            SetTFState(idx, TF_STATE_M15_PULLBACK, "M15_PULLBACK_CONFIRMED");
+            G_TF[idx].status = "M15 PULLBACK";
+            LogTFDecision(idx, dir, "M15_PULLBACK", "Pullback detected", 0);
+         }
+      }
+      
+      // 2. Check M15 pullback invalidation (after potential refresh)
       if(G_TF[idx].setup_state >= TF_STATE_M15_PULLBACK && CheckM15PullbackInvalidation(idx))
       {
          // Pullback became reversal → reset M15 + M5 but keep H1
+         LogTFReset(idx, "M15", "M15_PROTECTED_STRUCTURE_BROKEN");
          ResetTFM15Evidence(idx);
          ResetTFM5Evidence(idx);
-         G_TF[idx].setup_state = TF_STATE_H1_TREND;
+         SetTFState(idx, TF_STATE_H1_TREND, "M15_INVALIDATION");
          G_TF[idx].status = "M15 PULLBACK INVALID";
          LogTFDecision(idx, dir, "M15_INVALID", "Pullback became reversal", 0);
          return 0;
@@ -1351,18 +1410,6 @@ int CheckTrendFollowingSignal(int idx)
       {
          // Reset pullback counter but don't kill setup
          G_TF[idx].m15_pullback_bar_count = 0;
-      }
-      
-      // Evaluate pullback
-      if(G_TF[idx].setup_state == TF_STATE_H1_TREND || 
-         (G_TF[idx].setup_state == TF_STATE_M15_PULLBACK && !G_TF[idx].m15_pullback_valid))
-      {
-         if(EvaluateM15Pullback(idx, dir))
-         {
-            G_TF[idx].setup_state = TF_STATE_M15_PULLBACK;
-            G_TF[idx].status = "M15 PULLBACK";
-            LogTFDecision(idx, dir, "M15_PULLBACK", "Pullback detected", 0);
-         }
       }
    }
    
