@@ -253,15 +253,12 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
    int left = InpReversal_SwingLeft;
    int right = InpReversal_SwingRight;
    
-   // If we don't have an impulse yet, find a new one
-   bool find_new_impulse = (G_TF[idx].m15_impulse_high == 0.0 && G_TF[idx].m15_impulse_low == 0.0);
-   
    if(trend_dir == 1) // BUY trend → look for pullback DOWN
    {
       double distance_to_ema = (ema50 - close[0]) / atr;
       G_TF[idx].m15_ema_distance = distance_to_ema;
       
-      if(find_new_impulse)
+      // Always look for valid impulse to allow refresh
       {
          int best_hl = -1, best_hh = -1, best_ol = -1, best_oh = -1;
          double best_score = -999999.0;
@@ -340,21 +337,39 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
              {
                 if(t_ol[0] < t_oh[0] && t_oh[0] < t_hh[0] && t_hh[0] < t_hl[0])
                 {
-                   if(G_TF[idx].m15_impulse_high != m15_highs[best_hh] || G_TF[idx].m15_impulse_low != m15_lows[best_ol]) {
-                      ResetTFM5Evidence(idx);
-                   }
-                   G_TF[idx].m15_impulse_high = m15_highs[best_hh];
-                   G_TF[idx].m15_impulse_low = m15_lows[best_ol];
-                   G_TF[idx].m15_protected_low = m15_lows[best_hl];
-                   G_TF[idx].m15_impulse_start_time = t_ol[0];
-                   G_TF[idx].m15_impulse_end_time = t_hh[0];
-                   G_TF[idx].m15_protected_time = t_hl[0];
-                   G_TF[idx].m15_protected_confirmed_time = t_conf[0];
-                   G_TF[idx].m15_pullback_start_time = t_hh[0];
+                   bool is_newer_or_better = false;
+                   if(G_TF[idx].m15_impulse_start_time == 0) is_newer_or_better = true;
+                   else if(t_ol[0] > G_TF[idx].m15_impulse_start_time) is_newer_or_better = true;
+                   else if(t_ol[0] == G_TF[idx].m15_impulse_start_time && t_hh[0] > G_TF[idx].m15_impulse_end_time) is_newer_or_better = true;
                    
-                   double relevance = MathAbs(close[0] - m15_lows[best_hl]) / atr;
-                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=BUY origin_low=%.5f ref_high=%.5f impulse_hh=%.5f protected_hl=%.5f amplitude_atr=%.2f relevance=%.2f ranking_score=%.2f",
-                               sym, m15_lows[best_ol], m15_highs[best_oh], m15_highs[best_hh], m15_lows[best_hl], (m15_highs[best_hh] - m15_lows[best_ol])/atr, relevance, best_score);
+                   if(is_newer_or_better)
+                   {
+                      if(G_TF[idx].m15_impulse_start_time != 0) {
+                         PrintFormat("[M15_IMPULSE_REFRESH][%s] direction=BUY old_protected=%.5f new_protected=%.5f reason=NEW_STRUCTURAL_IMPULSE",
+                                     sym, G_TF[idx].m15_protected_low, m15_lows[best_hl]);
+                         ResetTFM5Evidence(idx);
+                         if(G_TF[idx].setup_state > TF_STATE_M15_PULLBACK) {
+                             G_TF[idx].setup_state = TF_STATE_M15_PULLBACK; // Drop back to wait sweep
+                         }
+                      }
+                      
+                      G_TF[idx].m15_impulse_high = m15_highs[best_hh];
+                      G_TF[idx].m15_impulse_low = m15_lows[best_ol];
+                      G_TF[idx].m15_protected_low = m15_lows[best_hl];
+                      G_TF[idx].m15_impulse_start_time = t_ol[0];
+                      G_TF[idx].m15_impulse_end_time = t_hh[0];
+                      G_TF[idx].m15_protected_time = t_hl[0];
+                      G_TF[idx].m15_protected_confirmed_time = t_conf[0];
+                      G_TF[idx].m15_pullback_start_time = t_hh[0];
+                      
+                      double relevance = MathAbs(close[0] - m15_lows[best_hl]) / atr;
+                      PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=BUY origin_low=%.5f ref_high=%.5f impulse_hh=%.5f protected_hl=%.5f amplitude_atr=%.2f relevance=%.2f ranking_score=%.2f",
+                                  sym, m15_lows[best_ol], m15_highs[best_oh], m15_highs[best_hh], m15_lows[best_hl], (m15_highs[best_hh] - m15_lows[best_ol])/atr, relevance, best_score);
+                   }
+                   else if (t_ol[0] < G_TF[idx].m15_impulse_start_time)
+                   {
+                      PrintFormat("[M15_IMPULSE_REJECT][%s] reason=OLDER_IMPULSE_FOUND", sym);
+                   }
                 }
              }
          }
@@ -386,7 +401,7 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       double distance_to_ema = (close[0] - ema50) / atr;
       G_TF[idx].m15_ema_distance = distance_to_ema;
       
-      if(find_new_impulse)
+      // Always look for valid impulse to allow refresh
       {
          int best_lh = -1, best_ll = -1, best_oh = -1, best_ol = -1;
          double best_score = -999999.0;
@@ -465,21 +480,39 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
              {
                 if(t_oh[0] < t_ol[0] && t_ol[0] < t_ll[0] && t_ll[0] < t_lh[0])
                 {
-                   if(G_TF[idx].m15_impulse_high != m15_highs[best_oh] || G_TF[idx].m15_impulse_low != m15_lows[best_ll]) {
-                      ResetTFM5Evidence(idx);
-                   }
-                   G_TF[idx].m15_impulse_low = m15_lows[best_ll];
-                   G_TF[idx].m15_impulse_high = m15_highs[best_oh];
-                   G_TF[idx].m15_protected_high = m15_highs[best_lh];
-                   G_TF[idx].m15_impulse_start_time = t_oh[0];
-                   G_TF[idx].m15_impulse_end_time = t_ll[0];
-                   G_TF[idx].m15_protected_time = t_lh[0];
-                   G_TF[idx].m15_protected_confirmed_time = t_conf[0];
-                   G_TF[idx].m15_pullback_start_time = t_ll[0];
+                   bool is_newer_or_better = false;
+                   if(G_TF[idx].m15_impulse_start_time == 0) is_newer_or_better = true;
+                   else if(t_oh[0] > G_TF[idx].m15_impulse_start_time) is_newer_or_better = true;
+                   else if(t_oh[0] == G_TF[idx].m15_impulse_start_time && t_ll[0] > G_TF[idx].m15_impulse_end_time) is_newer_or_better = true;
                    
-                   double relevance = MathAbs(close[0] - m15_highs[best_lh]) / atr;
-                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=SELL origin_high=%.5f ref_low=%.5f impulse_ll=%.5f protected_lh=%.5f amplitude_atr=%.2f relevance=%.2f ranking_score=%.2f",
-                               sym, m15_highs[best_oh], m15_lows[best_ol], m15_lows[best_ll], m15_highs[best_lh], (m15_highs[best_oh] - m15_lows[best_ll])/atr, relevance, best_score);
+                   if(is_newer_or_better)
+                   {
+                      if(G_TF[idx].m15_impulse_start_time != 0) {
+                         PrintFormat("[M15_IMPULSE_REFRESH][%s] direction=SELL old_protected=%.5f new_protected=%.5f reason=NEW_STRUCTURAL_IMPULSE",
+                                     sym, G_TF[idx].m15_protected_high, m15_highs[best_lh]);
+                         ResetTFM5Evidence(idx);
+                         if(G_TF[idx].setup_state > TF_STATE_M15_PULLBACK) {
+                             G_TF[idx].setup_state = TF_STATE_M15_PULLBACK; // Drop back to wait sweep
+                         }
+                      }
+                      
+                      G_TF[idx].m15_impulse_low = m15_lows[best_ll];
+                      G_TF[idx].m15_impulse_high = m15_highs[best_oh];
+                      G_TF[idx].m15_protected_high = m15_highs[best_lh];
+                      G_TF[idx].m15_impulse_start_time = t_oh[0];
+                      G_TF[idx].m15_impulse_end_time = t_ll[0];
+                      G_TF[idx].m15_protected_time = t_lh[0];
+                      G_TF[idx].m15_protected_confirmed_time = t_conf[0];
+                      G_TF[idx].m15_pullback_start_time = t_ll[0];
+                      
+                      double relevance = MathAbs(close[0] - m15_highs[best_lh]) / atr;
+                      PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=SELL origin_high=%.5f ref_low=%.5f impulse_ll=%.5f protected_lh=%.5f amplitude_atr=%.2f relevance=%.2f ranking_score=%.2f",
+                                  sym, m15_highs[best_oh], m15_lows[best_ol], m15_lows[best_ll], m15_highs[best_lh], (m15_highs[best_oh] - m15_lows[best_ll])/atr, relevance, best_score);
+                   }
+                   else if (t_oh[0] < G_TF[idx].m15_impulse_start_time)
+                   {
+                      PrintFormat("[M15_IMPULSE_REJECT][%s] reason=OLDER_IMPULSE_FOUND", sym);
+                   }
                 }
              }
          }
@@ -562,39 +595,61 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          for(int i = right; i < m5_lookback - left; i++) {
             if(IsSwingLow(m5_lows, i, left, right, m5_lookback)) {
                double target = m5_lows[i];
-               if(target >= G_TF[idx].m15_protected_low && target <= G_TF[idx].m15_impulse_high) {
-                  if(current_time > G_TF[idx].m15_protected_confirmed_time) {
-                     
-                     // MUST be structurally relevant: Formed DURING the pullback, not before
-                     datetime t_arr[];
-                     if(CopyTime(sym, m5, i + 1, 1, t_arr) == 1) {
-                        datetime target_time = t_arr[0];
-                        if (target_time < G_TF[idx].m15_pullback_start_time) {
-                           PrintFormat("[M5_SWEEP_REJECT][%s] reason=TARGET_BEFORE_PULLBACK target=%.5f time=%s", sym, target, TimeToString(target_time));
-                           continue;
-                        }
-                     }
-                     
-                     // Filter: already consumed by intermediate candles?
-                     bool consumed = false;
-                     for(int j = 1; j < i; j++) {
-                        if(m5_lows[j] < target) { consumed = true; break; }
-                     }
-                     
-                     if(!consumed && DetectLiquiditySweep(sym, m5, trend_dir, target)) {
-                        candidate_count++;
-                        double freshness = 1.0 / (i + 1.0);
-                        double dist = 0;
-                        if(atr > 0) dist = MathAbs(target - G_TF[idx].m15_protected_low) / atr;
-                        double score = (freshness * 50.0) - (dist * 10.0);
-                        
-                        if(score > best_score) {
-                           best_score = score;
-                           best_candidate_idx = i;
-                           sweep_target = target;
-                        }
-                     }
-                  }
+               if(!(target >= G_TF[idx].m15_protected_low && target <= G_TF[idx].m15_impulse_high)) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=OUTSIDE_M15_RANGE target=%.5f", sym, target);
+                  continue;
+               }
+               if(current_time <= G_TF[idx].m15_protected_confirmed_time) {
+                  continue; // Don't spam, just wait for confirmation
+               }
+               
+               // MUST be structurally relevant: Formed DURING the pullback, not before
+               datetime t_arr[];
+               if(CopyTime(sym, m5, i + 1, 1, t_arr) != 1) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=TARGET_TIME_UNAVAILABLE idx=%d", sym, i);
+                  continue;
+               }
+               
+               datetime target_time = t_arr[0];
+               if (target_time < G_TF[idx].m15_pullback_start_time) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=TARGET_BEFORE_PULLBACK target=%.5f time=%s", sym, target, TimeToString(target_time));
+                  continue;
+               }
+               
+               // Filter: already consumed by intermediate candles?
+               bool consumed = false;
+               for(int j = 1; j < i; j++) {
+                  if(m5_lows[j] < target) { consumed = true; break; }
+               }
+               
+               if(consumed) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=CONSUMED target=%.5f", sym, target);
+                  continue;
+               }
+               
+               if(!DetectLiquiditySweep(sym, m5, trend_dir, target)) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=NO_LIQUIDITY_SWEEP target=%.5f", sym, target);
+                  continue;
+               }
+               
+               candidate_count++;
+               double freshness = 1.0 / (i + 1.0);
+               double dist = 0;
+               if(atr > 0) dist = MathAbs(target - G_TF[idx].m15_protected_low) / atr;
+               
+               double structural_depth = 0;
+               if(atr > 0) structural_depth = (G_TF[idx].m15_impulse_high - target) / atr;
+               
+               // Priorities:
+               // 1. Structural relevance (depth into pullback) - high weight
+               // 2. Proximity to protected level (dist) - negative high weight
+               // 3. Freshness - low weight
+               double score = (structural_depth * 100.0) - (dist * 50.0) + (freshness * 10.0);
+               
+               if(score > best_score) {
+                  best_score = score;
+                  best_candidate_idx = i;
+                  sweep_target = target;
                }
             }
          }
@@ -602,39 +657,60 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          for(int i = right; i < m5_lookback - left; i++) {
             if(IsSwingHigh(m5_highs, i, left, right, m5_lookback)) {
                double target = m5_highs[i];
-               if(target <= G_TF[idx].m15_protected_high && target >= G_TF[idx].m15_impulse_low) {
-                  if(current_time > G_TF[idx].m15_protected_confirmed_time) {
-                     
-                     // MUST be structurally relevant: Formed DURING the pullback, not before
-                     datetime t_arr[];
-                     if(CopyTime(sym, m5, i + 1, 1, t_arr) == 1) {
-                        datetime target_time = t_arr[0];
-                        if (target_time < G_TF[idx].m15_pullback_start_time) {
-                           PrintFormat("[M5_SWEEP_REJECT][%s] reason=TARGET_BEFORE_PULLBACK target=%.5f time=%s", sym, target, TimeToString(target_time));
-                           continue;
-                        }
-                     }
-                     
-                     // Filter: already consumed by intermediate candles?
-                     bool consumed = false;
-                     for(int j = 1; j < i; j++) {
-                        if(m5_highs[j] > target) { consumed = true; break; }
-                     }
-                     
-                     if(!consumed && DetectLiquiditySweep(sym, m5, trend_dir, target)) {
-                        candidate_count++;
-                        double freshness = 1.0 / (i + 1.0);
-                        double dist = 0;
-                        if(atr > 0) dist = MathAbs(target - G_TF[idx].m15_protected_high) / atr;
-                        double score = (freshness * 50.0) - (dist * 10.0);
-                        
-                        if(score > best_score) {
-                           best_score = score;
-                           best_candidate_idx = i;
-                           sweep_target = target;
-                        }
-                     }
-                  }
+               if(!(target <= G_TF[idx].m15_protected_high && target >= G_TF[idx].m15_impulse_low)) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=OUTSIDE_M15_RANGE target=%.5f", sym, target);
+                  continue;
+               }
+               if(current_time <= G_TF[idx].m15_protected_confirmed_time) {
+                  continue; // Don't spam, just wait for confirmation
+               }
+               
+               // MUST be structurally relevant: Formed DURING the pullback, not before
+               datetime t_arr[];
+               if(CopyTime(sym, m5, i + 1, 1, t_arr) != 1) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=TARGET_TIME_UNAVAILABLE idx=%d", sym, i);
+                  continue;
+               }
+               
+               datetime target_time = t_arr[0];
+               if (target_time < G_TF[idx].m15_pullback_start_time) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=TARGET_BEFORE_PULLBACK target=%.5f time=%s", sym, target, TimeToString(target_time));
+                  continue;
+               }
+               
+               // Filter: already consumed by intermediate candles?
+               bool consumed = false;
+               for(int j = 1; j < i; j++) {
+                  if(m5_highs[j] > target) { consumed = true; break; }
+               }
+               if(consumed) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=CONSUMED target=%.5f", sym, target);
+                  continue;
+               }
+               
+               if(!DetectLiquiditySweep(sym, m5, trend_dir, target)) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=NO_LIQUIDITY_SWEEP target=%.5f", sym, target);
+                  continue;
+               }
+               
+               candidate_count++;
+               double freshness = 1.0 / (i + 1.0);
+               double dist = 0;
+               if(atr > 0) dist = MathAbs(target - G_TF[idx].m15_protected_high) / atr;
+               
+               double structural_depth = 0;
+               if(atr > 0) structural_depth = (target - G_TF[idx].m15_impulse_low) / atr;
+               
+               // Priorities:
+               // 1. Structural relevance (depth into pullback) - high weight
+               // 2. Proximity to protected level (dist) - negative high weight
+               // 3. Freshness - low weight
+               double score = (structural_depth * 100.0) - (dist * 50.0) + (freshness * 10.0);
+               
+               if(score > best_score) {
+                  best_score = score;
+                  best_candidate_idx = i;
+                  sweep_target = target;
                }
             }
          }
@@ -653,10 +729,14 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          G_TF[idx].status = "WAIT DISPLACEMENT";
          
          double dist_val = 0;
-         if(atr > 0) dist_val = MathAbs(sweep_target - (trend_dir == 1 ? G_TF[idx].m15_protected_low : G_TF[idx].m15_protected_high)) / atr;
+         double structural_relevance = 0;
+         if(atr > 0) {
+            dist_val = MathAbs(sweep_target - (trend_dir == 1 ? G_TF[idx].m15_protected_low : G_TF[idx].m15_protected_high)) / atr;
+            structural_relevance = (trend_dir == 1) ? (G_TF[idx].m15_impulse_high - sweep_target) / atr : (sweep_target - G_TF[idx].m15_impulse_low) / atr;
+         }
          
-         PrintFormat("[M5_SELECTED_SWEEP][%s] direction=%d swing_price=%.5f age_bars=%d distance=%.2f", 
-                     sym, trend_dir, sweep_target, best_candidate_idx, dist_val);
+         PrintFormat("[M5_SELECTED_SWEEP][%s] direction=%d swing_price=%.5f age_bars=%d distance=%.2f structural_relevance=%.2f ranking_score=%.2f", 
+                     sym, trend_dir, sweep_target, best_candidate_idx, dist_val, structural_relevance, best_score);
       }
       else
       {
