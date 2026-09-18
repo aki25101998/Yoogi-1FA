@@ -302,6 +302,12 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
          double best_score = -999999.0;
          int candidate_count = 0;
          
+         int summary_raw_pairs = 0;
+         int summary_rej_pullback_leg = 0;
+         int summary_passed_relevance = 0;
+         int summary_rej_structure = 0;
+         int summary_valid_structs = 0;
+         
          for(int i_hl = right; i_hl < pb_lookback - left; i_hl++)
          {
             if(!IsSwingLow(m15_lows, i_hl, left, right, pb_lookback)) continue;
@@ -310,13 +316,20 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
             {
                if(!IsSwingHigh(m15_highs, i_hh, left, right, pb_lookback)) continue;
                
+               summary_raw_pairs++;
+               
                // HARD FILTER: Relevance Check (Price must be in Pullback Leg)
                if (close[0] > m15_highs[i_hh] || close[0] < m15_lows[i_hl])
                {
-                   PrintFormat("[M15_STRUCTURE_REJECT][%s] reason=NOT_IN_PULLBACK_LEG candidate_hl_idx=%d candidate_hh_idx=%d", sym, i_hl, i_hh);
+                   summary_rej_pullback_leg++;
+                   if (summary_rej_pullback_leg <= 10) {
+                       PrintFormat("[M15_STRUCTURE_REJECT][%s]\nreason=NOT_IN_PULLBACK_LEG\ndirection=BUY\ncurrent_close=%.5f\ncandidate_hl=%.5f\ncandidate_hh=%.5f\nhl_idx=%d\nhh_idx=%d", 
+                                   sym, close[0], m15_lows[i_hl], m15_highs[i_hh], i_hl, i_hh);
+                   }
                    continue;
                }
                
+               summary_passed_relevance++;
                bool found_valid_structure = false;
                
                for(int i_oh = i_hh + 1; i_oh < pb_lookback - left; i_oh++)
@@ -333,6 +346,7 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                         m15_lows[i_hl] > m15_lows[i_ol] &&   // Protected HL is above OL
                         m15_highs[i_hh] > m15_lows[i_hl])    // HH is above HL
                      {
+                        summary_valid_structs++;
                         candidate_count++;
                         
                         double freshness = 1.0 / (i_hl + 1.0);
@@ -352,16 +366,30 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                         }
                         found_valid_structure = true;
                      }
+                     else
+                     {
+                         if (!found_valid_structure && summary_rej_structure < 10) {
+                             PrintFormat("[M15_STRUCTURE_REJECT][%s]\nreason=INVALID_QUAD\ndirection=BUY\norigin_low=%.5f\nreference_high=%.5f\nhigher_high=%.5f\nprotected_hl=%.5f\ncurrent_close=%.5f", 
+                                         sym, m15_lows[i_ol], m15_highs[i_oh], m15_highs[i_hh], m15_lows[i_hl], close[0]);
+                             summary_rej_structure++;
+                         }
+                     }
                   }
                }
                
                if(!found_valid_structure)
                {
-                  PrintFormat("[M15_STRUCTURE_REJECT][%s] reason=NO_VALID_STRUCTURAL_BREAK candidate_hl_idx=%d candidate_hh_idx=%d", sym, i_hl, i_hh);
+                  if (summary_rej_structure < 10) {
+                      PrintFormat("[M15_STRUCTURE_REJECT][%s]\nreason=NO_VALID_STRUCTURAL_BREAK\ndirection=BUY\ncurrent_close=%.5f\ncandidate_hl=%.5f\ncandidate_hh=%.5f\nhl_idx=%d\nhh_idx=%d", 
+                                  sym, close[0], m15_lows[i_hl], m15_highs[i_hh], i_hl, i_hh);
+                      summary_rej_structure++;
+                  }
                }
             }
          }
          
+         PrintFormat("[M15_FILTER_SUMMARY][%s]\ndirection=BUY\nraw_HL_HH_pairs=%d\nrejected_not_in_pullback_leg=%d\npassed_relevance=%d\nrejected_structure=%d\nvalid_structures=%d\nselected=%s", 
+                     sym, summary_raw_pairs, summary_rej_pullback_leg, summary_passed_relevance, summary_rej_structure, summary_valid_structs, (candidate_count > 0 ? "YES" : "NO"));
          PrintFormat("[M15_IMPULSE_CANDIDATES][%s] BUY candidates=%d", sym, candidate_count);
          
          if(candidate_count > 0 && best_hl != -1 && best_hh != -1 && best_ol != -1 && best_oh != -1)
@@ -451,6 +479,12 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
          double best_score = -999999.0;
          int candidate_count = 0;
          
+         int summary_raw_pairs = 0;
+         int summary_rej_pullback_leg = 0;
+         int summary_passed_relevance = 0;
+         int summary_rej_structure = 0;
+         int summary_valid_structs = 0;
+         
          for(int i_lh = right; i_lh < pb_lookback - left; i_lh++)
          {
             if(!IsSwingHigh(m15_highs, i_lh, left, right, pb_lookback)) continue;
@@ -459,13 +493,20 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
             {
                if(!IsSwingLow(m15_lows, i_ll, left, right, pb_lookback)) continue;
                
+               summary_raw_pairs++;
+               
                // HARD FILTER: Relevance Check (Price must be in Pullback Leg)
                if (close[0] < m15_lows[i_ll] || close[0] > m15_highs[i_lh])
                {
-                   PrintFormat("[M15_STRUCTURE_REJECT][%s] reason=NOT_IN_PULLBACK_LEG candidate_lh_idx=%d candidate_ll_idx=%d", sym, i_lh, i_ll);
+                   summary_rej_pullback_leg++;
+                   if (summary_rej_pullback_leg <= 10) {
+                       PrintFormat("[M15_STRUCTURE_REJECT][%s]\nreason=NOT_IN_PULLBACK_LEG\ndirection=SELL\ncurrent_close=%.5f\ncandidate_lh=%.5f\ncandidate_ll=%.5f\nlh_idx=%d\nll_idx=%d", 
+                                   sym, close[0], m15_highs[i_lh], m15_lows[i_ll], i_lh, i_ll);
+                   }
                    continue;
                }
                
+               summary_passed_relevance++;
                bool found_valid_structure = false;
                
                for(int i_ol = i_ll + 1; i_ol < pb_lookback - left; i_ol++)
@@ -482,6 +523,7 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                         m15_highs[i_lh] < m15_highs[i_oh] &&   // Protected LH is below OH
                         m15_lows[i_ll] < m15_highs[i_lh])    // LL is below LH
                      {
+                        summary_valid_structs++;
                         candidate_count++;
                         
                         double freshness = 1.0 / (i_lh + 1.0);
@@ -501,16 +543,30 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                         }
                         found_valid_structure = true;
                      }
+                     else
+                     {
+                         if (!found_valid_structure && summary_rej_structure < 10) {
+                             PrintFormat("[M15_STRUCTURE_REJECT][%s]\nreason=INVALID_QUAD\ndirection=SELL\norigin_high=%.5f\nreference_low=%.5f\nlower_low=%.5f\nprotected_lh=%.5f\ncurrent_close=%.5f", 
+                                         sym, m15_highs[i_oh], m15_lows[i_ol], m15_lows[i_ll], m15_highs[i_lh], close[0]);
+                             summary_rej_structure++;
+                         }
+                     }
                   }
                }
                
                if(!found_valid_structure)
                {
-                  PrintFormat("[M15_STRUCTURE_REJECT][%s] reason=NO_VALID_STRUCTURAL_BREAK candidate_lh_idx=%d candidate_ll_idx=%d", sym, i_lh, i_ll);
+                  if (summary_rej_structure < 10) {
+                      PrintFormat("[M15_STRUCTURE_REJECT][%s]\nreason=NO_VALID_STRUCTURAL_BREAK\ndirection=SELL\ncurrent_close=%.5f\ncandidate_lh=%.5f\ncandidate_ll=%.5f\nlh_idx=%d\nll_idx=%d", 
+                                  sym, close[0], m15_highs[i_lh], m15_lows[i_ll], i_lh, i_ll);
+                      summary_rej_structure++;
+                  }
                }
             }
          }
          
+         PrintFormat("[M15_FILTER_SUMMARY][%s]\ndirection=SELL\nraw_HL_HH_pairs=%d\nrejected_not_in_pullback_leg=%d\npassed_relevance=%d\nrejected_structure=%d\nvalid_structures=%d\nselected=%s", 
+                     sym, summary_raw_pairs, summary_rej_pullback_leg, summary_passed_relevance, summary_rej_structure, summary_valid_structs, (candidate_count > 0 ? "YES" : "NO"));
          PrintFormat("[M15_IMPULSE_CANDIDATES][%s] SELL candidates=%d", sym, candidate_count);
          
          if(candidate_count > 0 && best_lh != -1 && best_ll != -1 && best_oh != -1 && best_ol != -1)
