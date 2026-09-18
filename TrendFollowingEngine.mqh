@@ -28,19 +28,7 @@ void ResetTFSetup(int idx, string reason)
    G_TF[idx].h1_structure_valid = false;
    G_TF[idx].h1_not_sideway = false;
    
-   G_TF[idx].m15_pullback_valid = false;
-   G_TF[idx].m15_pullback_quality = 0.0;
-   G_TF[idx].m15_pullback_bar_count = 0;
-   G_TF[idx].m15_pullback_depth = 0.0;
-   G_TF[idx].m15_ema_distance = 0.0;
-   G_TF[idx].m15_pullback_start_time = 0;
-   G_TF[idx].m15_impulse_high = 0.0;
-   G_TF[idx].m15_impulse_low = 0.0;
-   G_TF[idx].m15_impulse_start_time = 0;
-   G_TF[idx].m15_impulse_end_time = 0;
-   G_TF[idx].m15_protected_time = 0;
-   G_TF[idx].m15_protected_confirmed_time = 0;
-   
+   ResetTFM15Evidence(idx);
    ResetTFM5Evidence(idx);
    
    G_TF[idx].total_score = 0.0;
@@ -49,8 +37,6 @@ void ResetTFSetup(int idx, string reason)
    G_TF[idx].status = "NO SETUP";
    
    G_TF[idx].h1_protected_structure = 0.0;
-   G_TF[idx].m15_protected_low = 0.0;
-   G_TF[idx].m15_protected_high = 0.0;
 }
 
 // Reset only M5 evidence (keep H1 + M15 state)
@@ -84,15 +70,37 @@ void ResetTFM5Evidence(int idx)
    G_TF[idx].score_entry_distance = 0.0;
 }
 
+// Reset only M15 evidence
+void ResetTFM15Evidence(int idx)
+{
+   G_TF[idx].m15_pullback_valid = false;
+   G_TF[idx].m15_pullback_quality = 0.0;
+   G_TF[idx].m15_pullback_bar_count = 0;
+   G_TF[idx].m15_pullback_depth = 0.0;
+   G_TF[idx].m15_ema_distance = 0.0;
+   G_TF[idx].m15_pullback_start_time = 0;
+   G_TF[idx].m15_impulse_high = 0.0;
+   G_TF[idx].m15_impulse_low = 0.0;
+   G_TF[idx].m15_impulse_start_time = 0;
+   G_TF[idx].m15_impulse_end_time = 0;
+   G_TF[idx].m15_protected_time = 0;
+   G_TF[idx].m15_protected_confirmed_time = 0;
+   G_TF[idx].score_m15_pullback = 0.0;
+   G_TF[idx].m15_protected_low = 0.0;
+   G_TF[idx].m15_protected_high = 0.0;
+}
+
 // ==================================================================
 // LAYER 1: H1 TREND REGIME
 // ==================================================================
 
 // Evaluate H1 Trend Quality - Returns direction (1=BUY, -1=SELL, 0=NONE)
-int EvaluateH1TrendRegime(int idx)
+int EvaluateH1TrendRegime(int idx, double &out_protected_struct)
 {
    string sym = G_Pairs[idx].symbol;
    ENUM_TIMEFRAMES htf = G_Pairs[idx].htf; // H1
+   
+   out_protected_struct = 0.0;
    
    // --- EMA Alignment ---
    double ema20 = CalculateEMA_Generic(sym, htf, 20, 1);
@@ -195,7 +203,7 @@ int EvaluateH1TrendRegime(int idx)
       G_TF[idx].score_h1_trend = buy_structure ? 20.0 : 15.0;
       
       // Set protected structure: if price breaks below recent swing low, trend invalid
-      if(slCount >= 1) G_TF[idx].h1_protected_structure = swL[0];
+      if(slCount >= 1) out_protected_struct = swL[0];
    }
    else if(sell_minimum)
    {
@@ -209,7 +217,7 @@ int EvaluateH1TrendRegime(int idx)
       G_TF[idx].score_h1_trend = sell_structure ? 20.0 : 15.0;
       
       // Set protected structure: if price breaks above recent swing high, trend invalid
-      if(shCount >= 1) G_TF[idx].h1_protected_structure = swH[0];
+      if(shCount >= 1) out_protected_struct = swH[0];
    }
    else
    {
@@ -280,7 +288,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                      
                      double freshness = 1.0 / (i_hl + 1.0);
                      double amplitude = (m15_highs[i_hh] - m15_lows[i_ol]) / atr;
-                     double score = (freshness * 50.0) + (amplitude * 10.0);
+                     double relevance = MathAbs(close[0] - m15_lows[i_hl]) / atr;
+                     double score = (freshness * 50.0) + (amplitude * 10.0) - (relevance * 20.0);
                      
                      if(score > best_score)
                      {
@@ -318,8 +327,9 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                    G_TF[idx].m15_protected_confirmed_time = t_conf[0];
                    G_TF[idx].m15_pullback_start_time = t_hh[0];
                    
-                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=BUY impulse_high=%.5f impulse_low=%.5f protected_hl=%.5f age_bars=%d impulse_atr=%.2f",
-                               sym, m15_highs[best_hh], m15_lows[best_ol], m15_lows[best_hl], best_hl, (m15_highs[best_hh] - m15_lows[best_ol])/atr);
+                   double relevance = MathAbs(close[0] - m15_lows[best_hl]) / atr;
+                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=BUY impulse_high=%.5f impulse_low=%.5f protected_hl=%.5f age_bars=%d impulse_atr=%.2f relevance=%.2f score=%.2f",
+                               sym, m15_highs[best_hh], m15_lows[best_ol], m15_lows[best_hl], best_hl, (m15_highs[best_hh] - m15_lows[best_ol])/atr, relevance, best_score);
                 }
              }
          }
@@ -378,7 +388,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                      
                      double freshness = 1.0 / (i_lh + 1.0);
                      double amplitude = (m15_highs[i_oh] - m15_lows[i_ll]) / atr;
-                     double score = (freshness * 50.0) + (amplitude * 10.0);
+                     double relevance = MathAbs(close[0] - m15_highs[i_lh]) / atr;
+                     double score = (freshness * 50.0) + (amplitude * 10.0) - (relevance * 20.0);
                      
                      if(score > best_score)
                      {
@@ -416,8 +427,9 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                    G_TF[idx].m15_protected_confirmed_time = t_conf[0];
                    G_TF[idx].m15_pullback_start_time = t_ll[0];
                    
-                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=SELL impulse_high=%.5f impulse_low=%.5f protected_lh=%.5f age_bars=%d impulse_atr=%.2f",
-                               sym, m15_highs[best_oh], m15_lows[best_ll], m15_highs[best_lh], best_lh, (m15_highs[best_oh] - m15_lows[best_ll])/atr);
+                   double relevance = MathAbs(close[0] - m15_highs[best_lh]) / atr;
+                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=SELL impulse_high=%.5f impulse_low=%.5f protected_lh=%.5f age_bars=%d impulse_atr=%.2f relevance=%.2f score=%.2f",
+                               sym, m15_highs[best_oh], m15_lows[best_ll], m15_highs[best_lh], best_lh, (m15_highs[best_oh] - m15_lows[best_ll])/atr, relevance, best_score);
                 }
              }
          }
@@ -988,13 +1000,15 @@ int CheckTrendFollowingSignal(int idx)
             s_tf_h1_last_time[idx] = h1_tm[0];
             
             int prev_dir = G_TF[idx].h1_trend_direction;
-            int new_dir = EvaluateH1TrendRegime(idx);
+            double new_protected = 0.0;
+            int new_dir = EvaluateH1TrendRegime(idx, new_protected);
             
             if(new_dir != 0)
             {
                if(G_TF[idx].setup_state == TF_STATE_NONE)
                {
                   G_TF[idx].h1_trend_direction = new_dir;
+                  G_TF[idx].h1_protected_structure = new_protected;
                   G_TF[idx].setup_state = TF_STATE_H1_TREND;
                   G_TF[idx].setup_bar_count = 0;
                   G_TF[idx].status = "H1 TREND";
@@ -1004,8 +1018,9 @@ int CheckTrendFollowingSignal(int idx)
                {
                   // H1 trend changed direction → full reset old, init new immediately
                   ResetTFSetup(idx, "H1_SETUP_INVALIDATED");
-                  EvaluateH1TrendRegime(idx); // Re-evaluate to set new state
+                  EvaluateH1TrendRegime(idx, new_protected); // Re-evaluate to set new state
                   G_TF[idx].h1_trend_direction = new_dir;
+                  G_TF[idx].h1_protected_structure = new_protected;
                   G_TF[idx].setup_state = TF_STATE_H1_TREND;
                   G_TF[idx].setup_bar_count = 0;
                   G_TF[idx].status = "H1 TREND (FLIPPED)";
@@ -1055,16 +1070,7 @@ int CheckTrendFollowingSignal(int idx)
       if(G_TF[idx].setup_state >= TF_STATE_M15_PULLBACK && CheckM15PullbackInvalidation(idx))
       {
          // Pullback became reversal → reset M15 + M5 but keep H1
-         G_TF[idx].m15_pullback_valid = false;
-         G_TF[idx].m15_pullback_quality = 0.0;
-         G_TF[idx].m15_pullback_bar_count = 0;
-         G_TF[idx].score_m15_pullback = 0.0;
-         G_TF[idx].m15_pullback_start_time = 0;
-         G_TF[idx].m15_impulse_high = 0.0;
-         G_TF[idx].m15_impulse_low = 0.0;
-         G_TF[idx].m15_impulse_start_time = 0;
-         G_TF[idx].m15_impulse_end_time = 0;
-         G_TF[idx].m15_protected_time = 0;
+         ResetTFM15Evidence(idx);
          ResetTFM5Evidence(idx);
          G_TF[idx].setup_state = TF_STATE_H1_TREND;
          G_TF[idx].status = "M15 PULLBACK INVALID";
@@ -1109,16 +1115,7 @@ int CheckTrendFollowingSignal(int idx)
    if(G_TF[idx].setup_bar_count > TF_MAX_SETUP_BARS)
    {
       // Reset M15 and M5 but keep H1
-      G_TF[idx].m15_pullback_valid = false;
-      G_TF[idx].m15_pullback_quality = 0.0;
-      G_TF[idx].m15_pullback_bar_count = 0;
-      G_TF[idx].score_m15_pullback = 0.0;
-      G_TF[idx].m15_pullback_start_time = 0;
-      G_TF[idx].m15_impulse_high = 0.0;
-      G_TF[idx].m15_impulse_low = 0.0;
-      G_TF[idx].m15_impulse_start_time = 0;
-      G_TF[idx].m15_impulse_end_time = 0;
-      G_TF[idx].m15_protected_time = 0;
+      ResetTFM15Evidence(idx);
       ResetTFM5Evidence(idx);
       
       G_TF[idx].setup_state = TF_STATE_H1_TREND;
