@@ -772,14 +772,28 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       double best_score = -1.0;
       int candidate_count = 0;
       
+      int sum_raw = 0;
+      int sum_qualified = 0;
+      int sum_rej_consumed = 0;
+      int sum_rej_broken = 0;
+      int sum_rej_range = 0;
+      int sum_rej_nosweep = 0;
+      
+      double close_arr[];
+      CopyClose(sym, m5, 1, 1, close_arr);
+      double current_close = (ArraySize(close_arr) > 0) ? close_arr[0] : 0.0;
+      
       double atr = CalculateATR_Generic(sym, m5, InpReversal_ATR_Period, 1);
       
       if(trend_dir == 1) {
          for(int i = right; i < m5_lookback - left; i++) {
             if(IsSwingLow(m5_lows, i, left, right, m5_lookback)) {
+               sum_raw++;
                double target = m5_lows[i];
                if(!(target >= G_TF[idx].m15_protected_low && target <= G_TF[idx].m15_impulse_high)) {
-                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=OUTSIDE_M15_RANGE target=%.5f", sym, target);
+                  sum_rej_range++;
+                  PrintFormat("[M5_TARGET_LIFECYCLE]\nSYMBOL=%s\nDIRECTION=BUY\nCURRENT_CLOSE=%.5f\nTARGET=%.5f\nTARGET_STATUS=REJECTED\nCANDIDATE_SOURCE=M5_SWING_LOW\nQUALIFIED=NO\nREJECT_REASON=OUTSIDE_M15_RANGE\nIS_CONSUMED=NO\nIS_SWING_INTACT=YES\nIN_M15_RANGE=NO\nREACTION_RATIO=0.0\nRANK_SCORE=0.0", sym, current_close, target);
+                  PrintFormat("[M5_TARGET_INVALIDATED]\nSYMBOL=%s\nTARGET=%.5f\nREASON=OUTSIDE_M15_RANGE", sym, target);
                   continue;
                }
                if(current_time <= G_TF[idx].m15_protected_confirmed_time) {
@@ -811,7 +825,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                
                // Check swing integrity: not broken before sweep
                if(!IsSwingIntactBeforeSweep(m5_highs, m5_lows, i, 1, target, m5_lookback)) {
-                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=SWING_BROKEN_BEFORE_SWEEP target=%.5f", sym, target);
+                  sum_rej_broken++;
+                  PrintFormat("[M5_TARGET_LIFECYCLE]\nSYMBOL=%s\nDIRECTION=BUY\nCURRENT_CLOSE=%.5f\nTARGET=%.5f\nTARGET_STATUS=REJECTED\nCANDIDATE_SOURCE=M5_SWING_LOW\nQUALIFIED=NO\nREJECT_REASON=SWING_BROKEN_BEFORE_SWEEP\nIS_CONSUMED=NO\nIS_SWING_INTACT=NO\nIN_M15_RANGE=YES\nREACTION_RATIO=%.2f\nRANK_SCORE=0.0", sym, current_close, target, reaction_ratio);
+                  PrintFormat("[M5_TARGET_INVALIDATED]\nSYMBOL=%s\nTARGET=%.5f\nREASON=SWING_BROKEN_BEFORE_SWEEP", sym, target);
                   continue;
                }
                
@@ -822,7 +838,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                }
                
                if(consumed) {
-                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=CONSUMED target=%.5f", sym, target);
+                  sum_rej_consumed++;
+                  PrintFormat("[M5_TARGET_LIFECYCLE]\nSYMBOL=%s\nDIRECTION=BUY\nCURRENT_CLOSE=%.5f\nTARGET=%.5f\nTARGET_STATUS=REJECTED\nCANDIDATE_SOURCE=M5_SWING_LOW\nQUALIFIED=NO\nREJECT_REASON=CONSUMED\nIS_CONSUMED=YES\nIS_SWING_INTACT=YES\nIN_M15_RANGE=YES\nREACTION_RATIO=%.2f\nRANK_SCORE=0.0", sym, current_close, target, reaction_ratio);
+                  PrintFormat("[M5_TARGET_INVALIDATED]\nSYMBOL=%s\nTARGET=%.5f\nREASON=CONSUMED", sym, target);
                   continue;
                }
                
@@ -856,9 +874,12 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       } else {
          for(int i = right; i < m5_lookback - left; i++) {
             if(IsSwingHigh(m5_highs, i, left, right, m5_lookback)) {
+               sum_raw++;
                double target = m5_highs[i];
                if(!(target <= G_TF[idx].m15_protected_high && target >= G_TF[idx].m15_impulse_low)) {
-                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=OUTSIDE_M15_RANGE target=%.5f", sym, target);
+                  sum_rej_range++;
+                  PrintFormat("[M5_TARGET_LIFECYCLE]\nSYMBOL=%s\nDIRECTION=SELL\nCURRENT_CLOSE=%.5f\nTARGET=%.5f\nTARGET_STATUS=REJECTED\nCANDIDATE_SOURCE=M5_SWING_HIGH\nQUALIFIED=NO\nREJECT_REASON=OUTSIDE_M15_RANGE\nIS_CONSUMED=NO\nIS_SWING_INTACT=YES\nIN_M15_RANGE=NO\nREACTION_RATIO=0.0\nRANK_SCORE=0.0", sym, current_close, target);
+                  PrintFormat("[M5_TARGET_INVALIDATED]\nSYMBOL=%s\nTARGET=%.5f\nREASON=OUTSIDE_M15_RANGE", sym, target);
                   continue;
                }
                if(current_time <= G_TF[idx].m15_protected_confirmed_time) {
@@ -890,7 +911,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                
                // Check swing integrity: not broken before sweep
                if(!IsSwingIntactBeforeSweep(m5_highs, m5_lows, i, -1, target, m5_lookback)) {
-                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=SWING_BROKEN_BEFORE_SWEEP target=%.5f", sym, target);
+                  sum_rej_broken++;
+                  PrintFormat("[M5_TARGET_LIFECYCLE]\nSYMBOL=%s\nDIRECTION=SELL\nCURRENT_CLOSE=%.5f\nTARGET=%.5f\nTARGET_STATUS=REJECTED\nCANDIDATE_SOURCE=M5_SWING_HIGH\nQUALIFIED=NO\nREJECT_REASON=SWING_BROKEN_BEFORE_SWEEP\nIS_CONSUMED=NO\nIS_SWING_INTACT=NO\nIN_M15_RANGE=YES\nREACTION_RATIO=%.2f\nRANK_SCORE=0.0", sym, current_close, target, reaction_ratio);
+                  PrintFormat("[M5_TARGET_INVALIDATED]\nSYMBOL=%s\nTARGET=%.5f\nREASON=SWING_BROKEN_BEFORE_SWEEP", sym, target);
                   continue;
                }
                
@@ -900,12 +923,16 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                   if(m5_highs[j] > target) { consumed = true; break; }
                }
                if(consumed) {
-                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=CONSUMED target=%.5f", sym, target);
+                  sum_rej_consumed++;
+                  PrintFormat("[M5_TARGET_LIFECYCLE]\nSYMBOL=%s\nDIRECTION=SELL\nCURRENT_CLOSE=%.5f\nTARGET=%.5f\nTARGET_STATUS=REJECTED\nCANDIDATE_SOURCE=M5_SWING_HIGH\nQUALIFIED=NO\nREJECT_REASON=CONSUMED\nIS_CONSUMED=YES\nIS_SWING_INTACT=YES\nIN_M15_RANGE=YES\nREACTION_RATIO=%.2f\nRANK_SCORE=0.0", sym, current_close, target, reaction_ratio);
+                  PrintFormat("[M5_TARGET_INVALIDATED]\nSYMBOL=%s\nTARGET=%.5f\nREASON=CONSUMED", sym, target);
                   continue;
                }
                
                if(!DetectLiquiditySweep(sym, m5, trend_dir, target)) {
                   PrintFormat("[M5_SWEEP_REJECT][%s] reason=NO_LIQUIDITY_SWEEP target=%.5f", sym, target);
+                  sum_rej_nosweep++;
+                  PrintFormat("[M5_TARGET_LIFECYCLE]\nSYMBOL=%s\nDIRECTION=SELL\nCURRENT_CLOSE=%.5f\nTARGET=%.5f\nTARGET_STATUS=REJECTED\nCANDIDATE_SOURCE=M5_SWING_HIGH\nQUALIFIED=YES\nREJECT_REASON=NO_LIQUIDITY_SWEEP\nIS_CONSUMED=NO\nIS_SWING_INTACT=YES\nIN_M15_RANGE=YES\nREACTION_RATIO=%.2f\nRANK_SCORE=0.0", sym, current_close, target, reaction_ratio);
                   continue;
                }
                
@@ -924,6 +951,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                // 4. Freshness - lowest weight
                double score = (reaction_ratio * 200.0) + (structural_depth * 50.0) - (dist * 30.0) + (freshness * 5.0);
                
+               sum_qualified++;
+               PrintFormat("[M5_TARGET_LIFECYCLE]\nSYMBOL=%s\nDIRECTION=SELL\nCURRENT_CLOSE=%.5f\nTARGET=%.5f\nTARGET_STATUS=SWEPT\nCANDIDATE_SOURCE=M5_SWING_HIGH\nQUALIFIED=YES\nREJECT_REASON=NONE\nIS_CONSUMED=NO\nIS_SWING_INTACT=YES\nIN_M15_RANGE=YES\nREACTION_RATIO=%.2f\nRANK_SCORE=%.2f", sym, current_close, target, reaction_ratio, score);
+               
                if(score > best_score) {
                   best_score = score;
                   best_candidate_idx = i;
@@ -933,6 +963,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          }
       }
       
+      PrintFormat("[M5_TARGET_SUMMARY]\nSYMBOL=%s\nDIRECTION=%s\nTOTAL_RAW=%d\nQUALIFIED=%d\nREJECT_CONSUMED=%d\nREJECT_BROKEN=%d\nREJECT_OUTSIDE_RANGE=%d\nREJECT_NO_SWEEP=%d\nSELECTED_TARGET=%.5f\nSELECTED_STATUS=%s", 
+                  sym, (trend_dir == 1 ? "BUY" : "SELL"), sum_raw, sum_qualified, sum_rej_consumed, sum_rej_broken, sum_rej_range, sum_rej_nosweep, sweep_target, (best_candidate_idx != -1 ? "SWEPT_AND_SELECTED" : "NONE"));
       PrintFormat("[M5_SWEEP_CANDIDATES][%s] direction=%d candidates=%d", sym, trend_dir, candidate_count);
       
       if(best_candidate_idx != -1)
