@@ -263,8 +263,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       
       if(find_new_impulse)
       {
-         int best_hl = -1, best_hh = -1, best_ol = -1;
-         double best_score = -1.0;
+         int best_hl = -1, best_hh = -1, best_ol = -1, best_oh = -1;
+         double best_score = -999999.0;
          int candidate_count = 0;
          
          for(int i_hl = right; i_hl < pb_lookback - left; i_hl++)
@@ -275,45 +275,70 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
             {
                if(!IsSwingHigh(m15_highs, i_hh, left, right, pb_lookback)) continue;
                
-               for(int i_ol = i_hh + 1; i_ol < pb_lookback - left; i_ol++)
+               // HARD FILTER: Relevance Check (Price must be in Pullback Leg)
+               if (close[0] > m15_highs[i_hh] || close[0] < m15_lows[i_hl])
                {
-                  if(!IsSwingLow(m15_lows, i_ol, left, right, pb_lookback)) continue;
+                   PrintFormat("[M15_STRUCTURE_REJECT][%s] reason=NOT_IN_PULLBACK_LEG candidate_hl_idx=%d candidate_hh_idx=%d", sym, i_hl, i_hh);
+                   continue;
+               }
+               
+               bool found_valid_structure = false;
+               
+               for(int i_oh = i_hh + 1; i_oh < pb_lookback - left; i_oh++)
+               {
+                  if(!IsSwingHigh(m15_highs, i_oh, left, right, pb_lookback)) continue;
                   
-                  // Validate structure: Origin Low -> HH -> Protected HL
-                  if(m15_lows[i_ol] < m15_highs[i_hh] && 
-                     m15_lows[i_hl] < m15_highs[i_hh] && 
-                     m15_lows[i_hl] > m15_lows[i_ol])
+                  for(int i_ol = i_oh + 1; i_ol < pb_lookback - left; i_ol++)
                   {
-                     candidate_count++;
+                     if(!IsSwingLow(m15_lows, i_ol, left, right, pb_lookback)) continue;
                      
-                     double freshness = 1.0 / (i_hl + 1.0);
-                     double amplitude = (m15_highs[i_hh] - m15_lows[i_ol]) / atr;
-                     double relevance = MathAbs(close[0] - m15_lows[i_hl]) / atr;
-                     double score = (freshness * 50.0) + (amplitude * 10.0) - (relevance * 20.0);
-                     
-                     if(score > best_score)
+                     // Validate structure: Origin Low -> Ref High -> Higher High -> Protected HL
+                     if(m15_highs[i_hh] > m15_highs[i_oh] && // Break of structure
+                        m15_highs[i_oh] > m15_lows[i_ol] &&  // OH is above OL
+                        m15_lows[i_hl] > m15_lows[i_ol] &&   // Protected HL is above OL
+                        m15_highs[i_hh] > m15_lows[i_hl])    // HH is above HL
                      {
-                        best_score = score;
-                        best_hl = i_hl;
-                        best_hh = i_hh;
-                        best_ol = i_ol;
+                        candidate_count++;
+                        
+                        double freshness = 1.0 / (i_hl + 1.0);
+                        double amplitude = (m15_highs[i_hh] - m15_lows[i_ol]) / atr;
+                        double relevance = MathAbs(close[0] - m15_lows[i_hl]) / atr;
+                        
+                        // Rank: Relevance (High Priority), Freshness, Amplitude
+                        double score = -(relevance * 100.0) + (freshness * 50.0) + (amplitude * 10.0);
+                        
+                        if(score > best_score)
+                        {
+                           best_score = score;
+                           best_hl = i_hl;
+                           best_hh = i_hh;
+                           best_ol = i_ol;
+                           best_oh = i_oh;
+                        }
+                        found_valid_structure = true;
                      }
                   }
+               }
+               
+               if(!found_valid_structure)
+               {
+                  PrintFormat("[M15_STRUCTURE_REJECT][%s] reason=NO_VALID_STRUCTURAL_BREAK candidate_hl_idx=%d candidate_hh_idx=%d", sym, i_hl, i_hh);
                }
             }
          }
          
          PrintFormat("[M15_IMPULSE_CANDIDATES][%s] BUY candidates=%d", sym, candidate_count);
          
-         if(candidate_count > 0 && best_hl != -1 && best_hh != -1 && best_ol != -1)
+         if(candidate_count > 0 && best_hl != -1 && best_hh != -1 && best_ol != -1 && best_oh != -1)
          {
-             datetime t_hl[], t_hh[], t_ol[], t_conf[];
+             datetime t_hl[], t_hh[], t_ol[], t_oh[], t_conf[];
              if(CopyTime(sym, m15, best_hl + 1, 1, t_hl) == 1 && 
                 CopyTime(sym, m15, best_hh + 1, 1, t_hh) == 1 && 
                 CopyTime(sym, m15, best_ol + 1, 1, t_ol) == 1 &&
+                CopyTime(sym, m15, best_oh + 1, 1, t_oh) == 1 &&
                 CopyTime(sym, m15, best_hl - right + 1, 1, t_conf) == 1)
              {
-                if(t_ol[0] < t_hh[0] && t_hh[0] < t_hl[0])
+                if(t_ol[0] < t_oh[0] && t_oh[0] < t_hh[0] && t_hh[0] < t_hl[0])
                 {
                    if(G_TF[idx].m15_impulse_high != m15_highs[best_hh] || G_TF[idx].m15_impulse_low != m15_lows[best_ol]) {
                       ResetTFM5Evidence(idx);
@@ -328,8 +353,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                    G_TF[idx].m15_pullback_start_time = t_hh[0];
                    
                    double relevance = MathAbs(close[0] - m15_lows[best_hl]) / atr;
-                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=BUY impulse_high=%.5f impulse_low=%.5f protected_hl=%.5f age_bars=%d impulse_atr=%.2f relevance=%.2f score=%.2f",
-                               sym, m15_highs[best_hh], m15_lows[best_ol], m15_lows[best_hl], best_hl, (m15_highs[best_hh] - m15_lows[best_ol])/atr, relevance, best_score);
+                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=BUY origin_low=%.5f ref_high=%.5f impulse_hh=%.5f protected_hl=%.5f amplitude_atr=%.2f relevance=%.2f ranking_score=%.2f",
+                               sym, m15_lows[best_ol], m15_highs[best_oh], m15_highs[best_hh], m15_lows[best_hl], (m15_highs[best_hh] - m15_lows[best_ol])/atr, relevance, best_score);
                 }
              }
          }
@@ -363,8 +388,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       
       if(find_new_impulse)
       {
-         int best_lh = -1, best_ll = -1, best_oh = -1;
-         double best_score = -1.0;
+         int best_lh = -1, best_ll = -1, best_oh = -1, best_ol = -1;
+         double best_score = -999999.0;
          int candidate_count = 0;
          
          for(int i_lh = right; i_lh < pb_lookback - left; i_lh++)
@@ -375,45 +400,70 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
             {
                if(!IsSwingLow(m15_lows, i_ll, left, right, pb_lookback)) continue;
                
-               for(int i_oh = i_ll + 1; i_oh < pb_lookback - left; i_oh++)
+               // HARD FILTER: Relevance Check (Price must be in Pullback Leg)
+               if (close[0] < m15_lows[i_ll] || close[0] > m15_highs[i_lh])
                {
-                  if(!IsSwingHigh(m15_highs, i_oh, left, right, pb_lookback)) continue;
+                   PrintFormat("[M15_STRUCTURE_REJECT][%s] reason=NOT_IN_PULLBACK_LEG candidate_lh_idx=%d candidate_ll_idx=%d", sym, i_lh, i_ll);
+                   continue;
+               }
+               
+               bool found_valid_structure = false;
+               
+               for(int i_ol = i_ll + 1; i_ol < pb_lookback - left; i_ol++)
+               {
+                  if(!IsSwingLow(m15_lows, i_ol, left, right, pb_lookback)) continue;
                   
-                  // Validate structure: Origin High -> LL -> Protected LH
-                  if(m15_highs[i_oh] > m15_lows[i_ll] && 
-                     m15_highs[i_lh] > m15_lows[i_ll] && 
-                     m15_highs[i_lh] < m15_highs[i_oh])
+                  for(int i_oh = i_ol + 1; i_oh < pb_lookback - left; i_oh++)
                   {
-                     candidate_count++;
+                     if(!IsSwingHigh(m15_highs, i_oh, left, right, pb_lookback)) continue;
                      
-                     double freshness = 1.0 / (i_lh + 1.0);
-                     double amplitude = (m15_highs[i_oh] - m15_lows[i_ll]) / atr;
-                     double relevance = MathAbs(close[0] - m15_highs[i_lh]) / atr;
-                     double score = (freshness * 50.0) + (amplitude * 10.0) - (relevance * 20.0);
-                     
-                     if(score > best_score)
+                     // Validate structure: Origin High -> Ref Low -> Lower Low -> Protected LH
+                     if(m15_lows[i_ll] < m15_lows[i_ol] && // Break of structure
+                        m15_lows[i_ol] < m15_highs[i_oh] &&  // OL is below OH
+                        m15_highs[i_lh] < m15_highs[i_oh] &&   // Protected LH is below OH
+                        m15_lows[i_ll] < m15_highs[i_lh])    // LL is below LH
                      {
-                        best_score = score;
-                        best_lh = i_lh;
-                        best_ll = i_ll;
-                        best_oh = i_oh;
+                        candidate_count++;
+                        
+                        double freshness = 1.0 / (i_lh + 1.0);
+                        double amplitude = (m15_highs[i_oh] - m15_lows[i_ll]) / atr;
+                        double relevance = MathAbs(close[0] - m15_highs[i_lh]) / atr;
+                        
+                        // Rank: Relevance (High Priority), Freshness, Amplitude
+                        double score = -(relevance * 100.0) + (freshness * 50.0) + (amplitude * 10.0);
+                        
+                        if(score > best_score)
+                        {
+                           best_score = score;
+                           best_lh = i_lh;
+                           best_ll = i_ll;
+                           best_oh = i_oh;
+                           best_ol = i_ol;
+                        }
+                        found_valid_structure = true;
                      }
                   }
+               }
+               
+               if(!found_valid_structure)
+               {
+                  PrintFormat("[M15_STRUCTURE_REJECT][%s] reason=NO_VALID_STRUCTURAL_BREAK candidate_lh_idx=%d candidate_ll_idx=%d", sym, i_lh, i_ll);
                }
             }
          }
          
          PrintFormat("[M15_IMPULSE_CANDIDATES][%s] SELL candidates=%d", sym, candidate_count);
          
-         if(candidate_count > 0 && best_lh != -1 && best_ll != -1 && best_oh != -1)
+         if(candidate_count > 0 && best_lh != -1 && best_ll != -1 && best_oh != -1 && best_ol != -1)
          {
-             datetime t_lh[], t_ll[], t_oh[], t_conf[];
+             datetime t_lh[], t_ll[], t_oh[], t_ol[], t_conf[];
              if(CopyTime(sym, m15, best_lh + 1, 1, t_lh) == 1 && 
                 CopyTime(sym, m15, best_ll + 1, 1, t_ll) == 1 && 
                 CopyTime(sym, m15, best_oh + 1, 1, t_oh) == 1 &&
+                CopyTime(sym, m15, best_ol + 1, 1, t_ol) == 1 &&
                 CopyTime(sym, m15, best_lh - right + 1, 1, t_conf) == 1)
              {
-                if(t_oh[0] < t_ll[0] && t_ll[0] < t_lh[0])
+                if(t_oh[0] < t_ol[0] && t_ol[0] < t_ll[0] && t_ll[0] < t_lh[0])
                 {
                    if(G_TF[idx].m15_impulse_high != m15_highs[best_oh] || G_TF[idx].m15_impulse_low != m15_lows[best_ll]) {
                       ResetTFM5Evidence(idx);
@@ -428,8 +478,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
                    G_TF[idx].m15_pullback_start_time = t_ll[0];
                    
                    double relevance = MathAbs(close[0] - m15_highs[best_lh]) / atr;
-                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=SELL impulse_high=%.5f impulse_low=%.5f protected_lh=%.5f age_bars=%d impulse_atr=%.2f relevance=%.2f score=%.2f",
-                               sym, m15_highs[best_oh], m15_lows[best_ll], m15_highs[best_lh], best_lh, (m15_highs[best_oh] - m15_lows[best_ll])/atr, relevance, best_score);
+                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=SELL origin_high=%.5f ref_low=%.5f impulse_ll=%.5f protected_lh=%.5f amplitude_atr=%.2f relevance=%.2f ranking_score=%.2f",
+                               sym, m15_highs[best_oh], m15_lows[best_ol], m15_lows[best_ll], m15_highs[best_lh], (m15_highs[best_oh] - m15_lows[best_ll])/atr, relevance, best_score);
                 }
              }
          }
@@ -514,6 +564,17 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                double target = m5_lows[i];
                if(target >= G_TF[idx].m15_protected_low && target <= G_TF[idx].m15_impulse_high) {
                   if(current_time > G_TF[idx].m15_protected_confirmed_time) {
+                     
+                     // MUST be structurally relevant: Formed DURING the pullback, not before
+                     datetime t_arr[];
+                     if(CopyTime(sym, m5, i + 1, 1, t_arr) == 1) {
+                        datetime target_time = t_arr[0];
+                        if (target_time < G_TF[idx].m15_pullback_start_time) {
+                           PrintFormat("[M5_SWEEP_REJECT][%s] reason=TARGET_BEFORE_PULLBACK target=%.5f time=%s", sym, target, TimeToString(target_time));
+                           continue;
+                        }
+                     }
+                     
                      // Filter: already consumed by intermediate candles?
                      bool consumed = false;
                      for(int j = 1; j < i; j++) {
@@ -543,6 +604,17 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                double target = m5_highs[i];
                if(target <= G_TF[idx].m15_protected_high && target >= G_TF[idx].m15_impulse_low) {
                   if(current_time > G_TF[idx].m15_protected_confirmed_time) {
+                     
+                     // MUST be structurally relevant: Formed DURING the pullback, not before
+                     datetime t_arr[];
+                     if(CopyTime(sym, m5, i + 1, 1, t_arr) == 1) {
+                        datetime target_time = t_arr[0];
+                        if (target_time < G_TF[idx].m15_pullback_start_time) {
+                           PrintFormat("[M5_SWEEP_REJECT][%s] reason=TARGET_BEFORE_PULLBACK target=%.5f time=%s", sym, target, TimeToString(target_time));
+                           continue;
+                        }
+                     }
+                     
                      // Filter: already consumed by intermediate candles?
                      bool consumed = false;
                      for(int j = 1; j < i; j++) {
