@@ -217,7 +217,6 @@ int EvaluateH1TrendRegime(int idx)
       G_TF[idx].score_h1_trend = 0.0;
    }
    
-   G_TF[idx].h1_trend_direction = direction;
    return direction;
 }
 
@@ -256,46 +255,77 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       
       if(find_new_impulse)
       {
-         int hl_idx = -1; // Newest Swing Low (Protected HL)
-         int hh_idx = -1; // Older Swing High (Impulse High)
-         int ol_idx = -1; // Oldest Swing Low (Origin Low)
+         int best_hl = -1, best_hh = -1, best_ol = -1;
+         double best_score = -1.0;
+         int candidate_count = 0;
          
-         for(int i = right; i < pb_lookback - left; i++) {
-            if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) {
-               if(hl_idx == -1) hl_idx = i;
-               else if(hh_idx != -1 && ol_idx == -1) { ol_idx = i; break; }
-            }
-            else if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) {
-               if(hl_idx != -1 && hh_idx == -1) hh_idx = i;
-            }
-         }
-         
-         // Validate structure: Origin Low -> HH -> Protected HL
-         if(hl_idx != -1 && hh_idx != -1 && ol_idx != -1) {
-            if(m15_lows[ol_idx] < m15_highs[hh_idx] && m15_lows[hl_idx] < m15_highs[hh_idx] && m15_lows[hl_idx] > m15_lows[ol_idx]) {
-               datetime t_hl[], t_hh[], t_ol[], t_conf[];
-               // Note: arrays from ReadHighLow_Generic start at index 1 of the chart.
-               if(CopyTime(sym, m15, hl_idx + 1, 1, t_hl) == 1 && 
-                  CopyTime(sym, m15, hh_idx + 1, 1, t_hh) == 1 && 
-                  CopyTime(sym, m15, ol_idx + 1, 1, t_ol) == 1 &&
-                  CopyTime(sym, m15, hl_idx - right + 1, 1, t_conf) == 1)
+         for(int i_hl = right; i_hl < pb_lookback - left; i_hl++)
+         {
+            if(!IsSwingLow(m15_lows, i_hl, left, right, pb_lookback)) continue;
+            
+            for(int i_hh = i_hl + 1; i_hh < pb_lookback - left; i_hh++)
+            {
+               if(!IsSwingHigh(m15_highs, i_hh, left, right, pb_lookback)) continue;
+               
+               for(int i_ol = i_hh + 1; i_ol < pb_lookback - left; i_ol++)
                {
-                  if(t_ol[0] < t_hh[0] && t_hh[0] < t_hl[0])
+                  if(!IsSwingLow(m15_lows, i_ol, left, right, pb_lookback)) continue;
+                  
+                  // Validate structure: Origin Low -> HH -> Protected HL
+                  if(m15_lows[i_ol] < m15_highs[i_hh] && 
+                     m15_lows[i_hl] < m15_highs[i_hh] && 
+                     m15_lows[i_hl] > m15_lows[i_ol])
                   {
-                     if(G_TF[idx].m15_impulse_high != m15_highs[hh_idx] || G_TF[idx].m15_impulse_low != m15_lows[ol_idx]) {
-                        ResetTFM5Evidence(idx);
+                     candidate_count++;
+                     
+                     double freshness = 1.0 / (i_hl + 1.0);
+                     double amplitude = (m15_highs[i_hh] - m15_lows[i_ol]) / atr;
+                     double score = (freshness * 50.0) + (amplitude * 10.0);
+                     
+                     if(score > best_score)
+                     {
+                        best_score = score;
+                        best_hl = i_hl;
+                        best_hh = i_hh;
+                        best_ol = i_ol;
                      }
-                     G_TF[idx].m15_impulse_high = m15_highs[hh_idx];
-                     G_TF[idx].m15_impulse_low = m15_lows[ol_idx];
-                     G_TF[idx].m15_protected_low = m15_lows[hl_idx];
-                     G_TF[idx].m15_impulse_start_time = t_ol[0];
-                     G_TF[idx].m15_impulse_end_time = t_hh[0];
-                     G_TF[idx].m15_protected_time = t_hl[0];
-                     G_TF[idx].m15_protected_confirmed_time = t_conf[0];
-                     G_TF[idx].m15_pullback_start_time = t_hh[0];
                   }
                }
             }
+         }
+         
+         PrintFormat("[M15_IMPULSE_CANDIDATES][%s] BUY candidates=%d", sym, candidate_count);
+         
+         if(candidate_count > 0 && best_hl != -1 && best_hh != -1 && best_ol != -1)
+         {
+             datetime t_hl[], t_hh[], t_ol[], t_conf[];
+             if(CopyTime(sym, m15, best_hl + 1, 1, t_hl) == 1 && 
+                CopyTime(sym, m15, best_hh + 1, 1, t_hh) == 1 && 
+                CopyTime(sym, m15, best_ol + 1, 1, t_ol) == 1 &&
+                CopyTime(sym, m15, best_hl - right + 1, 1, t_conf) == 1)
+             {
+                if(t_ol[0] < t_hh[0] && t_hh[0] < t_hl[0])
+                {
+                   if(G_TF[idx].m15_impulse_high != m15_highs[best_hh] || G_TF[idx].m15_impulse_low != m15_lows[best_ol]) {
+                      ResetTFM5Evidence(idx);
+                   }
+                   G_TF[idx].m15_impulse_high = m15_highs[best_hh];
+                   G_TF[idx].m15_impulse_low = m15_lows[best_ol];
+                   G_TF[idx].m15_protected_low = m15_lows[best_hl];
+                   G_TF[idx].m15_impulse_start_time = t_ol[0];
+                   G_TF[idx].m15_impulse_end_time = t_hh[0];
+                   G_TF[idx].m15_protected_time = t_hl[0];
+                   G_TF[idx].m15_protected_confirmed_time = t_conf[0];
+                   G_TF[idx].m15_pullback_start_time = t_hh[0];
+                   
+                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=BUY impulse_high=%.5f impulse_low=%.5f protected_hl=%.5f age_bars=%d impulse_atr=%.2f",
+                               sym, m15_highs[best_hh], m15_lows[best_ol], m15_lows[best_hl], best_hl, (m15_highs[best_hh] - m15_lows[best_ol])/atr);
+                }
+             }
+         }
+         else
+         {
+             PrintFormat("[M15_NO_VALID_IMPULSE][%s]", sym);
          }
       }
       
@@ -323,45 +353,77 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       
       if(find_new_impulse)
       {
-         int lh_idx = -1; // Newest Swing High (Protected LH)
-         int ll_idx = -1; // Older Swing Low (Impulse Low)
-         int oh_idx = -1; // Oldest Swing High (Origin High)
+         int best_lh = -1, best_ll = -1, best_oh = -1;
+         double best_score = -1.0;
+         int candidate_count = 0;
          
-         for(int i = right; i < pb_lookback - left; i++) {
-            if(IsSwingHigh(m15_highs, i, left, right, pb_lookback)) {
-               if(lh_idx == -1) lh_idx = i;
-               else if(ll_idx != -1 && oh_idx == -1) { oh_idx = i; break; }
-            }
-            else if(IsSwingLow(m15_lows, i, left, right, pb_lookback)) {
-               if(lh_idx != -1 && ll_idx == -1) ll_idx = i;
-            }
-         }
-         
-         // Validate structure: Origin High -> LL -> Protected LH
-         if(lh_idx != -1 && ll_idx != -1 && oh_idx != -1) {
-            if(m15_highs[oh_idx] > m15_lows[ll_idx] && m15_highs[lh_idx] > m15_lows[ll_idx] && m15_highs[lh_idx] < m15_highs[oh_idx]) {
-               datetime t_lh[], t_ll[], t_oh[], t_conf[];
-               if(CopyTime(sym, m15, lh_idx + 1, 1, t_lh) == 1 && 
-                  CopyTime(sym, m15, ll_idx + 1, 1, t_ll) == 1 && 
-                  CopyTime(sym, m15, oh_idx + 1, 1, t_oh) == 1 &&
-                  CopyTime(sym, m15, lh_idx - right + 1, 1, t_conf) == 1)
+         for(int i_lh = right; i_lh < pb_lookback - left; i_lh++)
+         {
+            if(!IsSwingHigh(m15_highs, i_lh, left, right, pb_lookback)) continue;
+            
+            for(int i_ll = i_lh + 1; i_ll < pb_lookback - left; i_ll++)
+            {
+               if(!IsSwingLow(m15_lows, i_ll, left, right, pb_lookback)) continue;
+               
+               for(int i_oh = i_ll + 1; i_oh < pb_lookback - left; i_oh++)
                {
-                  if(t_oh[0] < t_ll[0] && t_ll[0] < t_lh[0])
+                  if(!IsSwingHigh(m15_highs, i_oh, left, right, pb_lookback)) continue;
+                  
+                  // Validate structure: Origin High -> LL -> Protected LH
+                  if(m15_highs[i_oh] > m15_lows[i_ll] && 
+                     m15_highs[i_lh] > m15_lows[i_ll] && 
+                     m15_highs[i_lh] < m15_highs[i_oh])
                   {
-                     if(G_TF[idx].m15_impulse_high != m15_highs[oh_idx] || G_TF[idx].m15_impulse_low != m15_lows[ll_idx]) {
-                        ResetTFM5Evidence(idx);
+                     candidate_count++;
+                     
+                     double freshness = 1.0 / (i_lh + 1.0);
+                     double amplitude = (m15_highs[i_oh] - m15_lows[i_ll]) / atr;
+                     double score = (freshness * 50.0) + (amplitude * 10.0);
+                     
+                     if(score > best_score)
+                     {
+                        best_score = score;
+                        best_lh = i_lh;
+                        best_ll = i_ll;
+                        best_oh = i_oh;
                      }
-                     G_TF[idx].m15_impulse_low = m15_lows[ll_idx];
-                     G_TF[idx].m15_impulse_high = m15_highs[oh_idx];
-                     G_TF[idx].m15_protected_high = m15_highs[lh_idx];
-                     G_TF[idx].m15_impulse_start_time = t_oh[0];
-                     G_TF[idx].m15_impulse_end_time = t_ll[0];
-                     G_TF[idx].m15_protected_time = t_lh[0];
-                     G_TF[idx].m15_protected_confirmed_time = t_conf[0];
-                     G_TF[idx].m15_pullback_start_time = t_ll[0];
                   }
                }
             }
+         }
+         
+         PrintFormat("[M15_IMPULSE_CANDIDATES][%s] SELL candidates=%d", sym, candidate_count);
+         
+         if(candidate_count > 0 && best_lh != -1 && best_ll != -1 && best_oh != -1)
+         {
+             datetime t_lh[], t_ll[], t_oh[], t_conf[];
+             if(CopyTime(sym, m15, best_lh + 1, 1, t_lh) == 1 && 
+                CopyTime(sym, m15, best_ll + 1, 1, t_ll) == 1 && 
+                CopyTime(sym, m15, best_oh + 1, 1, t_oh) == 1 &&
+                CopyTime(sym, m15, best_lh - right + 1, 1, t_conf) == 1)
+             {
+                if(t_oh[0] < t_ll[0] && t_ll[0] < t_lh[0])
+                {
+                   if(G_TF[idx].m15_impulse_high != m15_highs[best_oh] || G_TF[idx].m15_impulse_low != m15_lows[best_ll]) {
+                      ResetTFM5Evidence(idx);
+                   }
+                   G_TF[idx].m15_impulse_low = m15_lows[best_ll];
+                   G_TF[idx].m15_impulse_high = m15_highs[best_oh];
+                   G_TF[idx].m15_protected_high = m15_highs[best_lh];
+                   G_TF[idx].m15_impulse_start_time = t_oh[0];
+                   G_TF[idx].m15_impulse_end_time = t_ll[0];
+                   G_TF[idx].m15_protected_time = t_lh[0];
+                   G_TF[idx].m15_protected_confirmed_time = t_conf[0];
+                   G_TF[idx].m15_pullback_start_time = t_ll[0];
+                   
+                   PrintFormat("[M15_SELECTED_IMPULSE][%s] direction=SELL impulse_high=%.5f impulse_low=%.5f protected_lh=%.5f age_bars=%d impulse_atr=%.2f",
+                               sym, m15_highs[best_oh], m15_lows[best_ll], m15_highs[best_lh], best_lh, (m15_highs[best_oh] - m15_lows[best_ll])/atr);
+                }
+             }
+         }
+         else
+         {
+             PrintFormat("[M15_NO_VALID_IMPULSE][%s]", sym);
          }
       }
       
@@ -428,17 +490,37 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_SWEEP)
    {
       double sweep_target = 0.0;
-      bool sweep_found = false;
+      int best_candidate_idx = -1;
+      double best_score = -1.0;
+      int candidate_count = 0;
+      
+      double atr = CalculateATR_Generic(sym, m5, InpReversal_ATR_Period, 1);
       
       if(trend_dir == 1) {
          for(int i = right; i < m5_lookback - left; i++) {
             if(IsSwingLow(m5_lows, i, left, right, m5_lookback)) {
                double target = m5_lows[i];
                if(target >= G_TF[idx].m15_protected_low && target <= G_TF[idx].m15_impulse_high) {
-                  if(current_time > G_TF[idx].m15_protected_confirmed_time && DetectLiquiditySweep(sym, m5, trend_dir, target)) {
-                     sweep_target = target;
-                     sweep_found = true;
-                     break;
+                  if(current_time > G_TF[idx].m15_protected_confirmed_time) {
+                     // Filter: already consumed by intermediate candles?
+                     bool consumed = false;
+                     for(int j = 1; j < i; j++) {
+                        if(m5_lows[j] < target) { consumed = true; break; }
+                     }
+                     
+                     if(!consumed && DetectLiquiditySweep(sym, m5, trend_dir, target)) {
+                        candidate_count++;
+                        double freshness = 1.0 / (i + 1.0);
+                        double dist = 0;
+                        if(atr > 0) dist = MathAbs(target - G_TF[idx].m15_protected_low) / atr;
+                        double score = (freshness * 50.0) - (dist * 10.0);
+                        
+                        if(score > best_score) {
+                           best_score = score;
+                           best_candidate_idx = i;
+                           sweep_target = target;
+                        }
+                     }
                   }
                }
             }
@@ -448,17 +530,35 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             if(IsSwingHigh(m5_highs, i, left, right, m5_lookback)) {
                double target = m5_highs[i];
                if(target <= G_TF[idx].m15_protected_high && target >= G_TF[idx].m15_impulse_low) {
-                  if(current_time > G_TF[idx].m15_protected_confirmed_time && DetectLiquiditySweep(sym, m5, trend_dir, target)) {
-                     sweep_target = target;
-                     sweep_found = true;
-                     break;
+                  if(current_time > G_TF[idx].m15_protected_confirmed_time) {
+                     // Filter: already consumed by intermediate candles?
+                     bool consumed = false;
+                     for(int j = 1; j < i; j++) {
+                        if(m5_highs[j] > target) { consumed = true; break; }
+                     }
+                     
+                     if(!consumed && DetectLiquiditySweep(sym, m5, trend_dir, target)) {
+                        candidate_count++;
+                        double freshness = 1.0 / (i + 1.0);
+                        double dist = 0;
+                        if(atr > 0) dist = MathAbs(target - G_TF[idx].m15_protected_high) / atr;
+                        double score = (freshness * 50.0) - (dist * 10.0);
+                        
+                        if(score > best_score) {
+                           best_score = score;
+                           best_candidate_idx = i;
+                           sweep_target = target;
+                        }
+                     }
                   }
                }
             }
          }
       }
       
-      if(sweep_found)
+      PrintFormat("[M5_SWEEP_CANDIDATES][%s] direction=%d candidates=%d", sym, trend_dir, candidate_count);
+      
+      if(best_candidate_idx != -1)
       {
          G_TF[idx].m5_sweep = true;
          G_TF[idx].m5_sweep_time = current_time;
@@ -467,7 +567,16 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          G_TF[idx].score_sweep = 10.0;
          G_TF[idx].setup_state = TF_STATE_M5_WAIT_DISPLACEMENT;
          G_TF[idx].status = "WAIT DISPLACEMENT";
-         PrintFormat("[TREND-FOLLOWING][%s] M5 Sweep Confirmed (dir=%d, price=%.5f)", sym, trend_dir, sweep_target);
+         
+         double dist_val = 0;
+         if(atr > 0) dist_val = MathAbs(sweep_target - (trend_dir == 1 ? G_TF[idx].m15_protected_low : G_TF[idx].m15_protected_high)) / atr;
+         
+         PrintFormat("[M5_SELECTED_SWEEP][%s] direction=%d swing_price=%.5f age_bars=%d distance=%.2f", 
+                     sym, trend_dir, sweep_target, best_candidate_idx, dist_val);
+      }
+      else
+      {
+         PrintFormat("[M5_NO_VALID_SWEEP][%s] direction=%d", sym, trend_dir);
       }
       return; // Wait for next candle for next event
    }
@@ -885,6 +994,7 @@ int CheckTrendFollowingSignal(int idx)
             {
                if(G_TF[idx].setup_state == TF_STATE_NONE)
                {
+                  G_TF[idx].h1_trend_direction = new_dir;
                   G_TF[idx].setup_state = TF_STATE_H1_TREND;
                   G_TF[idx].setup_bar_count = 0;
                   G_TF[idx].status = "H1 TREND";
@@ -893,12 +1003,18 @@ int CheckTrendFollowingSignal(int idx)
                else if(prev_dir != 0 && prev_dir != new_dir)
                {
                   // H1 trend changed direction → full reset old, init new immediately
-                  ResetTFSetup(idx, "H1 Trend Direction Changed");
+                  ResetTFSetup(idx, "H1_SETUP_INVALIDATED");
                   EvaluateH1TrendRegime(idx); // Re-evaluate to set new state
+                  G_TF[idx].h1_trend_direction = new_dir;
                   G_TF[idx].setup_state = TF_STATE_H1_TREND;
                   G_TF[idx].setup_bar_count = 0;
                   G_TF[idx].status = "H1 TREND (FLIPPED)";
                   LogTFDecision(idx, new_dir, "H1_TREND", "Trend flipped", 0);
+               }
+               else
+               {
+                  // Recovered from weakened, or just continuing
+                  G_TF[idx].h1_trend_direction = new_dir;
                }
             }
             else
@@ -906,14 +1022,15 @@ int CheckTrendFollowingSignal(int idx)
                // No clear trend → check invalidation
                if(G_TF[idx].setup_state != TF_STATE_NONE)
                {
-                  ResetTFSetup(idx, "H1 Trend Lost");
+                  G_TF[idx].status = "H1_REGIME_WEAKENED";
+                  PrintFormat("[TREND-FOLLOWING][%s] H1_REGIME_WEAKENED", sym);
                }
             }
             
             // Check H1 trend invalidation (protected structure broken)
             if(G_TF[idx].setup_state != TF_STATE_NONE && CheckH1TrendInvalidation(idx))
             {
-               ResetTFSetup(idx, "H1 Protected Structure Broken");
+               ResetTFSetup(idx, "H1_SETUP_INVALIDATED");
                return 0;
             }
          }
@@ -923,6 +1040,9 @@ int CheckTrendFollowingSignal(int idx)
    // If no H1 trend → stop
    if(G_TF[idx].h1_trend_direction == 0) return 0;
    if(G_TF[idx].setup_state == TF_STATE_NONE) return 0;
+   
+   // Block progression if H1 is weakened
+   if(G_TF[idx].h1_trend_quality < 20.0) return 0;
    
    int dir = G_TF[idx].h1_trend_direction;
    
@@ -988,7 +1108,23 @@ int CheckTrendFollowingSignal(int idx)
    // Setup timeout
    if(G_TF[idx].setup_bar_count > TF_MAX_SETUP_BARS)
    {
-      ResetTFSetup(idx, "SETUP_TIMEOUT");
+      // Reset M15 and M5 but keep H1
+      G_TF[idx].m15_pullback_valid = false;
+      G_TF[idx].m15_pullback_quality = 0.0;
+      G_TF[idx].m15_pullback_bar_count = 0;
+      G_TF[idx].score_m15_pullback = 0.0;
+      G_TF[idx].m15_pullback_start_time = 0;
+      G_TF[idx].m15_impulse_high = 0.0;
+      G_TF[idx].m15_impulse_low = 0.0;
+      G_TF[idx].m15_impulse_start_time = 0;
+      G_TF[idx].m15_impulse_end_time = 0;
+      G_TF[idx].m15_protected_time = 0;
+      ResetTFM5Evidence(idx);
+      
+      G_TF[idx].setup_state = TF_STATE_H1_TREND;
+      G_TF[idx].status = "M15 TIMEOUT RESTART";
+      G_TF[idx].setup_bar_count = 0;
+      PrintFormat("[TREND-FOLLOWING][%s] SETUP TIMEOUT -> Reset to H1", sym);
       return 0;
    }
    
