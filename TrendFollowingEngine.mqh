@@ -295,7 +295,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       double distance_to_ema = (ema50 - close[0]) / atr;
       G_TF[idx].m15_ema_distance = distance_to_ema;
       
-      // Always look for valid impulse to allow refresh
+      // Look for valid impulse to allow refresh (only if not locked by M5 execution)
+      if(G_TF[idx].setup_state <= TF_STATE_M15_PULLBACK)
       {
          int best_hl = -1, best_hh = -1, best_ol = -1, best_oh = -1;
          double best_score = -999999.0;
@@ -416,6 +417,10 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
              PrintFormat("[M15_NO_VALID_IMPULSE][%s]", sym);
          }
       }
+      else
+      {
+         PrintFormat("[M15_CONTEXT_LOCKED][%s] direction=BUY state=%s", sym, TFStateToString(G_TF[idx].setup_state));
+      }
       
       if(G_TF[idx].m15_impulse_high > 0.0)
       {
@@ -439,7 +444,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
       double distance_to_ema = (close[0] - ema50) / atr;
       G_TF[idx].m15_ema_distance = distance_to_ema;
       
-      // Always look for valid impulse to allow refresh
+      // Look for valid impulse to allow refresh (only if not locked by M5 execution)
+      if(G_TF[idx].setup_state <= TF_STATE_M15_PULLBACK)
       {
          int best_lh = -1, best_ll = -1, best_oh = -1, best_ol = -1;
          double best_score = -999999.0;
@@ -560,6 +566,10 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
              PrintFormat("[M15_NO_VALID_IMPULSE][%s]", sym);
          }
       }
+      else
+      {
+         PrintFormat("[M15_CONTEXT_LOCKED][%s] direction=SELL state=%s", sym, TFStateToString(G_TF[idx].setup_state));
+      }
       
       if(G_TF[idx].m15_impulse_low > 0.0)
       {
@@ -678,17 +688,17 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    if(G_TF[idx].m5_sweep && G_TF[idx].m5_sweep_time > 0)
    {
       long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
-      if(bars_since_sweep > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); G_TF[idx].setup_state = TF_STATE_M5_WAIT_SWEEP; return; }
+      if(bars_since_sweep > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT"); return; }
    }
    if(G_TF[idx].m5_displacement && G_TF[idx].m5_displacement_time > 0)
    {
       long bars_since_disp = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
-      if(bars_since_disp > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); G_TF[idx].setup_state = TF_STATE_M5_WAIT_SWEEP; return; }
+      if(bars_since_disp > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT"); return; }
    }
    if(G_TF[idx].m5_mss && G_TF[idx].m5_mss_time > 0)
    {
       long bars_since_mss = (current_time - G_TF[idx].m5_mss_time) / period_sec;
-      if(bars_since_mss > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); G_TF[idx].setup_state = TF_STATE_M5_WAIT_SWEEP; return; }
+      if(bars_since_mss > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT"); return; }
    }
    
    // --- Find qualified swings on M5 ---
@@ -917,7 +927,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             G_TF[idx].m5_displacement_time = current_time;
             G_TF[idx].m5_displacement_price = close[0];
             G_TF[idx].score_displacement = 10.0;
-            G_TF[idx].setup_state = TF_STATE_M5_WAIT_MSS;
+            SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED");
             G_TF[idx].status = "WAIT MSS";
             PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d)", sym, trend_dir);
          }
@@ -937,7 +947,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             G_TF[idx].m5_mss_time = current_time;
             G_TF[idx].m5_mss_break_level = breakLvl;
             G_TF[idx].score_mss = 10.0;
-            G_TF[idx].setup_state = TF_STATE_ENTRY_READY; // Forward to entry validation
+            SetTFState(idx, TF_STATE_ENTRY_READY, "M5_MSS_CONFIRMED"); // Forward to entry validation
             G_TF[idx].status = "MSS CONFIRMED";
             PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f)", sym, trend_dir, breakLvl);
             
@@ -1432,7 +1442,7 @@ int CheckTrendFollowingSignal(int idx)
       ResetTFM15Evidence(idx);
       ResetTFM5Evidence(idx);
       
-      G_TF[idx].setup_state = TF_STATE_H1_TREND;
+      SetTFState(idx, TF_STATE_H1_TREND, "M15_TIMEOUT");
       G_TF[idx].status = "M15 TIMEOUT RESTART";
       G_TF[idx].setup_bar_count = 0;
       PrintFormat("[TREND-FOLLOWING][%s] SETUP TIMEOUT -> Reset to H1", sym);
@@ -1442,7 +1452,7 @@ int CheckTrendFollowingSignal(int idx)
    // Evaluate M5 evidence
    if(G_TF[idx].setup_state == TF_STATE_M15_PULLBACK)
    {
-      G_TF[idx].setup_state = TF_STATE_M5_WAIT_SWEEP;
+      SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M15_PULLBACK_READY");
       G_TF[idx].status = "WAIT SWEEP";
    }
    EvaluateM5Trigger(idx, dir);
@@ -1453,7 +1463,7 @@ int CheckTrendFollowingSignal(int idx)
    if(score == 100.0)
    {
       // === FINAL GATE ===
-      G_TF[idx].setup_state = TF_STATE_ENTRY_READY;
+      SetTFState(idx, TF_STATE_ENTRY_READY, "SCORE_100_REACHED");
       
       string rejectReason = "";
       bool hardPass = ValidateTFHardRequirements(idx, dir, rejectReason);
@@ -1483,7 +1493,7 @@ int CheckTrendFollowingSignal(int idx)
          {
             LogTFDecision(idx, dir, "REJECT", rejectReason, score);
             ResetTFM5Evidence(idx); // Reset M5 only, keep H1+M15
-            G_TF[idx].setup_state = TF_STATE_M15_PULLBACK;
+            SetTFState(idx, TF_STATE_M15_PULLBACK, "ENTRY_DISTANCE_REJECT");
             G_TF[idx].status = "M5 RE-ACCUMULATING (distance)";
             return 0;
          }
@@ -1491,7 +1501,7 @@ int CheckTrendFollowingSignal(int idx)
          {
             LogTFDecision(idx, dir, "REJECT", rejectReason, score);
             ResetTFM5Evidence(idx); // Reset M5 only
-            G_TF[idx].setup_state = TF_STATE_M15_PULLBACK;
+            SetTFState(idx, TF_STATE_M15_PULLBACK, "EVENT_NOT_COHERENT_REJECT");
             G_TF[idx].status = "M5 RE-ACCUMULATING (coherence)";
             return 0;
          }
