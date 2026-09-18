@@ -544,6 +544,84 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
 }
 
 // ==================================================================
+// HELPER: M5 STRUCTURAL SIGNIFICANCE CHECK
+// ==================================================================
+// Determines whether an M5 swing has structural significance by measuring
+// the price reaction AWAY from the swing using only closed bar data.
+// A structurally significant swing must have produced a meaningful
+// price reaction (normalized by ATR) that creates local structure.
+//
+// Returns: reaction_ratio (ATR-normalized). 0.0 = not significant.
+// Uses only bars between the swing and the most recent closed bar.
+// No look-ahead: only data at indices [right .. swing_idx-1] relative
+// to the swing formation is used (all confirmed/closed bars).
+
+const double TF_M5_MIN_REACTION_ATR = 0.5; // Minimum reaction to qualify as structural
+
+double MeasureSwingReaction(const double &highs[], const double &lows[],
+                            int swing_idx, int right_bars, int direction,
+                            double swing_price, double atr, int array_size)
+{
+   if(atr <= 0.0) return 0.0;
+   if(swing_idx <= right_bars) return 0.0; // Not enough bars after swing
+   
+   // Scan bars BETWEEN the swing confirmation and current bar
+   // Index 0 = newest closed bar, swing_idx = swing bar
+   // Bars right_bars..swing_idx-1 are AFTER the swing was confirmed
+   // (lower index = more recent = chronologically after the swing)
+   
+   if(direction == 1) // BUY: swing low → measure upward reaction
+   {
+      double max_high = 0.0;
+      for(int j = right_bars; j < swing_idx; j++)
+      {
+         if(highs[j] > max_high) max_high = highs[j];
+      }
+      if(max_high <= swing_price) return 0.0;
+      return (max_high - swing_price) / atr;
+   }
+   else // SELL: swing high → measure downward reaction
+   {
+      double min_low = 999999.0;
+      for(int j = right_bars; j < swing_idx; j++)
+      {
+         if(lows[j] < min_low) min_low = lows[j];
+      }
+      if(min_low >= swing_price) return 0.0;
+      return (swing_price - min_low) / atr;
+   }
+}
+
+// Check if swing was broken (violated) before the current sweep candle.
+// For BUY: check if any bar between swing and bar 2 went below swing_price
+// For SELL: check if any bar between swing and bar 2 went above swing_price
+// Bar index 1 = the sweep candle itself (excluded from this check)
+bool IsSwingIntactBeforeSweep(const double &highs[], const double &lows[],
+                              int swing_idx, int direction, double swing_price,
+                              int array_size)
+{
+   // Check bars from 2 (one before sweep candle) up to swing_idx-1
+   // These are bars AFTER the swing was formed, BEFORE the sweep candle
+   if(swing_idx <= 2) return true; // Not enough bars to check
+   
+   if(direction == 1) // BUY: swing low must not have been broken below
+   {
+      for(int j = 2; j < swing_idx; j++)
+      {
+         if(lows[j] < swing_price) return false;
+      }
+   }
+   else // SELL: swing high must not have been broken above
+   {
+      for(int j = 2; j < swing_idx; j++)
+      {
+         if(highs[j] > swing_price) return false;
+      }
+   }
+   return true;
+}
+
+// ==================================================================
 // LAYER 3: M5 ENTRY TRIGGER
 // ==================================================================
 
@@ -616,6 +694,22 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                   continue;
                }
                
+               // --- STRUCTURAL SIGNIFICANCE CHECK (before consumed/sweep) ---
+               double reaction_ratio = MeasureSwingReaction(m5_highs, m5_lows,
+                  i, right, 1, target, atr, m5_lookback);
+               
+               if(reaction_ratio < TF_M5_MIN_REACTION_ATR) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=NOT_STRUCTURALLY_SIGNIFICANT target=%.5f reaction_ratio=%.2f threshold=%.2f",
+                              sym, target, reaction_ratio, TF_M5_MIN_REACTION_ATR);
+                  continue;
+               }
+               
+               // Check swing integrity: not broken before sweep
+               if(!IsSwingIntactBeforeSweep(m5_highs, m5_lows, i, 1, target, m5_lookback)) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=SWING_BROKEN_BEFORE_SWEEP target=%.5f", sym, target);
+                  continue;
+               }
+               
                // Filter: already consumed by intermediate candles?
                bool consumed = false;
                for(int j = 1; j < i; j++) {
@@ -641,10 +735,11 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                if(atr > 0) structural_depth = (G_TF[idx].m15_impulse_high - target) / atr;
                
                // Priorities:
-               // 1. Structural relevance (depth into pullback) - high weight
-               // 2. Proximity to protected level (dist) - negative high weight
-               // 3. Freshness - low weight
-               double score = (structural_depth * 100.0) - (dist * 50.0) + (freshness * 10.0);
+               // 1. Structural significance (price reaction) - highest weight
+               // 2. Structural depth (depth into pullback) - medium weight
+               // 3. Proximity to protected level (dist) - negative weight
+               // 4. Freshness - lowest weight
+               double score = (reaction_ratio * 200.0) + (structural_depth * 50.0) - (dist * 30.0) + (freshness * 5.0);
                
                if(score > best_score) {
                   best_score = score;
@@ -678,6 +773,22 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                   continue;
                }
                
+               // --- STRUCTURAL SIGNIFICANCE CHECK (before consumed/sweep) ---
+               double reaction_ratio = MeasureSwingReaction(m5_highs, m5_lows,
+                  i, right, -1, target, atr, m5_lookback);
+               
+               if(reaction_ratio < TF_M5_MIN_REACTION_ATR) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=NOT_STRUCTURALLY_SIGNIFICANT target=%.5f reaction_ratio=%.2f threshold=%.2f",
+                              sym, target, reaction_ratio, TF_M5_MIN_REACTION_ATR);
+                  continue;
+               }
+               
+               // Check swing integrity: not broken before sweep
+               if(!IsSwingIntactBeforeSweep(m5_highs, m5_lows, i, -1, target, m5_lookback)) {
+                  PrintFormat("[M5_SWEEP_REJECT][%s] reason=SWING_BROKEN_BEFORE_SWEEP target=%.5f", sym, target);
+                  continue;
+               }
+               
                // Filter: already consumed by intermediate candles?
                bool consumed = false;
                for(int j = 1; j < i; j++) {
@@ -702,10 +813,11 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                if(atr > 0) structural_depth = (target - G_TF[idx].m15_impulse_low) / atr;
                
                // Priorities:
-               // 1. Structural relevance (depth into pullback) - high weight
-               // 2. Proximity to protected level (dist) - negative high weight
-               // 3. Freshness - low weight
-               double score = (structural_depth * 100.0) - (dist * 50.0) + (freshness * 10.0);
+               // 1. Structural significance (price reaction) - highest weight
+               // 2. Structural depth (depth into pullback) - medium weight
+               // 3. Proximity to protected level (dist) - negative weight
+               // 4. Freshness - lowest weight
+               double score = (reaction_ratio * 200.0) + (structural_depth * 50.0) - (dist * 30.0) + (freshness * 5.0);
                
                if(score > best_score) {
                   best_score = score;
@@ -735,8 +847,11 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             structural_relevance = (trend_dir == 1) ? (G_TF[idx].m15_impulse_high - sweep_target) / atr : (sweep_target - G_TF[idx].m15_impulse_low) / atr;
          }
          
-         PrintFormat("[M5_SELECTED_SWEEP][%s] direction=%d swing_price=%.5f age_bars=%d distance=%.2f structural_relevance=%.2f ranking_score=%.2f", 
-                     sym, trend_dir, sweep_target, best_candidate_idx, dist_val, structural_relevance, best_score);
+         double selected_reaction = MeasureSwingReaction(m5_highs, m5_lows,
+            best_candidate_idx, right, trend_dir, sweep_target, atr, m5_lookback);
+         
+         PrintFormat("[M5_SELECTED_SWEEP][%s] direction=%d swing_price=%.5f structural_significance=%.2f structural_depth=%.2f distance=%.2f freshness=%d ranking_score=%.2f", 
+                     sym, trend_dir, sweep_target, selected_reaction, structural_relevance, dist_val, best_candidate_idx, best_score);
       }
       else
       {
