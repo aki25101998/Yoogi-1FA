@@ -17,7 +17,7 @@ input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = d
 
 input group "=== ENTRY ENGINE ==="
 input bool InpEnableCounterTrend    = true;   // Counter-Trend Engine (ON/OFF)
-input bool InpEnableTrendFollowing  = false;  // Trend-Following Engine (ON/OFF)
+input bool InpEnableTrendFollowing  = true;   // Trend-Following Engine (ON/OFF)
 
 //--- Tester Withdrawal Settings ---
 input group "--- Tester Withdrawal Settings ---"

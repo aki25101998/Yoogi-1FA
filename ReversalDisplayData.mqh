@@ -237,28 +237,38 @@ bool BuildReversalDisplayData(int idx, ReversalDisplayData &data)
          G_Pairs[idx].score_mss, G_Pairs[idx].score_momentum);
 
      // Trend-Following Data
-     switch(G_TF[idx].setup_state)
+     if(!InpEnableTrendFollowing)
      {
-         case TF_STATE_NONE:                 data.tfState = "NONE"; break;
-         case TF_STATE_H1_TREND:             data.tfState = "H1 TREND"; break;
-         case TF_STATE_M15_PULLBACK:         data.tfState = "M15 PULLBACK"; break;
-         case TF_STATE_M5_WAIT_SWEEP:        data.tfState = "WAIT SWEEP"; break;
-         case TF_STATE_M5_WAIT_DISPLACEMENT: data.tfState = "WAIT DISP"; break;
-         case TF_STATE_M5_WAIT_MSS:          data.tfState = "WAIT MSS"; break;
-         case TF_STATE_ENTRY_READY:          data.tfState = "ENTRY READY"; break;
-         default:                            data.tfState = "UNKNOWN"; break;
+         data.tfState = "TF OFF";
+         data.tfDirection = "TF OFF";
+         data.tfScore = 0.0;
+         data.tfScoreBreakdown = "";
      }
-     
-     if(G_TF[idx].h1_trend_direction == 1) data.tfDirection = "BUY";
-     else if(G_TF[idx].h1_trend_direction == -1) data.tfDirection = "SELL";
-     else data.tfDirection = "NONE";
-     
-     data.tfScore = G_TF[idx].total_score;
-     data.tfScoreBreakdown = StringFormat("H1:%.0f M15:%.0f Sw:%.0f Di:%.0f MS:%.0f Co:%.0f Mo:%.0f En:%.0f",
-         G_TF[idx].score_h1_trend, G_TF[idx].score_m15_pullback,
-         G_TF[idx].score_sweep, G_TF[idx].score_displacement,
-         G_TF[idx].score_mss, G_TF[idx].score_event_coherence,
-         G_TF[idx].score_momentum, G_TF[idx].score_entry_distance);
+     else
+     {
+         switch(G_TF[idx].setup_state)
+         {
+             case TF_STATE_NONE:                 data.tfState = "NONE"; break;
+             case TF_STATE_H1_TREND:             data.tfState = "H1 TREND"; break;
+             case TF_STATE_M15_PULLBACK:         data.tfState = "M15 PULLBACK"; break;
+             case TF_STATE_M5_WAIT_SWEEP:        data.tfState = "WAIT SWEEP"; break;
+             case TF_STATE_M5_WAIT_DISPLACEMENT: data.tfState = "WAIT DISP"; break;
+             case TF_STATE_M5_WAIT_MSS:          data.tfState = "WAIT MSS"; break;
+             case TF_STATE_ENTRY_READY:          data.tfState = "ENTRY READY"; break;
+             default:                            data.tfState = "UNKNOWN"; break;
+         }
+         
+         if(G_TF[idx].h1_trend_direction == 1) data.tfDirection = "BUY";
+         else if(G_TF[idx].h1_trend_direction == -1) data.tfDirection = "SELL";
+         else data.tfDirection = "NONE";
+         
+         data.tfScore = G_TF[idx].total_score;
+         data.tfScoreBreakdown = StringFormat("H1:%.0f M15:%.0f Sw:%.0f Di:%.0f MS:%.0f Co:%.0f Mo:%.0f En:%.0f",
+             G_TF[idx].score_h1_trend, G_TF[idx].score_m15_pullback,
+             G_TF[idx].score_sweep, G_TF[idx].score_displacement,
+             G_TF[idx].score_mss, G_TF[idx].score_event_coherence,
+             G_TF[idx].score_momentum, G_TF[idx].score_entry_distance);
+     }
      
      // Entry Mode
      if(InpEnableCounterTrend && InpEnableTrendFollowing) data.entryMode = "CT+TF";

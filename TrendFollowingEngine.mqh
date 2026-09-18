@@ -164,7 +164,7 @@ int EvaluateH1TrendRegime(int idx)
       for(int i = 1; i < slCount; i++) if(swL[i] < min_l) min_l = swL[i];
       h1_range = (max_h - min_l) / atr;
    }
-   bool not_sideway = (h1_range > TF_SIDEWAY_ATR_RATIO * 10.0); // Meaningful range
+   bool not_sideway = (h1_range > TF_SIDEWAY_ATR_RATIO); // Meaningful range
    
    // --- Evaluate BUY Trend ---
    bool buy_ema = (ema20 > ema50);
@@ -178,26 +178,12 @@ int EvaluateH1TrendRegime(int idx)
    bool sell_price = (close[0] < ema50);
    bool sell_structure = has_ll_lh;
    
-   // --- Score and Direction ---
-   double buy_quality = 0.0;
-   if(buy_ema)       buy_quality += 5.0;
-   if(buy_slope)     buy_quality += 5.0;
-   if(buy_price)     buy_quality += 5.0;
-   if(buy_structure) buy_quality += 5.0;
-   
-   double sell_quality = 0.0;
-   if(sell_ema)       sell_quality += 5.0;
-   if(sell_slope)     sell_quality += 5.0;
-   if(sell_price)     sell_quality += 5.0;
-   if(sell_structure) sell_quality += 5.0;
-   
-   // Only valid if all 4 factors align AND not sideway
-   // Score 20 = perfect trend (all 4 factors + not sideway)
-   // Must have at least EMA alignment + 1 more factor (10+) to be considered trending
-   
    int direction = 0;
    
-   if(buy_quality == 20.0 && not_sideway)
+   bool buy_minimum = (buy_ema && buy_slope && buy_price && not_sideway);
+   bool sell_minimum = (sell_ema && sell_slope && sell_price && not_sideway);
+   
+   if(buy_minimum)
    {
       direction = 1;
       G_TF[idx].h1_ema_aligned = buy_ema;
@@ -205,13 +191,13 @@ int EvaluateH1TrendRegime(int idx)
       G_TF[idx].h1_price_above_ema = buy_price;
       G_TF[idx].h1_structure_valid = buy_structure;
       G_TF[idx].h1_not_sideway = not_sideway;
-      G_TF[idx].h1_trend_quality = 20.0;
-      G_TF[idx].score_h1_trend = 20.0;
+      G_TF[idx].h1_trend_quality = buy_structure ? 20.0 : 15.0;
+      G_TF[idx].score_h1_trend = buy_structure ? 20.0 : 15.0;
       
       // Set protected structure: if price breaks below recent swing low, trend invalid
       if(slCount >= 1) G_TF[idx].h1_protected_structure = swL[0];
    }
-   else if(sell_quality == 20.0 && not_sideway)
+   else if(sell_minimum)
    {
       direction = -1;
       G_TF[idx].h1_ema_aligned = sell_ema;
@@ -219,8 +205,8 @@ int EvaluateH1TrendRegime(int idx)
       G_TF[idx].h1_price_above_ema = sell_price;
       G_TF[idx].h1_structure_valid = sell_structure;
       G_TF[idx].h1_not_sideway = not_sideway;
-      G_TF[idx].h1_trend_quality = 20.0;
-      G_TF[idx].score_h1_trend = 20.0;
+      G_TF[idx].h1_trend_quality = sell_structure ? 20.0 : 15.0;
+      G_TF[idx].score_h1_trend = sell_structure ? 20.0 : 15.0;
       
       // Set protected structure: if price breaks above recent swing high, trend invalid
       if(shCount >= 1) G_TF[idx].h1_protected_structure = swH[0];
@@ -260,8 +246,8 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
    int left = InpReversal_SwingLeft;
    int right = InpReversal_SwingRight;
    
-   // If we don't have an impulse yet, or pullback was invalidated, find a new one
-   bool find_new_impulse = (G_TF[idx].m15_impulse_high == 0.0 && G_TF[idx].m15_impulse_low == 0.0) || !G_TF[idx].m15_pullback_valid;
+   // If we don't have an impulse yet, find a new one
+   bool find_new_impulse = (G_TF[idx].m15_impulse_high == 0.0 && G_TF[idx].m15_impulse_low == 0.0);
    
    if(trend_dir == 1) // BUY trend → look for pullback DOWN
    {
@@ -442,35 +428,46 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_SWEEP)
    {
       double sweep_target = 0.0;
+      bool sweep_found = false;
+      
       if(trend_dir == 1) {
          for(int i = right; i < m5_lookback - left; i++) {
-            if(IsSwingLow(m5_lows, i, left, right, m5_lookback)) { sweep_target = m5_lows[i]; break; }
+            if(IsSwingLow(m5_lows, i, left, right, m5_lookback)) {
+               double target = m5_lows[i];
+               if(target >= G_TF[idx].m15_protected_low && target <= G_TF[idx].m15_impulse_high) {
+                  if(current_time > G_TF[idx].m15_protected_confirmed_time && DetectLiquiditySweep(sym, m5, trend_dir, target)) {
+                     sweep_target = target;
+                     sweep_found = true;
+                     break;
+                  }
+               }
+            }
          }
       } else {
          for(int i = right; i < m5_lookback - left; i++) {
-            if(IsSwingHigh(m5_highs, i, left, right, m5_lookback)) { sweep_target = m5_highs[i]; break; }
+            if(IsSwingHigh(m5_highs, i, left, right, m5_lookback)) {
+               double target = m5_highs[i];
+               if(target <= G_TF[idx].m15_protected_high && target >= G_TF[idx].m15_impulse_low) {
+                  if(current_time > G_TF[idx].m15_protected_confirmed_time && DetectLiquiditySweep(sym, m5, trend_dir, target)) {
+                     sweep_target = target;
+                     sweep_found = true;
+                     break;
+                  }
+               }
+            }
          }
       }
       
-      if(sweep_target > 0.0)
+      if(sweep_found)
       {
-         // Zone Validation: Sweep must be inside M15 Pullback Zone
-         bool in_zone = false;
-         if(trend_dir == 1 && sweep_target >= G_TF[idx].m15_protected_low && sweep_target <= G_TF[idx].m15_impulse_high) in_zone = true;
-         if(trend_dir == -1 && sweep_target <= G_TF[idx].m15_protected_high && sweep_target >= G_TF[idx].m15_impulse_low) in_zone = true;
-         
-         // Event Timing: Sweep must occur AFTER the M15 Protected HL/LH is confirmed
-         if(in_zone && current_time > G_TF[idx].m15_protected_confirmed_time && DetectLiquiditySweep(sym, m5, trend_dir, sweep_target))
-         {
-            G_TF[idx].m5_sweep = true;
-            G_TF[idx].m5_sweep_time = current_time;
-            G_TF[idx].m5_sweep_price = sweep_target;
-            G_TF[idx].m5_sweep_level = sweep_target;
-            G_TF[idx].score_sweep = 10.0;
-            G_TF[idx].setup_state = TF_STATE_M5_WAIT_DISPLACEMENT;
-            G_TF[idx].status = "WAIT DISPLACEMENT";
-            PrintFormat("[TREND-FOLLOWING][%s] M5 Sweep Confirmed (dir=%d, price=%.5f)", sym, trend_dir, sweep_target);
-         }
+         G_TF[idx].m5_sweep = true;
+         G_TF[idx].m5_sweep_time = current_time;
+         G_TF[idx].m5_sweep_price = sweep_target;
+         G_TF[idx].m5_sweep_level = sweep_target;
+         G_TF[idx].score_sweep = 10.0;
+         G_TF[idx].setup_state = TF_STATE_M5_WAIT_DISPLACEMENT;
+         G_TF[idx].status = "WAIT DISPLACEMENT";
+         PrintFormat("[TREND-FOLLOWING][%s] M5 Sweep Confirmed (dir=%d, price=%.5f)", sym, trend_dir, sweep_target);
       }
       return; // Wait for next candle for next event
    }
@@ -571,11 +568,17 @@ bool CheckTFEntryDistance(int idx, int direction)
    
    double distance = 0.0;
    if(direction == 1)
+   {
+      if(close[0] < G_TF[idx].m5_mss_break_level) return false;
       distance = close[0] - G_TF[idx].m5_mss_break_level;
+   }
    else
+   {
+      if(close[0] > G_TF[idx].m5_mss_break_level) return false;
       distance = G_TF[idx].m5_mss_break_level - close[0];
+   }
    
-   if(distance < 0 || distance > TF_MAX_ENTRY_DISTANCE_ATR * atr) return false;
+   if(distance > TF_MAX_ENTRY_DISTANCE_ATR * atr) return false;
    
    G_TF[idx].score_entry_distance = 10.0;
    return true;
@@ -743,20 +746,40 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    // 9. DXY Confirmation (if applicable)
    if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
    {
-      int ct_trap_signal = G_Pairs[idx].trapSignal; // Save CT state
-      G_Pairs[idx].trapSignal = direction;
-      int dxy_signal = CheckDXYConvergence_Dual(idx);
-      G_Pairs[idx].trapSignal = ct_trap_signal; // Restore CT state
-      
-      if(dxy_signal == 0)
+      int di = G_Pairs[idx].dxy_map_index;
+      if(di >= 0)
       {
-         rejectReason = "DXY_NOT_READY";
-         return false;
-      }
-      if(dxy_signal != direction)
-      {
-         rejectReason = "DXY_CONFLICT";
-         return false;
+         int dxyTrapHTF = G_DXY_TrapSignal_HTF[di];
+         int dxyTrapLTF = G_DXY_TrapSignal_LTF[di];
+         
+         if(dxyTrapHTF == 0 || dxyTrapLTF == 0)
+         {
+            rejectReason = "DXY_NOT_READY";
+            return false;
+         }
+         if(dxyTrapHTF != dxyTrapLTF)
+         {
+            rejectReason = "DXY_CONFLICT_INTERNAL";
+            return false;
+         }
+         
+         int dxySignal = dxyTrapHTF;
+         bool converges = false;
+         
+         if(G_Pairs[idx].isUSDSecond) // EURUSD, AUDUSD -> nguoc chieu
+         {
+            converges = (direction != dxySignal);
+         }
+         else if(G_Pairs[idx].isUSDFirst) // USDCAD, USDCHF -> cung chieu
+         {
+            converges = (direction == dxySignal);
+         }
+         
+         if(!converges)
+         {
+            rejectReason = "DXY_CONFLICT";
+            return false;
+         }
       }
    }
    
@@ -773,33 +796,53 @@ void LogTFDecision(int idx, int direction, string decision, string reason, doubl
    string sym = G_Pairs[idx].symbol;
    string dir_str = (direction == 1) ? "BUY" : ((direction == -1) ? "SELL" : "NONE");
    
-   PrintFormat("[TREND-FOLLOWING] %s", sym);
-   PrintFormat("Decision=%s | Reason=%s | Score=%.0f", decision, reason, score);
-   PrintFormat("M15:");
-   PrintFormat("Origin: %s", TimeToString(G_TF[idx].m15_impulse_start_time, TIME_MINUTES));
-   PrintFormat("Impulse: %s", TimeToString(G_TF[idx].m15_impulse_end_time, TIME_MINUTES));
-   PrintFormat("Protected: %s", TimeToString(G_TF[idx].m15_protected_time, TIME_MINUTES));
-   PrintFormat("Protected Confirmed: %s", TimeToString(G_TF[idx].m15_protected_confirmed_time, TIME_MINUTES));
-   PrintFormat("Pullback Start: %s", TimeToString(G_TF[idx].m15_pullback_start_time, TIME_MINUTES));
-   PrintFormat("M5:");
-   PrintFormat("Sweep: %s", G_TF[idx].m5_sweep ? "YES" : "NO");
-   PrintFormat("Sweep Time: %s", TimeToString(G_TF[idx].m5_sweep_time, TIME_MINUTES));
-   PrintFormat("Displacement: %s", G_TF[idx].m5_displacement ? "YES" : "NO");
-   PrintFormat("Displacement Time: %s", TimeToString(G_TF[idx].m5_displacement_time, TIME_MINUTES));
-   PrintFormat("MSS: %s", G_TF[idx].m5_mss ? "YES" : "NO");
-   PrintFormat("MSS Time: %s", TimeToString(G_TF[idx].m5_mss_time, TIME_MINUTES));
-   PrintFormat("Momentum: %s", (G_TF[idx].m5_momentum_cci && G_TF[idx].m5_momentum_rf) ? "YES" : "NO");
-   PrintFormat("Momentum Time: %s", TimeToString(G_TF[idx].m5_momentum_time, TIME_MINUTES));
-   PrintFormat("Score:");
-   PrintFormat("H1: %.0f", G_TF[idx].score_h1_trend);
-   PrintFormat("M15: %.0f", G_TF[idx].score_m15_pullback);
-   PrintFormat("Sweep: %.0f", G_TF[idx].score_sweep);
-   PrintFormat("Displacement: %.0f", G_TF[idx].score_displacement);
-   PrintFormat("MSS: %.0f", G_TF[idx].score_mss);
-   PrintFormat("Coherence: %.0f", G_TF[idx].score_event_coherence);
-   PrintFormat("Momentum: %.0f", G_TF[idx].score_momentum);
-   PrintFormat("Distance: %.0f", G_TF[idx].score_entry_distance);
-   PrintFormat("TOTAL: %.0f", G_TF[idx].total_score);
+   if(decision == "REJECT")
+   {
+      PrintFormat("[TREND-FOLLOWING][%s] REJECT | Reason=%s", sym, reason);
+      return;
+   }
+   
+   PrintFormat("\n[TREND-FOLLOWING][%s]", sym);
+   PrintFormat("H1:");
+   PrintFormat(" Direction=%s", dir_str);
+   PrintFormat(" Score=%.0f/20", G_TF[idx].score_h1_trend);
+   PrintFormat(" EMA=%d", G_TF[idx].h1_ema_aligned ? 1 : 0);
+   PrintFormat(" Slope=%d", G_TF[idx].h1_slope_positive ? 1 : 0);
+   PrintFormat(" Price=%d", G_TF[idx].h1_price_above_ema ? 1 : 0);
+   PrintFormat(" Structure=%d", G_TF[idx].h1_structure_valid ? 1 : 0);
+   PrintFormat(" Sideway=%d", !G_TF[idx].h1_not_sideway ? 1 : 0);
+   
+   PrintFormat("\nM15:");
+   PrintFormat(" Impulse=%s", (G_TF[idx].m15_impulse_high > 0 || G_TF[idx].m15_impulse_low > 0) ? "YES" : "NO");
+   PrintFormat(" Pullback=%s", G_TF[idx].m15_pullback_valid ? "YES" : "NO");
+   PrintFormat(" Depth=%.2f ATR", G_TF[idx].m15_pullback_depth);
+   PrintFormat(" Protected=%s", (G_TF[idx].m15_protected_low > 0 || G_TF[idx].m15_protected_high > 0) ? "YES" : "NO");
+   
+   PrintFormat("\nM5:");
+   PrintFormat(" State=%s", G_TF[idx].status);
+   PrintFormat(" Sweep=%s", G_TF[idx].m5_sweep ? "YES" : "NO");
+   PrintFormat(" Displacement=%s", G_TF[idx].m5_displacement ? "YES" : "NO");
+   PrintFormat(" MSS=%s", G_TF[idx].m5_mss ? "YES" : "NO");
+   
+   PrintFormat("\nScore:");
+   PrintFormat(" H1=%.0f", G_TF[idx].score_h1_trend);
+   PrintFormat(" M15=%.0f", G_TF[idx].score_m15_pullback);
+   PrintFormat(" Sweep=%.0f", G_TF[idx].score_sweep);
+   PrintFormat(" Disp=%.0f", G_TF[idx].score_displacement);
+   PrintFormat(" MSS=%.0f", G_TF[idx].score_mss);
+   PrintFormat(" Coh=%.0f", G_TF[idx].score_event_coherence);
+   PrintFormat(" Momentum=%.0f", G_TF[idx].score_momentum);
+   PrintFormat(" Distance=%.0f", G_TF[idx].score_entry_distance);
+   PrintFormat(" Total=%.0f/100", G_TF[idx].total_score);
+   
+   string next = "NONE";
+   if(G_TF[idx].setup_state == TF_STATE_H1_TREND) next = "M15 PULLBACK";
+   else if(G_TF[idx].setup_state == TF_STATE_M15_PULLBACK) next = "SWEEP";
+   else if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_SWEEP) next = "SWEEP";
+   else if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_DISPLACEMENT) next = "DISPLACEMENT";
+   else if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_MSS) next = "MSS";
+   else if(G_TF[idx].setup_state == TF_STATE_ENTRY_READY) next = "TRIGGER";
+   PrintFormat("\nNEXT=%s\n", next);
 }
 
 // ==================================================================
