@@ -89,6 +89,9 @@ void ResetTFM5Evidence(int idx)
    G_TF[idx].m5_displacement_time = 0;
    G_TF[idx].m5_mss_time = 0;
    G_TF[idx].m5_momentum_time = 0;
+   G_TF[idx].m5_momentum_start_time = 0;
+   G_TF[idx].m5_momentum_cci_time = 0;
+   G_TF[idx].m5_momentum_rf_time = 0;
    
    G_TF[idx].m5_sweep_price = 0.0;
    G_TF[idx].m5_displacement_price = 0.0;
@@ -1038,19 +1041,39 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             SetTFState(idx, TF_STATE_ENTRY_READY, "M5_MSS_CONFIRMED"); // Forward to entry validation
             G_TF[idx].status = "MSS CONFIRMED";
             PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f)", sym, trend_dir, breakLvl);
-            
-            // Capture Momentum at MSS time
-            int cci_status = 0, rf_status = 0;
-            CheckMomentumStatus(idx, cci_status, rf_status);
-            G_TF[idx].m5_momentum_cci = (cci_status == trend_dir);
-            G_TF[idx].m5_momentum_rf = (rf_status == trend_dir);
-            G_TF[idx].m5_momentum_time = current_time;
-            double mom = 0.0;
-            if(G_TF[idx].m5_momentum_cci) mom += 5.0;
-            if(G_TF[idx].m5_momentum_rf)  mom += 5.0;
-            G_TF[idx].score_momentum = MathMin(mom, 10.0);
+            // Start Momentum Window
+            G_TF[idx].m5_momentum_start_time = current_time;
+            G_TF[idx].m5_momentum_cci = false;
+            G_TF[idx].m5_momentum_rf = false;
+            G_TF[idx].score_momentum = 0.0;
          }
       }
+      return;
+   }
+   
+   if(G_TF[idx].setup_state == TF_STATE_ENTRY_READY)
+   {
+      // Check Momentum continuously in window
+      int cci_status = 0, rf_status = 0;
+      datetime cci_time = 0, rf_time = 0;
+      CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
+      
+      if(!G_TF[idx].m5_momentum_cci && cci_status == trend_dir && cci_time >= G_TF[idx].m5_momentum_start_time)
+      {
+         G_TF[idx].m5_momentum_cci = true;
+         G_TF[idx].m5_momentum_cci_time = cci_time;
+      }
+      if(!G_TF[idx].m5_momentum_rf && rf_status == trend_dir && rf_time >= G_TF[idx].m5_momentum_start_time)
+      {
+         G_TF[idx].m5_momentum_rf = true;
+         G_TF[idx].m5_momentum_rf_time = rf_time;
+      }
+      
+      double mom = 0.0;
+      if(G_TF[idx].m5_momentum_cci) mom += 5.0;
+      if(G_TF[idx].m5_momentum_rf)  mom += 5.0;
+      G_TF[idx].score_momentum = MathMin(mom, 10.0);
+      
       return;
    }
 }
@@ -1087,8 +1110,11 @@ bool CheckTFEventCoherence(int idx)
 // ==================================================================
 // Don't chase price if it has moved too far from trigger
 
-bool CheckTFEntryDistance(int idx, int direction)
+bool ValidateTFEntryDistance(int idx, int direction, double &distance_atr, double &max_distance_atr)
 {
+   distance_atr = 0.0;
+   max_distance_atr = TF_MAX_ENTRY_DISTANCE_ATR;
+   
    if(G_TF[idx].m5_mss_break_level <= 0.0) return false; // MUST NOT BE SKIPPED
    
    string sym = G_Pairs[idx].symbol;
@@ -1101,18 +1127,18 @@ bool CheckTFEntryDistance(int idx, int direction)
    double distance = 0.0;
    if(direction == 1)
    {
-      if(close[0] < G_TF[idx].m5_mss_break_level) return false;
       distance = close[0] - G_TF[idx].m5_mss_break_level;
+      if(close[0] < G_TF[idx].m5_mss_break_level) return false;
    }
    else
    {
-      if(close[0] > G_TF[idx].m5_mss_break_level) return false;
       distance = G_TF[idx].m5_mss_break_level - close[0];
+      if(close[0] > G_TF[idx].m5_mss_break_level) return false;
    }
    
-   if(distance > TF_MAX_ENTRY_DISTANCE_ATR * atr) return false;
+   distance_atr = distance / atr;
+   if(distance_atr > max_distance_atr) return false;
    
-   G_TF[idx].score_entry_distance = 10.0;
    return true;
 }
 
@@ -1174,6 +1200,10 @@ bool CheckM15PullbackInvalidation(int idx)
 
 double CalculateTFScore(int idx)
 {
+   double d_atr=0, max_d=0;
+   bool dist_valid = ValidateTFEntryDistance(idx, G_TF[idx].h1_trend_direction, d_atr, max_d);
+   G_TF[idx].score_entry_distance = dist_valid ? 10.0 : 0.0;
+
    G_TF[idx].total_score = G_TF[idx].score_h1_trend
                          + G_TF[idx].score_m15_pullback
                          + G_TF[idx].score_sweep
@@ -1194,212 +1224,157 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
 {
    bool pass = true;
    string first_reject = "";
-   string all_rejects = "";
    
-   string h1_dir_str = "PASS";
-   string h1_qual_str = "PASS";
-   string m15_val_str = "PASS";
-   string m15_qual_str = "PASS";
-   string sweep_str = "PASS";
-   string disp_str = "PASS";
-   string mss_str = "PASS";
-   string event_str = "PASS";
-   string mss_break_str = "PASS";
-   string dist_str = "PASS";
-   string cci_str = "PASS";
-   string rf_str = "PASS";
-   string score_100_str = "PASS";
-   string dxy_str = "PASS";
+   // 1. H1 Trend
+   if(G_TF[idx].h1_trend_direction != direction) { if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; pass = false; }
+   if(G_TF[idx].h1_trend_quality < 20.0) { if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; pass = false; }
    
-   // 1. H1 Trend must be valid with sufficient quality
-   if(G_TF[idx].h1_trend_direction != direction) { h1_dir_str = "FAIL"; if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; all_rejects += "H1_DIR,"; pass = false; }
-   if(G_TF[idx].h1_trend_quality < 20.0) { h1_qual_str = "FAIL"; if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; all_rejects += "H1_QUAL,"; pass = false; }
-   
-   // 2. M15 Pullback must be valid
+   // 2. M15 Pullback
    if(!G_TF[idx].m15_pullback_valid) { 
-      m15_val_str = "FAIL"; 
-      if(first_reject=="") {
-         if (G_TF[idx].m15_impulse_high == 0.0 && G_TF[idx].m15_impulse_low == 0.0) first_reject = "M15_IMPULSE_NOT_FOUND";
-         else first_reject = "M15_PULLBACK_INVALID";
-      }
-      all_rejects += "M15_VAL,"; pass = false; 
+      if(first_reject=="") first_reject = (G_TF[idx].m15_impulse_high == 0.0 && G_TF[idx].m15_impulse_low == 0.0) ? "M15_IMPULSE_NOT_FOUND" : "M15_PULLBACK_INVALID";
+      pass = false; 
    }
-   if(G_TF[idx].m15_pullback_quality < 20.0) { m15_qual_str = "FAIL"; if(first_reject=="") first_reject = "M15_PULLBACK_INVALID"; all_rejects += "M15_QUAL,"; pass = false; }
+   if(G_TF[idx].m15_pullback_quality < 20.0) { if(first_reject=="") first_reject = "M15_PULLBACK_INVALID"; pass = false; }
    
-   // 3. M5 Sweep
-   if(!G_TF[idx].m5_sweep) { sweep_str = "FAIL"; if(first_reject=="") first_reject = "M5_SWEEP_NOT_FOUND"; all_rejects += "SWEEP,"; pass = false; }
+   // 3. M5 Events
+   if(!G_TF[idx].m5_sweep) { if(first_reject=="") first_reject = "M5_SWEEP_NOT_FOUND"; pass = false; }
+   if(!G_TF[idx].m5_displacement) { if(first_reject=="") first_reject = "M5_DISPLACEMENT_NOT_AFTER_SWEEP"; pass = false; }
+   if(!G_TF[idx].m5_mss) { if(first_reject=="") first_reject = "M5_MSS_NOT_AFTER_DISPLACEMENT"; pass = false; }
    
-   // 4. M5 Displacement
-   if(!G_TF[idx].m5_displacement) { disp_str = "FAIL"; if(first_reject=="") first_reject = "M5_DISPLACEMENT_NOT_AFTER_SWEEP"; all_rejects += "DISP,"; pass = false; }
-   
-   // 5. M5 MSS
-   if(!G_TF[idx].m5_mss) { mss_str = "FAIL"; if(first_reject=="") first_reject = "M5_MSS_NOT_AFTER_DISPLACEMENT"; all_rejects += "MSS,"; pass = false; }
-   
-   // 6. Event Coherence
-   if(!CheckTFEventCoherence(idx)) { 
-      event_str = "FAIL"; 
-      if(first_reject=="") {
-         if(G_TF[idx].m15_protected_confirmed_time >= G_TF[idx].m5_sweep_time)
-            first_reject = "M5_SWEEP_BEFORE_PROTECTED_CONFIRMATION";
-         else if(G_TF[idx].m5_sweep_time >= G_TF[idx].m5_displacement_time || G_TF[idx].m5_displacement_time >= G_TF[idx].m5_mss_time)
-            first_reject = "M5_EVENT_SEQUENCE_INVALID";
-         else {
-            long period_sec = PeriodSeconds(PERIOD_M5);
-            long total_sequence_bars = (G_TF[idx].m5_mss_time - G_TF[idx].m5_sweep_time) / period_sec;
-            if(total_sequence_bars > TF_MAX_EVENT_BARS) first_reject = "M5_EVENT_STALE";
-            else first_reject = "M5_EVENT_OUTSIDE_M15_SETUP";
-         }
-      }
-      all_rejects += "COHERENCE,"; pass = false; 
+   // 4. Event Coherence
+   bool event_coherent = CheckTFEventCoherence(idx);
+   if(!event_coherent) { 
+      if(first_reject=="") first_reject = "EVENT_NOT_COHERENT";
+      pass = false; 
    }
    
-   // 7. Entry Distance and Break Level Check
-   if(G_TF[idx].m5_mss_break_level <= 0.0) { mss_break_str = "FAIL"; if(first_reject=="") first_reject = "MSS_BREAK_LEVEL_INVALID"; all_rejects += "BREAK_LEVEL,"; pass = false; }
+   // 5. Entry Distance
+   double d_atr=0, max_d=0;
+   bool dist_valid = ValidateTFEntryDistance(idx, direction, d_atr, max_d);
+   if(G_TF[idx].m5_mss_break_level <= 0.0) { if(first_reject=="") first_reject = "MSS_BREAK_LEVEL_INVALID"; pass = false; }
+   if(!dist_valid) { if(first_reject=="") first_reject = "ENTRY_DISTANCE_TOO_FAR"; pass = false; }
    
-   if(!CheckTFEntryDistance(idx, direction)) { dist_str = "FAIL"; if(first_reject=="") first_reject = "ENTRY_DISTANCE_TOO_FAR"; all_rejects += "ENTRY_DISTANCE,"; pass = false; }
+   // 6. Momentum
+   if(!G_TF[idx].m5_momentum_cci) { if(first_reject=="") first_reject = "MOMENTUM_INCOMPLETE"; pass = false; }
+   if(!G_TF[idx].m5_momentum_rf) { if(first_reject=="") first_reject = "MOMENTUM_INCOMPLETE"; pass = false; }
    
-   // 8. Momentum check
-   if(!G_TF[idx].m5_momentum_cci) { cci_str = "FAIL"; if(first_reject=="") first_reject = "MOMENTUM_INCOMPLETE"; all_rejects += "CCI,"; pass = false; }
-   if(!G_TF[idx].m5_momentum_rf) { rf_str = "FAIL"; if(first_reject=="") first_reject = "MOMENTUM_INCOMPLETE"; all_rejects += "RF,"; pass = false; }
-   
-   // 9. Score exactly == 100
+   // 7. Score
    double score = CalculateTFScore(idx);
-   if(score != 100.0) { score_100_str = "FAIL"; if(first_reject=="") first_reject = (score > 100.0) ? "SCORE_OVER_100_LEAKAGE" : "SCORE_BELOW_100"; all_rejects += "SCORE_100,"; pass = false; }
+   if(score != 100.0) { if(first_reject=="") first_reject = (score > 100.0) ? "SCORE_OVER_100_LEAKAGE" : "SCORE_BELOW_100"; pass = false; }
    
-   // 10. DXY Confirmation (if applicable)
+   // 8. DXY Confirmation
+   string dxy_status_str = "PASS";
+   int dxy_htf = 0, dxy_ltf = 0;
+   string orientation = "NONE";
+   
    if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
    {
       int di = G_Pairs[idx].dxy_map_index;
       if(di >= 0)
       {
-         int dxyTrapHTF = G_DXY_TrapSignal_HTF[di];
-         int dxyTrapLTF = G_DXY_TrapSignal_LTF[di];
+         dxy_htf = G_DXY_TrapSignal_HTF[di];
+         dxy_ltf = G_DXY_TrapSignal_LTF[di];
+         orientation = G_Pairs[idx].isUSDFirst ? "USD_FIRST" : (G_Pairs[idx].isUSDSecond ? "USD_SECOND" : "UNKNOWN");
          
-         bool dxy_pass = true;
-         if(dxyTrapHTF == 0 || dxyTrapLTF == 0)
+         if(dxy_htf == 0 || dxy_ltf == 0)
          {
-            dxy_pass = false;
+            dxy_status_str = "NOT_READY";
             if(first_reject=="") first_reject = "DXY_NOT_READY";
+            pass = false;
          }
-         else if(dxyTrapHTF != dxyTrapLTF)
+         else if(dxy_htf != dxy_ltf)
          {
-            dxy_pass = false;
-            if(first_reject=="") first_reject = "DXY_CONFLICT_INTERNAL";
+            dxy_status_str = "CONFLICT";
+            if(first_reject=="") first_reject = "DXY_CONFLICT";
+            pass = false;
          }
          else
          {
-            int dxySignal = dxyTrapHTF;
             bool converges = false;
-            if(G_Pairs[idx].isUSDSecond) converges = (direction != dxySignal);
-            else if(G_Pairs[idx].isUSDFirst) converges = (direction == dxySignal);
+            if(G_Pairs[idx].isUSDSecond) converges = (direction != dxy_htf);
+            else if(G_Pairs[idx].isUSDFirst) converges = (direction == dxy_htf);
             
             if(!converges)
             {
-               dxy_pass = false;
+               dxy_status_str = "CONFLICT";
                if(first_reject=="") first_reject = "DXY_CONFLICT";
+               pass = false;
             }
          }
-         if(!dxy_pass) { dxy_str = "FAIL"; all_rejects += "DXY,"; pass = false; }
       }
    }
-   
-   Print("\n[TF_HARD_GATE]");
-   PrintFormat("H1_DIRECTION=%s", h1_dir_str);
-   PrintFormat("H1_QUALITY=%s", h1_qual_str);
-   PrintFormat("M15_VALID=%s", m15_val_str);
-   PrintFormat("M15_QUALITY=%s", m15_qual_str);
-   PrintFormat("SWEEP=%s", sweep_str);
-   PrintFormat("DISPLACEMENT=%s", disp_str);
-   PrintFormat("MSS=%s", mss_str);
-   PrintFormat("EVENT_COHERENCE=%s", event_str);
-   PrintFormat("MSS_BREAK_LEVEL=%s", mss_break_str);
-   PrintFormat("ENTRY_DISTANCE=%s", dist_str);
-   PrintFormat("CCI=%s", cci_str);
-   PrintFormat("RF=%s", rf_str);
-   PrintFormat("SCORE_100=%s", score_100_str);
-   PrintFormat("DXY=%s", dxy_str);
-   PrintFormat("\nFINAL=%s", pass ? "PASS" : "REJECT");
-   
-   if(!pass) {
-      PrintFormat("REASON=%s", all_rejects); // as requested, print all fails
-      rejectReason = first_reject; // keep logic same for caller
-   }
    else {
-      rejectReason = "";
+      dxy_status_str = "N/A";
+      orientation = "N/A";
    }
-   return pass;
-}
-
-void LogTFFinalDiagnostic(int idx, int direction)
-{
+   
+   // Gather diagnostic values
    string sym = G_Pairs[idx].symbol;
    string dir_str = (direction == 1) ? "BUY" : ((direction == -1) ? "SELL" : "NONE");
-   
-   Print("\n[TF_ENTRY_GATE]");
-   PrintFormat("SYMBOL=%s", sym);
-   PrintFormat("DIRECTION=%s", dir_str);
-   PrintFormat("STATE=ENTRY_READY"); // ENTRY_READY currently means: "MSS confirmed, waiting for final entry gates"
-   
-   Print("\nH1:");
-   PrintFormat("VALID=%s", (G_TF[idx].score_h1_trend >= 20.0 && G_TF[idx].h1_trend_direction == direction) ? "PASS" : "FAIL");
-   PrintFormat("DIRECTION=%s", (G_TF[idx].h1_trend_direction == 1) ? "BUY" : ((G_TF[idx].h1_trend_direction == -1) ? "SELL" : "NONE"));
-   PrintFormat("QUALITY=%.0f", G_TF[idx].h1_trend_quality);
-   PrintFormat("SCORE=%.0f", G_TF[idx].score_h1_trend);
-   
-   Print("\nM15:");
-   PrintFormat("VALID=%s", G_TF[idx].m15_pullback_valid ? "PASS" : "FAIL");
-   PrintFormat("DIRECTION=%s", dir_str);
-   PrintFormat("QUALITY=%.0f", G_TF[idx].m15_pullback_quality);
-   PrintFormat("SCORE=%.0f", G_TF[idx].score_m15_pullback);
-   
-   Print("\nM5:");
-   PrintFormat("SWEEP=%s", G_TF[idx].m5_sweep ? "YES" : "NO");
-   PrintFormat("DISPLACEMENT=%s", G_TF[idx].m5_displacement ? "YES" : "NO");
-   PrintFormat("MSS=%s", G_TF[idx].m5_mss ? "YES" : "NO");
-   
-   Print("\nEVENT:");
-   PrintFormat("COHERENT=%s", CheckTFEventCoherence(idx) ? "PASS" : "FAIL");
-   PrintFormat("SCORE=%.0f", G_TF[idx].score_event_coherence);
+   double m5_close = iClose(sym, PERIOD_M5, 1);
+   double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
    
    int cci_status = 0, rf_status = 0;
-   CheckMomentumStatus(idx, cci_status, rf_status);
+   datetime cci_time = 0, rf_time = 0;
+   CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
    string cci_dir = (cci_status == 1) ? "BUY" : (cci_status == -1 ? "SELL" : "NONE");
    string rf_dir = (rf_status == 1) ? "BUY" : (rf_status == -1 ? "SELL" : "NONE");
    
-   Print("\n[MOMENTUM_DIAGNOSTIC]");
-   PrintFormat("CCI_VALID=%s", (cci_status == direction) ? "true" : "false");
-   PrintFormat("CCI_DIRECTION=%s", cci_dir);
-   PrintFormat("RF_VALID=%s", (rf_status == direction) ? "true" : "false");
-   PrintFormat("RF_DIRECTION=%s", rf_dir);
-   PrintFormat("MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
+   // --- PRINT DIAGNOSTIC BLOCK ---
+   Print("\n[TF_SETUP_DIAGNOSTIC]");
+   Print("");
+   PrintFormat("SYMBOL=%s", sym);
+   PrintFormat("DIRECTION=%s", dir_str);
+   Print("");
+   Print("H1:");
+   PrintFormat("  VALID=%s", (G_TF[idx].h1_trend_direction == direction) ? "true" : "false");
+   PrintFormat("  QUALITY=%.0f", G_TF[idx].h1_trend_quality);
+   PrintFormat("  SCORE=%.0f", G_TF[idx].score_h1_trend);
+   Print("");
+   Print("M15:");
+   PrintFormat("  VALID=%s", G_TF[idx].m15_pullback_valid ? "true" : "false");
+   PrintFormat("  QUALITY=%.0f", G_TF[idx].m15_pullback_quality);
+   PrintFormat("  SCORE=%.0f", G_TF[idx].score_m15_pullback);
+   Print("");
+   Print("M5:");
+   PrintFormat("  SWEEP=%s", G_TF[idx].m5_sweep ? "true" : "false");
+   PrintFormat("  DISPLACEMENT=%s", G_TF[idx].m5_displacement ? "true" : "false");
+   PrintFormat("  MSS=%s", G_TF[idx].m5_mss ? "true" : "false");
+   PrintFormat("  EVENT=%s", event_coherent ? "true" : "false");
+   Print("");
+   Print("MOMENTUM:");
+   PrintFormat("  CCI_VALID=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
+   PrintFormat("  CCI_DIRECTION=%s", cci_dir);
+   PrintFormat("  CCI_TIME=%s", TimeToString(cci_time));
+   Print("");
+   PrintFormat("  RF_VALID=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
+   PrintFormat("  RF_DIRECTION=%s", rf_dir);
+   PrintFormat("  RF_TIME=%s", TimeToString(rf_time));
+   Print("");
+   PrintFormat("  MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
+   Print("");
+   Print("ENTRY_DISTANCE:");
+   PrintFormat("  MSS_LEVEL=%.5f", G_TF[idx].m5_mss_break_level);
+   PrintFormat("  CLOSE=%.5f", m5_close);
+   PrintFormat("  ATR=%.5f", atr);
+   PrintFormat("  DISTANCE_ATR=%.2f", d_atr);
+   PrintFormat("  MAX_DISTANCE_ATR=%.2f", max_d);
+   PrintFormat("  VALID=%s", dist_valid ? "true" : "false");
+   PrintFormat("  SCORE=%.0f", G_TF[idx].score_entry_distance);
+   Print("");
+   Print("DXY:");
+   PrintFormat("  HTF=%d", dxy_htf);
+   PrintFormat("  LTF=%d", dxy_ltf);
+   PrintFormat("  ORIENTATION=%s", orientation);
+   PrintFormat("  STATUS=%s", dxy_status_str);
+   Print("");
+   PrintFormat("TOTAL_SCORE=%.0f", score);
+   Print("");
+   PrintFormat("FINAL_GATE=%s", pass ? "PASS" : "FAIL");
+   if(!pass) PrintFormat("REJECT_REASON=%s", first_reject);
    
-   double m5_close = iClose(sym, PERIOD_M5, 1);
-   double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
-   double break_lvl = G_TF[idx].m5_mss_break_level;
-   double dist_price = MathAbs(m5_close - break_lvl);
-   double dist_atr = (atr > 0) ? dist_price / atr : 0;
-   double max_dist_atr = TF_MAX_ENTRY_DISTANCE_ATR;
-   bool dist_valid = CheckTFEntryDistance(idx, direction);
-   
-   Print("\n[ENTRY_DISTANCE_DIAGNOSTIC]");
-   PrintFormat("MSS_LEVEL=%.5f", break_lvl);
-   PrintFormat("CURRENT_CLOSE=%.5f", m5_close);
-   PrintFormat("ATR=%.5f", atr);
-   PrintFormat("DISTANCE_PRICE=%.5f", dist_price);
-   PrintFormat("DISTANCE_ATR=%.2f", dist_atr);
-   PrintFormat("MAX_DISTANCE_ATR=%.2f", max_dist_atr);
-   PrintFormat("VALID=%s", dist_valid ? "true" : "false");
-   
-   Print("\n[TF_SCORE_BREAKDOWN]");
-   PrintFormat("H1=%.0f", G_TF[idx].score_h1_trend);
-   PrintFormat("M15=%.0f", G_TF[idx].score_m15_pullback);
-   PrintFormat("SWEEP=%.0f", G_TF[idx].score_sweep);
-   PrintFormat("DISPLACEMENT=%.0f", G_TF[idx].score_displacement);
-   PrintFormat("MSS=%.0f", G_TF[idx].score_mss);
-   PrintFormat("EVENT=%.0f", G_TF[idx].score_event_coherence);
-   PrintFormat("MOMENTUM=%.0f", G_TF[idx].score_momentum);
-   PrintFormat("ENTRY_DISTANCE=%.0f", G_TF[idx].score_entry_distance);
-   PrintFormat("TOTAL=%.0f", G_TF[idx].total_score);
+   rejectReason = first_reject;
+   return pass;
 }
 
 void LogTFTimeoutSnapshot(int idx)
@@ -1424,7 +1399,8 @@ void LogTFTimeoutSnapshot(int idx)
    PrintFormat("ENTRY_DISTANCE_SCORE=%.0f", G_TF[idx].score_entry_distance);
    
    int cci_status = 0, rf_status = 0;
-   CheckMomentumStatus(idx, cci_status, rf_status);
+   datetime cci_time = 0, rf_time = 0;
+   CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
    string cci_dir = (cci_status == 1) ? "BUY" : (cci_status == -1 ? "SELL" : "NONE");
    string rf_dir = (rf_status == 1) ? "BUY" : (rf_status == -1 ? "SELL" : "NONE");
    
@@ -1674,11 +1650,6 @@ int CheckTrendFollowingSignal(int idx)
    
    // Check if all evidence is ready
    double score = CalculateTFScore(idx);
-   
-   if(G_TF[idx].setup_state == TF_STATE_ENTRY_READY)
-   {
-      LogTFFinalDiagnostic(idx, dir);
-   }
    
    if(score == 100.0)
    {

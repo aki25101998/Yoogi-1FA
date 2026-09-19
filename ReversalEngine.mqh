@@ -909,7 +909,8 @@ double CalculateReversalScore(int idx, int direction)
    // --- MOMENTUM (max 10) ---
    double mom = 0.0;
    int cci_status = 0, rf_status = 0;
-   CheckMomentumStatus(idx, cci_status, rf_status);
+   datetime cci_time = 0, rf_time = 0;
+   CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
    G_Pairs[idx].ltf_cci_recov = cci_status;
    G_Pairs[idx].ltf_rf_state = rf_status;
    

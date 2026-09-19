@@ -546,15 +546,20 @@ void UpdateIndicatorsState(int idx)
    double cci_val=0, cci_prev=0;
    if(ReadCCI_2Bars(G_Pairs[idx].handle_cci, cci_val, cci_prev))
    {
+       string sym = G_Pairs[idx].symbol;
+       datetime current_time = iTime(sym, PERIOD_M5, 0); // current M5 bar time
+       
        if(cci_prev <= CCI_OS && cci_val > CCI_OS)
        { 
           G_Pairs[idx].isReadyForBuy  = true;  
           G_Pairs[idx].isReadyForSell = false; 
+          G_Pairs[idx].cci_signal_time = current_time;
        }
        if(cci_prev >= CCI_OB && cci_val < CCI_OB)
        { 
           G_Pairs[idx].isReadyForSell = true;  
           G_Pairs[idx].isReadyForBuy  = false; 
+          G_Pairs[idx].cci_signal_time = current_time;
        }
    }
    
@@ -589,21 +594,51 @@ void UpdateIndicatorsState(int idx)
            bool bull = (source > f_curr) && (G_Pairs[idx].upCount > 0);
            bool bear = (source < f_curr) && (G_Pairs[idx].dnCount > 0);
            
-           if(bull)      G_Pairs[idx].lastCond = 1;
-           else if(bear) G_Pairs[idx].lastCond = -1;
+           string sym = G_Pairs[idx].symbol;
+           datetime current_time = iTime(sym, PERIOD_M5, 0);
+           
+           if(bull && G_Pairs[idx].lastCond != 1) {
+               G_Pairs[idx].lastCond = 1;
+               G_Pairs[idx].rf_signal_time = current_time;
+           }
+           else if(bear && G_Pairs[idx].lastCond != -1) {
+               G_Pairs[idx].lastCond = -1;
+               G_Pairs[idx].rf_signal_time = current_time;
+           }
+           // if it's already 1 or -1, we keep the original signal time
+           else if(bull) {
+               G_Pairs[idx].lastCond = 1;
+           }
+           else if(bear) {
+               G_Pairs[idx].lastCond = -1;
+           }
        }
    }
 }
 
-void CheckMomentumStatus(int idx, int &cci_status, int &rf_status)
+void CheckMomentumStatus(int idx, int &cci_status, int &rf_status, datetime &cci_time, datetime &rf_time)
 {
    cci_status = 0;
    rf_status = 0;
+   cci_time = 0;
+   rf_time = 0;
    
-   if(G_Pairs[idx].isReadyForBuy) cci_status = 1;
-   if(G_Pairs[idx].isReadyForSell) cci_status = -1;
+   if(G_Pairs[idx].isReadyForBuy) {
+       cci_status = 1;
+       cci_time = G_Pairs[idx].cci_signal_time;
+   }
+   if(G_Pairs[idx].isReadyForSell) {
+       cci_status = -1;
+       cci_time = G_Pairs[idx].cci_signal_time;
+   }
    
-   if(G_Pairs[idx].lastCond == 1) rf_status = 1;
-   if(G_Pairs[idx].lastCond == -1) rf_status = -1;
+   if(G_Pairs[idx].lastCond == 1) {
+       rf_status = 1;
+       rf_time = G_Pairs[idx].rf_signal_time;
+   }
+   if(G_Pairs[idx].lastCond == -1) {
+       rf_status = -1;
+       rf_time = G_Pairs[idx].rf_signal_time;
+   }
 }
 //+------------------------------------------------------------------+

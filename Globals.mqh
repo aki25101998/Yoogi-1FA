@@ -175,6 +175,7 @@ struct PairContext
    int      handle_cci;
    bool     isReadyForBuy;
    bool     isReadyForSell;
+   datetime cci_signal_time;
 
    // --- LTF Filter State ---
    bool     g_inited_filt;
@@ -183,6 +184,7 @@ struct PairContext
    int      upCount;
    int      dnCount;
    int      lastCond;
+   datetime rf_signal_time;
 
    datetime last_bar_time;
 
@@ -276,6 +278,9 @@ struct TrendFollowingContext
    datetime m5_displacement_time;
    datetime m5_mss_time;
    datetime m5_momentum_time;
+   datetime m5_momentum_start_time;
+   datetime m5_momentum_cci_time;
+   datetime m5_momentum_rf_time;
    
    double m5_sweep_price;
    double m5_displacement_price;
