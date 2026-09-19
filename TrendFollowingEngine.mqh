@@ -1007,13 +1007,14 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       else
       {
          PrintFormat("[M5_NO_VALID_SWEEP][%s] direction=%d", sym, trend_dir);
+         return; // Only return if no sweep found, otherwise fall through to evaluate Displacement on the same candle
       }
-      return; // Wait for next candle for next event
    }
    
    if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_DISPLACEMENT)
    {
-      if(current_time > G_TF[idx].m5_sweep_time)
+      // Allow displacement evaluation on the same candle as sweep (>= instead of >)
+      if(current_time >= G_TF[idx].m5_sweep_time)
       {
          if(DetectDisplacement(sym, m5, trend_dir))
          {
@@ -1024,15 +1025,23 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             G_TF[idx].score_displacement = 10.0;
             SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED");
             G_TF[idx].status = "WAIT MSS";
-            PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d)", sym, trend_dir);
+            PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d) on time=%s", sym, trend_dir, TimeToString(current_time));
+         }
+         else
+         {
+            return; // Wait for next candle if displacement not found yet
          }
       }
-      return; // Wait for next candle for next event
+      else
+      {
+         return; // Safety guard for time invalidity
+      }
    }
    
    if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_MSS)
    {
-      if(current_time > G_TF[idx].m5_displacement_time)
+      // Allow MSS evaluation on the same candle as displacement (>= instead of >)
+      if(current_time >= G_TF[idx].m5_displacement_time)
       {
          double breakLvl = 0.0;
          string mssReason = "";
@@ -1044,7 +1053,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             G_TF[idx].score_mss = 10.0;
             SetTFState(idx, TF_STATE_ENTRY_READY, "M5_MSS_CONFIRMED"); // Forward to entry validation
             G_TF[idx].status = "MSS CONFIRMED";
-            PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f)", sym, trend_dir, breakLvl);
+            PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f) on time=%s", sym, trend_dir, breakLvl, TimeToString(current_time));
             // Start Momentum Window
             G_TF[idx].m5_momentum_start_time = current_time;
             G_TF[idx].m5_momentum_bars_elapsed = 0;
@@ -1053,8 +1062,15 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             G_TF[idx].m5_momentum_rf = false;
             G_TF[idx].score_momentum = 0.0;
          }
+         else
+         {
+            return; // Wait for next candle if MSS not found yet
+         }
       }
-      return;
+      else
+      {
+         return; // Safety guard for time invalidity
+      }
    }
    
    if(G_TF[idx].setup_state == TF_STATE_ENTRY_READY)
@@ -1175,10 +1191,10 @@ bool CheckTFEventCoherence(int idx)
    if(G_TF[idx].m5_sweep_time == 0 || G_TF[idx].m5_displacement_time == 0 || G_TF[idx].m5_mss_time == 0)
       return false;
       
-   // Strict chronological order
-   if(G_TF[idx].m5_sweep_time >= G_TF[idx].m5_displacement_time) return false;
-   if(G_TF[idx].m5_displacement_time >= G_TF[idx].m5_mss_time) return false;
-   if(G_TF[idx].m15_protected_confirmed_time >= G_TF[idx].m5_sweep_time) return false;
+   // Events can happen on the same candle (==), but must not happen backward in time (>)
+   if(G_TF[idx].m5_sweep_time > G_TF[idx].m5_displacement_time) return false;
+   if(G_TF[idx].m5_displacement_time > G_TF[idx].m5_mss_time) return false;
+   if(G_TF[idx].m15_protected_confirmed_time > G_TF[idx].m5_sweep_time) return false;
    
    // Strict Freshness: entire sequence must complete within TF_MAX_EVENT_BARS
    long period_sec = PeriodSeconds(PERIOD_M5);
