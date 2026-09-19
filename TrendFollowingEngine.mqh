@@ -100,6 +100,9 @@ void ResetTFM5Evidence(int idx)
    G_TF[idx].m5_displacement_age = 0;
    G_TF[idx].m5_mss_age = 0;
    G_TF[idx].m5_momentum_bars_elapsed = 0;
+   // NOTE: m5_momentum_last_closed_time is intentionally NOT reset.
+   // Keeps the last processed timestamp so the same closed candle won't be
+   // re-counted as bar+1 after reset. It advances naturally on next new bar.
    G_TF[idx].m5_mss_break_level = 0.0;
    G_TF[idx].m5_sweep_level = 0.0;
    
@@ -1044,7 +1047,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f)", sym, trend_dir, breakLvl);
             // Start Momentum Window
             G_TF[idx].m5_momentum_start_time = current_time;
-            G_TF[idx].m5_momentum_bars_elapsed = 0; // Will be incremented on first closed bar after MSS
+            G_TF[idx].m5_momentum_bars_elapsed = 0; // Will be incremented on first NEW closed bar after MSS
+            // m5_momentum_last_closed_time keeps its value so the MSS candle itself
+            // is not counted as bar+1 (it was already processed as the current closed candle)
             G_TF[idx].m5_momentum_cci = false;
             G_TF[idx].m5_momentum_rf = false;
             G_TF[idx].score_momentum = 0.0;
@@ -1055,17 +1060,26 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    
    if(G_TF[idx].setup_state == TF_STATE_ENTRY_READY)
    {
-      // Step 1: Identify the current closed M5 candle time
+      // Step 1: Get the most recent CLOSED M5 candle timestamp
       datetime closed_m5_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 1);
+      if(closed_m5_time <= 0)
+         return;
       
-      // Step 2: Increment closed bar counter (each new M5 bar after MSS = +1)
+      // Step 2: Check whether this is a NEW closed M5 candle
+      // If same closed candle as last processed → do nothing (prevents multi-call counting)
+      if(closed_m5_time == G_TF[idx].m5_momentum_last_closed_time)
+         return; // Same candle already processed, skip entirely
+      
+      // Step 3: This IS a new closed M5 candle → update tracking and increment counter
+      G_TF[idx].m5_momentum_last_closed_time = closed_m5_time;
       G_TF[idx].m5_momentum_bars_elapsed++;
       int bars_elapsed = G_TF[idx].m5_momentum_bars_elapsed;
       
-      // Step 3: Check Momentum Window BEFORE evaluating momentum
-      // If bars_elapsed > TF_MOMENTUM_MAX_BARS, this bar is OUTSIDE the window → TIMEOUT
+      // Step 4: Check Momentum Window BEFORE evaluating momentum
+      // bars_elapsed > TF_MOMENTUM_MAX_BARS means this bar is OUTSIDE the window
       if(bars_elapsed > TF_MOMENTUM_MAX_BARS)
       {
+         // If momentum was NOT fully confirmed within the window → TIMEOUT
          if(!G_TF[idx].m5_momentum_cci || !G_TF[idx].m5_momentum_rf)
          {
             Print("\n[TF_MOMENTUM_TIMEOUT]");
@@ -1083,10 +1097,12 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "MOMENTUM_TIMEOUT");
             return;
          }
-         // If both CCI and RF are already confirmed, allow to proceed to final gate
+         // Both CCI and RF were already confirmed in bar +1/+2/+3
+         // Do NOT evaluate momentum again. Let Final Entry Gate handle the completed state.
+         return;
       }
       
-      // Step 5: Within window → evaluate Momentum confirmation on closed candle
+      // Step 5: Within window (bars_elapsed 1..3) → evaluate Momentum confirmation on closed candle
       EvaluateTFMomentumConfirmation(idx, trend_dir, G_TF[idx].m5_momentum_cci, G_TF[idx].m5_momentum_rf);
       
       // Step 6: Update momentum score
@@ -1095,7 +1111,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       if(G_TF[idx].m5_momentum_rf)  mom += 5.0;
       G_TF[idx].score_momentum = MathMin(mom, 10.0);
       
-      // Diagnostic: log momentum status
+      // Step 7: Diagnostic log
       string mom_status = "WAIT";
       if(G_TF[idx].m5_momentum_cci && G_TF[idx].m5_momentum_rf) mom_status = "CONFIRMED";
       else if(bars_elapsed == TF_MOMENTUM_MAX_BARS) mom_status = "LAST_CHANCE";
