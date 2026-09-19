@@ -291,6 +291,7 @@ struct TrendFollowingContext
    int    m5_sweep_age;
    int    m5_displacement_age;
    int    m5_mss_age;
+   int    m5_momentum_bars_elapsed; // Closed M5 bars since MSS (incremented each new bar)
    double m5_mss_break_level;
    double m5_sweep_level;
 
@@ -582,11 +583,15 @@ void InitGlobals()
       G_TF[i].m5_displacement_time = 0;
       G_TF[i].m5_mss_time = 0;
       G_TF[i].m5_momentum_time = 0;
+      G_TF[i].m5_momentum_start_time = 0;
+      G_TF[i].m5_momentum_cci_time = 0;
+      G_TF[i].m5_momentum_rf_time = 0;
       G_TF[i].m5_sweep_price = 0.0;
       G_TF[i].m5_displacement_price = 0.0;
       G_TF[i].m5_sweep_age = 0;
       G_TF[i].m5_displacement_age = 0;
       G_TF[i].m5_mss_age = 0;
+      G_TF[i].m5_momentum_bars_elapsed = 0;
       G_TF[i].m5_mss_break_level = 0.0;
       G_TF[i].m5_sweep_level = 0.0;
       G_TF[i].score_h1_trend = 0.0;

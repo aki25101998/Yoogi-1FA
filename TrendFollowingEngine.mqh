@@ -99,6 +99,7 @@ void ResetTFM5Evidence(int idx)
    G_TF[idx].m5_sweep_age = 0;
    G_TF[idx].m5_displacement_age = 0;
    G_TF[idx].m5_mss_age = 0;
+   G_TF[idx].m5_momentum_bars_elapsed = 0;
    G_TF[idx].m5_mss_break_level = 0.0;
    G_TF[idx].m5_sweep_level = 0.0;
    
@@ -1043,6 +1044,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f)", sym, trend_dir, breakLvl);
             // Start Momentum Window
             G_TF[idx].m5_momentum_start_time = current_time;
+            G_TF[idx].m5_momentum_bars_elapsed = 0; // Will be incremented on first closed bar after MSS
             G_TF[idx].m5_momentum_cci = false;
             G_TF[idx].m5_momentum_rf = false;
             G_TF[idx].score_momentum = 0.0;
@@ -1053,23 +1055,25 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    
    if(G_TF[idx].setup_state == TF_STATE_ENTRY_READY)
    {
-      // Check Momentum continuously in window
-      EvaluateTFMomentumConfirmation(idx, trend_dir, G_TF[idx].m5_momentum_cci, G_TF[idx].m5_momentum_rf);
+      // Step 1: Identify the current closed M5 candle time
+      datetime closed_m5_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 1);
       
-      double mom = 0.0;
-      if(G_TF[idx].m5_momentum_cci) mom += 5.0;
-      if(G_TF[idx].m5_momentum_rf)  mom += 5.0;
-      G_TF[idx].score_momentum = MathMin(mom, 10.0);
+      // Step 2: Increment closed bar counter (each new M5 bar after MSS = +1)
+      G_TF[idx].m5_momentum_bars_elapsed++;
+      int bars_elapsed = G_TF[idx].m5_momentum_bars_elapsed;
       
-      int bars_since_mss = iBarShift(G_Pairs[idx].symbol, PERIOD_M5, G_TF[idx].m5_mss_time, false);
-      if(bars_since_mss > TF_MOMENTUM_MAX_BARS)
+      // Step 3: Check Momentum Window BEFORE evaluating momentum
+      // If bars_elapsed > TF_MOMENTUM_MAX_BARS, this bar is OUTSIDE the window → TIMEOUT
+      if(bars_elapsed > TF_MOMENTUM_MAX_BARS)
       {
          if(!G_TF[idx].m5_momentum_cci || !G_TF[idx].m5_momentum_rf)
          {
             Print("\n[TF_MOMENTUM_TIMEOUT]");
             PrintFormat("SYMBOL=%s", sym);
             PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
-            PrintFormat("BARS_SINCE_MSS=%d", bars_since_mss);
+            PrintFormat("MSS_TIME=%s", TimeToString(G_TF[idx].m5_mss_time));
+            PrintFormat("CLOSED_M5_TIME=%s", TimeToString(closed_m5_time));
+            PrintFormat("BARS_SINCE_MSS=%d", bars_elapsed);
             PrintFormat("MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
             PrintFormat("CCI_CONFIRMED=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
             PrintFormat("RF_CONFIRMED=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
@@ -1079,6 +1083,43 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "MOMENTUM_TIMEOUT");
             return;
          }
+         // If both CCI and RF are already confirmed, allow to proceed to final gate
+      }
+      
+      // Step 5: Within window → evaluate Momentum confirmation on closed candle
+      EvaluateTFMomentumConfirmation(idx, trend_dir, G_TF[idx].m5_momentum_cci, G_TF[idx].m5_momentum_rf);
+      
+      // Step 6: Update momentum score
+      double mom = 0.0;
+      if(G_TF[idx].m5_momentum_cci) mom += 5.0;
+      if(G_TF[idx].m5_momentum_rf)  mom += 5.0;
+      G_TF[idx].score_momentum = MathMin(mom, 10.0);
+      
+      // Diagnostic: log momentum status
+      string mom_status = "WAIT";
+      if(G_TF[idx].m5_momentum_cci && G_TF[idx].m5_momentum_rf) mom_status = "CONFIRMED";
+      else if(bars_elapsed == TF_MOMENTUM_MAX_BARS) mom_status = "LAST_CHANCE";
+      
+      Print("\n[TF_MOMENTUM]");
+      PrintFormat("SYMBOL=%s", sym);
+      PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
+      PrintFormat("MSS_TIME=%s", TimeToString(G_TF[idx].m5_mss_time));
+      PrintFormat("CLOSED_M5_TIME=%s", TimeToString(closed_m5_time));
+      PrintFormat("BARS_SINCE_MSS=%d", bars_elapsed);
+      PrintFormat("MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
+      PrintFormat("CCI_CONFIRMED=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
+      PrintFormat("RF_CONFIRMED=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
+      PrintFormat("MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
+      PrintFormat("STATUS=%s", mom_status);
+      
+      if(G_TF[idx].m5_momentum_cci && G_TF[idx].m5_momentum_rf)
+      {
+         Print("\n[TF_MOMENTUM_CONFIRMED]");
+         PrintFormat("SYMBOL=%s", sym);
+         PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
+         PrintFormat("CCI_CONFIRMED=true");
+         PrintFormat("RF_CONFIRMED=true");
+         PrintFormat("MOMENTUM_SCORE=10");
       }
       
       return;
@@ -1401,24 +1442,30 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    PrintFormat("  MSS=%s", G_TF[idx].m5_mss ? "true" : "false");
    PrintFormat("  EVENT=%s", event_coherent ? "true" : "false");
    Print("");
-   int bars_since_mss = iBarShift(sym, PERIOD_M5, G_TF[idx].m5_mss_time, false);
+   int bars_elapsed = G_TF[idx].m5_momentum_bars_elapsed;
+   
+   string mom_diag_status = "WAIT";
+   if(G_TF[idx].m5_momentum_cci && G_TF[idx].m5_momentum_rf) mom_diag_status = "CONFIRMED";
+   else if(bars_elapsed == TF_MOMENTUM_MAX_BARS) mom_diag_status = "LAST_CHANCE";
    
    Print("\n[TF_MOMENTUM]");
    PrintFormat("SYMBOL=%s", sym);
    PrintFormat("DIRECTION=%s", dir_str);
    PrintFormat("MSS_TIME=%s", TimeToString(G_TF[idx].m5_mss_time));
    PrintFormat("CLOSED_M5_TIME=%s", TimeToString(iTime(sym, PERIOD_M5, 1)));
-   PrintFormat("BARS_SINCE_MSS=%d", bars_since_mss);
+   PrintFormat("BARS_SINCE_MSS=%d", bars_elapsed);
    PrintFormat("MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
    Print("");
    PrintFormat("CCI_STATE=%s", cci_dir);
    PrintFormat("CCI_CONFIRMED=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
+   if(G_TF[idx].m5_momentum_cci_time > 0) PrintFormat("CCI_CONFIRMED_TIME=%s", TimeToString(G_TF[idx].m5_momentum_cci_time));
    Print("");
    PrintFormat("RF_STATE=%s", rf_dir);
    PrintFormat("RF_CONFIRMED=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
+   if(G_TF[idx].m5_momentum_rf_time > 0) PrintFormat("RF_CONFIRMED_TIME=%s", TimeToString(G_TF[idx].m5_momentum_rf_time));
    Print("");
    PrintFormat("MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
-   if(G_TF[idx].score_momentum < 10.0) Print("STATUS=WAIT");
+   PrintFormat("STATUS=%s", mom_diag_status);
    Print("");
    Print("ENTRY_DISTANCE:");
    PrintFormat("  MSS_LEVEL=%.5f", G_TF[idx].m5_mss_break_level);
