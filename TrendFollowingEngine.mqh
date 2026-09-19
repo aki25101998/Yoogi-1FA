@@ -1054,20 +1054,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    if(G_TF[idx].setup_state == TF_STATE_ENTRY_READY)
    {
       // Check Momentum continuously in window
-      int cci_status = 0, rf_status = 0;
-      datetime cci_time = 0, rf_time = 0;
-      CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
-      
-      if(!G_TF[idx].m5_momentum_cci && cci_status == trend_dir && cci_time >= G_TF[idx].m5_momentum_start_time)
-      {
-         G_TF[idx].m5_momentum_cci = true;
-         G_TF[idx].m5_momentum_cci_time = cci_time;
-      }
-      if(!G_TF[idx].m5_momentum_rf && rf_status == trend_dir && rf_time >= G_TF[idx].m5_momentum_start_time)
-      {
-         G_TF[idx].m5_momentum_rf = true;
-         G_TF[idx].m5_momentum_rf_time = rf_time;
-      }
+      EvaluateTFMomentumConfirmation(idx, trend_dir, G_TF[idx].m5_momentum_cci, G_TF[idx].m5_momentum_rf);
       
       double mom = 0.0;
       if(G_TF[idx].m5_momentum_cci) mom += 5.0;
@@ -1075,6 +1062,25 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       G_TF[idx].score_momentum = MathMin(mom, 10.0);
       
       return;
+   }
+}
+
+void EvaluateTFMomentumConfirmation(int idx, int trend_dir, bool &cci_confirmed, bool &rf_confirmed)
+{
+   int cci_status = 0, rf_status = 0;
+   datetime cci_time = 0, rf_time = 0;
+   CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
+   
+   if(!cci_confirmed && cci_status == trend_dir)
+   {
+      cci_confirmed = true;
+      G_TF[idx].m5_momentum_cci_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 0); 
+   }
+      
+   if(!rf_confirmed && rf_status == trend_dir)
+   {
+      rf_confirmed = true;
+      G_TF[idx].m5_momentum_rf_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 0);
    }
 }
 
@@ -1265,6 +1271,8 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    // 8. DXY Confirmation
    string dxy_status_str = "PASS";
    int dxy_htf = 0, dxy_ltf = 0;
+   long htf_age_bars = 0, ltf_age_bars = 0;
+   datetime htf_time = 0, ltf_time = 0;
    string orientation = "NONE";
    
    if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
@@ -1274,6 +1282,9 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
       {
          dxy_htf = G_DXY_TrapSignal_HTF[di];
          dxy_ltf = G_DXY_TrapSignal_LTF[di];
+         htf_time = G_DXY_TrapSignalTime_HTF[di];
+         ltf_time = G_DXY_TrapSignalTime_LTF[di];
+         
          orientation = G_Pairs[idx].isUSDFirst ? "USD_FIRST" : (G_Pairs[idx].isUSDSecond ? "USD_SECOND" : "UNKNOWN");
          
          if(dxy_htf == 0 || dxy_ltf == 0)
@@ -1299,6 +1310,19 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
                dxy_status_str = "CONFLICT";
                if(first_reject=="") first_reject = "DXY_CONFLICT";
                pass = false;
+            }
+            else
+            {
+               datetime current_time = TimeCurrent();
+               htf_age_bars = (current_time - htf_time) / PeriodSeconds(G_Pairs[idx].htf);
+               ltf_age_bars = (current_time - ltf_time) / PeriodSeconds(G_Pairs[idx].ltf);
+               
+               if(htf_age_bars > TF_DXY_MAX_AGE_BARS_HTF || ltf_age_bars > TF_DXY_MAX_AGE_BARS_LTF)
+               {
+                  dxy_status_str = "STALE";
+                  if(first_reject=="") first_reject = "DXY_STALE";
+                  pass = false;
+               }
             }
          }
       }
@@ -1363,8 +1387,12 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    PrintFormat("  SCORE=%.0f", G_TF[idx].score_entry_distance);
    Print("");
    Print("DXY:");
-   PrintFormat("  HTF=%d", dxy_htf);
-   PrintFormat("  LTF=%d", dxy_ltf);
+   PrintFormat("  HTF=%s", (dxy_htf == 1 ? "BUY" : (dxy_htf == -1 ? "SELL" : "NONE")));
+   PrintFormat("  HTF_TIME=%s", TimeToString(htf_time));
+   PrintFormat("  HTF_AGE_BARS=%d", htf_age_bars);
+   PrintFormat("  LTF=%s", (dxy_ltf == 1 ? "BUY" : (dxy_ltf == -1 ? "SELL" : "NONE")));
+   PrintFormat("  LTF_TIME=%s", TimeToString(ltf_time));
+   PrintFormat("  LTF_AGE_BARS=%d", ltf_age_bars);
    PrintFormat("  ORIENTATION=%s", orientation);
    PrintFormat("  STATUS=%s", dxy_status_str);
    Print("");

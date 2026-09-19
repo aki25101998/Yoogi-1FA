@@ -397,6 +397,7 @@ void ManagePairs()
          if(dxyHTF != 0)
          {
             G_DXY_TrapSignal_HTF[d] = dxyHTF;
+            G_DXY_TrapSignalTime_HTF[d] = iTime(G_DXY_HTF[d].symbol, G_DXY_HTF[d].ltf, 1);
             PrintFormat("DXY Filter: DXY HTF(%s) dat bay %s",
                         EnumToString(G_DXY_HTF[d].ltf), (dxyHTF == 1 ? "BUY" : "SELL"));
          }
@@ -406,6 +407,7 @@ void ManagePairs()
          if(dxyLTF != 0)
          {
             G_DXY_TrapSignal_LTF[d] = dxyLTF;
+            G_DXY_TrapSignalTime_LTF[d] = iTime(G_DXY_LTF[d].symbol, G_DXY_LTF[d].ltf, 1);
             PrintFormat("DXY Filter: DXY LTF(%s) dat bay %s",
                         EnumToString(G_DXY_LTF[d].ltf), (dxyLTF == 1 ? "BUY" : "SELL"));
          }

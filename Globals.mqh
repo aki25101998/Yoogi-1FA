@@ -240,6 +240,8 @@ const double TF_PULLBACK_MAX_DEPTH_ATR = 3.0;   // Max pullback depth before rev
 const int    TF_SLOPE_LOOKBACK         = 5;     // Bars to measure EMA slope
 const double TF_SIDEWAY_ATR_RATIO      = 0.5;   // Below this = sideway
 const bool   TF_REQUIRE_RETEST         = false; // Module ready, default OFF
+const int    TF_DXY_MAX_AGE_BARS_HTF   = 48;    // DXY HTF signal max age (bars)
+const int    TF_DXY_MAX_AGE_BARS_LTF   = 288;   // DXY LTF signal max age (bars)
 
 struct TrendFollowingContext
 {
@@ -325,6 +327,8 @@ PairContext G_DXY_HTF[DXY_CONTEXTS];     // DXY context trên TF lớn
 PairContext G_DXY_LTF[DXY_CONTEXTS];     // DXY context trên TF nhỏ
 int         G_DXY_TrapSignal_HTF[DXY_CONTEXTS]; // DXY trap signal HTF
 int         G_DXY_TrapSignal_LTF[DXY_CONTEXTS]; // DXY trap signal LTF
+datetime    G_DXY_TrapSignalTime_HTF[DXY_CONTEXTS]; // Time when HTF signal was generated
+datetime    G_DXY_TrapSignalTime_LTF[DXY_CONTEXTS]; // Time when LTF signal was generated
 string DXY_SYMBOL = "DXY";             // Se duoc tu dong phat hien boi AutoDetectDXY()
 bool   g_dxy_available = false;         // True neu DXY duoc tim thay tren san
 
@@ -666,6 +670,7 @@ void InitGlobals()
          G_DXY_HTF[i].g_inited_filt = false;
          G_DXY_HTF[i].last_bar_time = 0;
          G_DXY_TrapSignal_HTF[i] = 0;
+         G_DXY_TrapSignalTime_HTF[i] = 0;
 
          // --- DXY LTF Context ---
          G_DXY_LTF[i].symbol = dxy_broker;
@@ -678,6 +683,7 @@ void InitGlobals()
          G_DXY_LTF[i].g_inited_filt = false;
          G_DXY_LTF[i].last_bar_time = 0;
          G_DXY_TrapSignal_LTF[i] = 0;
+         G_DXY_TrapSignalTime_LTF[i] = 0;
       }
 
       Print("DXY Filter: Symbol = ", dxy_broker, " | Contexts: 5 (Dual TF per pair)");
