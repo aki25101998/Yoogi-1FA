@@ -1047,9 +1047,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f)", sym, trend_dir, breakLvl);
             // Start Momentum Window
             G_TF[idx].m5_momentum_start_time = current_time;
-            G_TF[idx].m5_momentum_bars_elapsed = 0; // Will be incremented on first NEW closed bar after MSS
-            // m5_momentum_last_closed_time keeps its value so the MSS candle itself
-            // is not counted as bar+1 (it was already processed as the current closed candle)
+            G_TF[idx].m5_momentum_bars_elapsed = 0;
+            G_TF[idx].m5_momentum_last_closed_time = iTime(sym, PERIOD_M5, 1);
             G_TF[idx].m5_momentum_cci = false;
             G_TF[idx].m5_momentum_rf = false;
             G_TF[idx].score_momentum = 0.0;
