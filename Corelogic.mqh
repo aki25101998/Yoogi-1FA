@@ -394,7 +394,7 @@ void ManagePairs()
       {
          // DXY HTF Signal
          int dxyHTF = CheckEntrySignal_DXY_HTF(d);
-         if(dxyHTF != 0)
+         if(dxyHTF != 0 && dxyHTF != G_DXY_TrapSignal_HTF[d])
          {
             G_DXY_TrapSignal_HTF[d] = dxyHTF;
             G_DXY_TrapSignalTime_HTF[d] = iTime(G_DXY_HTF[d].symbol, G_DXY_HTF[d].ltf, 1);
@@ -404,7 +404,7 @@ void ManagePairs()
 
          // DXY LTF Signal
          int dxyLTF = CheckEntrySignal_DXY_LTF(d);
-         if(dxyLTF != 0)
+         if(dxyLTF != 0 && dxyLTF != G_DXY_TrapSignal_LTF[d])
          {
             G_DXY_TrapSignal_LTF[d] = dxyLTF;
             G_DXY_TrapSignalTime_LTF[d] = iTime(G_DXY_LTF[d].symbol, G_DXY_LTF[d].ltf, 1);

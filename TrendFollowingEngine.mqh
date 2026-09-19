@@ -1061,6 +1061,26 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       if(G_TF[idx].m5_momentum_rf)  mom += 5.0;
       G_TF[idx].score_momentum = MathMin(mom, 10.0);
       
+      int bars_since_mss = iBarShift(G_Pairs[idx].symbol, PERIOD_M5, G_TF[idx].m5_mss_time, false);
+      if(bars_since_mss > TF_MOMENTUM_MAX_BARS)
+      {
+         if(!G_TF[idx].m5_momentum_cci || !G_TF[idx].m5_momentum_rf)
+         {
+            Print("\n[TF_MOMENTUM_TIMEOUT]");
+            PrintFormat("SYMBOL=%s", sym);
+            PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
+            PrintFormat("BARS_SINCE_MSS=%d", bars_since_mss);
+            PrintFormat("MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
+            PrintFormat("CCI_CONFIRMED=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
+            PrintFormat("RF_CONFIRMED=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
+            PrintFormat("ACTION=RESET_M5");
+            
+            ResetTFM5Evidence(idx);
+            SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "MOMENTUM_TIMEOUT");
+            return;
+         }
+      }
+      
       return;
    }
 }
@@ -1071,16 +1091,18 @@ void EvaluateTFMomentumConfirmation(int idx, int trend_dir, bool &cci_confirmed,
    datetime cci_time = 0, rf_time = 0;
    CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
    
+   datetime closed_m5_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 1);
+   
    if(!cci_confirmed && cci_status == trend_dir)
    {
       cci_confirmed = true;
-      G_TF[idx].m5_momentum_cci_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 0); 
+      G_TF[idx].m5_momentum_cci_time = closed_m5_time; 
    }
       
    if(!rf_confirmed && rf_status == trend_dir)
    {
       rf_confirmed = true;
-      G_TF[idx].m5_momentum_rf_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 0);
+      G_TF[idx].m5_momentum_rf_time = closed_m5_time;
    }
 }
 
@@ -1325,6 +1347,19 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
                }
             }
          }
+         
+         Print("\n[TF_DXY_GATE]");
+         PrintFormat("SYMBOL=%s", G_Pairs[idx].symbol);
+         PrintFormat("DIRECTION=%s", (direction == 1 ? "BUY" : "SELL"));
+         PrintFormat("HTF=%s", (dxy_htf == 1 ? "BUY" : (dxy_htf == -1 ? "SELL" : "NONE")));
+         PrintFormat("HTF_TIME=%s", TimeToString(htf_time));
+         PrintFormat("HTF_AGE_BARS=%d", htf_age_bars);
+         PrintFormat("LTF=%s", (dxy_ltf == 1 ? "BUY" : (dxy_ltf == -1 ? "SELL" : "NONE")));
+         PrintFormat("LTF_TIME=%s", TimeToString(ltf_time));
+         PrintFormat("LTF_AGE_BARS=%d", ltf_age_bars);
+         PrintFormat("ORIENTATION=%s", orientation);
+         PrintFormat("STATUS=%s", dxy_status_str);
+         if(dxy_status_str != "PASS") PrintFormat("REASON=%s", first_reject);
       }
    }
    else {
@@ -1366,16 +1401,24 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    PrintFormat("  MSS=%s", G_TF[idx].m5_mss ? "true" : "false");
    PrintFormat("  EVENT=%s", event_coherent ? "true" : "false");
    Print("");
-   Print("MOMENTUM:");
-   PrintFormat("  CCI_VALID=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
-   PrintFormat("  CCI_DIRECTION=%s", cci_dir);
-   PrintFormat("  CCI_TIME=%s", TimeToString(cci_time));
+   int bars_since_mss = iBarShift(sym, PERIOD_M5, G_TF[idx].m5_mss_time, false);
+   
+   Print("\n[TF_MOMENTUM]");
+   PrintFormat("SYMBOL=%s", sym);
+   PrintFormat("DIRECTION=%s", dir_str);
+   PrintFormat("MSS_TIME=%s", TimeToString(G_TF[idx].m5_mss_time));
+   PrintFormat("CLOSED_M5_TIME=%s", TimeToString(iTime(sym, PERIOD_M5, 1)));
+   PrintFormat("BARS_SINCE_MSS=%d", bars_since_mss);
+   PrintFormat("MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
    Print("");
-   PrintFormat("  RF_VALID=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
-   PrintFormat("  RF_DIRECTION=%s", rf_dir);
-   PrintFormat("  RF_TIME=%s", TimeToString(rf_time));
+   PrintFormat("CCI_STATE=%s", cci_dir);
+   PrintFormat("CCI_CONFIRMED=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
    Print("");
-   PrintFormat("  MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
+   PrintFormat("RF_STATE=%s", rf_dir);
+   PrintFormat("RF_CONFIRMED=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
+   Print("");
+   PrintFormat("MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
+   if(G_TF[idx].score_momentum < 10.0) Print("STATUS=WAIT");
    Print("");
    Print("ENTRY_DISTANCE:");
    PrintFormat("  MSS_LEVEL=%.5f", G_TF[idx].m5_mss_break_level);
