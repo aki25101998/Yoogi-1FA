@@ -23,6 +23,7 @@
 #include "Globals.mqh"
 #include "Indicators.mqh"
 #include "ReversalEngine.mqh"
+#include "DXYTrendFollowingEngine.mqh"
 #include "TrendFollowingEngine.mqh"
 #include "CoreLogic.mqh"
 #include "InfoDisplay.mqh"

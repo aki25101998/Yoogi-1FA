@@ -332,6 +332,45 @@ int         G_DXY_TrapSignal_HTF[DXY_CONTEXTS]; // DXY trap signal HTF
 int         G_DXY_TrapSignal_LTF[DXY_CONTEXTS]; // DXY trap signal LTF
 datetime    G_DXY_TrapSignalTime_HTF[DXY_CONTEXTS]; // Time when HTF signal was generated
 datetime    G_DXY_TrapSignalTime_LTF[DXY_CONTEXTS]; // Time when LTF signal was generated
+
+struct DXYTrendContext
+{
+    string symbol;
+
+    ENUM_TIMEFRAMES htf;
+    ENUM_TIMEFRAMES mtf;
+    ENUM_TIMEFRAMES ltf;
+
+    int h1_direction;
+    bool h1_structure_valid;
+    bool h1_ema_aligned;
+    bool h1_slope_valid;
+    bool h1_price_position_valid;
+    bool h1_not_sideway;
+
+    int m15_direction;
+    bool m15_structure_valid;
+    bool m15_aligned;
+
+    int m5_direction;
+    bool m5_continuation;
+    bool m5_displacement;
+    bool m5_momentum;
+    bool m5_structure_valid;
+
+    double protected_high;
+    double protected_low;
+
+    datetime h1_last_confirmed_time;
+    datetime m15_last_confirmed_time;
+    datetime m5_last_confirmed_time;
+
+    string status;
+    string reject_reason;
+};
+
+DXYTrendContext G_DXY_TF[DXY_CONTEXTS]; // DXY context cho Trend Following
+
 string DXY_SYMBOL = "DXY";             // Se duoc tu dong phat hien boi AutoDetectDXY()
 bool   g_dxy_available = false;         // True neu DXY duoc tim thay tren san
 
@@ -692,6 +731,20 @@ void InitGlobals()
          G_DXY_LTF[i].last_bar_time = 0;
          G_DXY_TrapSignal_LTF[i] = 0;
          G_DXY_TrapSignalTime_LTF[i] = 0;
+
+         // --- DXY TF Context ---
+         G_DXY_TF[i].symbol = dxy_broker;
+         G_DXY_TF[i].htf = PERIOD_H1;
+         G_DXY_TF[i].mtf = PERIOD_M15;
+         G_DXY_TF[i].ltf = PERIOD_M5;
+         G_DXY_TF[i].h1_direction = 0;
+         G_DXY_TF[i].m15_direction = 0;
+         G_DXY_TF[i].m5_direction = 0;
+         G_DXY_TF[i].h1_last_confirmed_time = 0;
+         G_DXY_TF[i].m15_last_confirmed_time = 0;
+         G_DXY_TF[i].m5_last_confirmed_time = 0;
+         G_DXY_TF[i].status = "INIT";
+         G_DXY_TF[i].reject_reason = "";
       }
 
       Print("DXY Filter: Symbol = ", dxy_broker, " | Contexts: 5 (Dual TF per pair)");

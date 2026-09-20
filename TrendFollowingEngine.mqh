@@ -1363,81 +1363,14 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    if(score != 100.0) { if(first_reject=="") first_reject = (score > 100.0) ? "SCORE_OVER_100_LEAKAGE" : "SCORE_BELOW_100"; pass = false; }
    
    // 8. DXY Confirmation
-   string dxy_status_str = "PASS";
-   int dxy_htf = 0, dxy_ltf = 0;
-   long htf_age_bars = 0, ltf_age_bars = 0;
-   datetime htf_time = 0, ltf_time = 0;
-   string orientation = "NONE";
-   
-   if(G_Pairs[idx].isUSDPair && g_dxy_available && InpUseDXYReference)
+   string dxy_reason = "";
+   bool dxy_pass = CheckDXYTrendFollowingConfirmation(idx, direction, dxy_reason);
+   if(!dxy_pass)
    {
-      int di = G_Pairs[idx].dxy_map_index;
-      if(di >= 0)
-      {
-         dxy_htf = G_DXY_TrapSignal_HTF[di];
-         dxy_ltf = G_DXY_TrapSignal_LTF[di];
-         htf_time = G_DXY_TrapSignalTime_HTF[di];
-         ltf_time = G_DXY_TrapSignalTime_LTF[di];
-         
-         orientation = G_Pairs[idx].isUSDFirst ? "USD_FIRST" : (G_Pairs[idx].isUSDSecond ? "USD_SECOND" : "UNKNOWN");
-         
-         if(dxy_htf == 0 || dxy_ltf == 0)
-         {
-            dxy_status_str = "NOT_READY";
-            if(first_reject=="") first_reject = "DXY_NOT_READY";
-            pass = false;
-         }
-         else if(dxy_htf != dxy_ltf)
-         {
-            dxy_status_str = "CONFLICT";
-            if(first_reject=="") first_reject = "DXY_CONFLICT";
-            pass = false;
-         }
-         else
-         {
-            bool converges = false;
-            if(G_Pairs[idx].isUSDSecond) converges = (direction != dxy_htf);
-            else if(G_Pairs[idx].isUSDFirst) converges = (direction == dxy_htf);
-            
-            if(!converges)
-            {
-               dxy_status_str = "CONFLICT";
-               if(first_reject=="") first_reject = "DXY_CONFLICT";
-               pass = false;
-            }
-            else
-            {
-               datetime current_time = TimeCurrent();
-               htf_age_bars = (current_time - htf_time) / PeriodSeconds(G_Pairs[idx].htf);
-               ltf_age_bars = (current_time - ltf_time) / PeriodSeconds(G_Pairs[idx].ltf);
-               
-               if(htf_age_bars > TF_DXY_MAX_AGE_BARS_HTF || ltf_age_bars > TF_DXY_MAX_AGE_BARS_LTF)
-               {
-                  dxy_status_str = "STALE";
-                  if(first_reject=="") first_reject = "DXY_STALE";
-                  pass = false;
-               }
-            }
-         }
-         
-         Print("\n[TF_DXY_GATE]");
-         PrintFormat("SYMBOL=%s", G_Pairs[idx].symbol);
-         PrintFormat("DIRECTION=%s", (direction == 1 ? "BUY" : "SELL"));
-         PrintFormat("HTF=%s", (dxy_htf == 1 ? "BUY" : (dxy_htf == -1 ? "SELL" : "NONE")));
-         PrintFormat("HTF_TIME=%s", TimeToString(htf_time));
-         PrintFormat("HTF_AGE_BARS=%d", htf_age_bars);
-         PrintFormat("LTF=%s", (dxy_ltf == 1 ? "BUY" : (dxy_ltf == -1 ? "SELL" : "NONE")));
-         PrintFormat("LTF_TIME=%s", TimeToString(ltf_time));
-         PrintFormat("LTF_AGE_BARS=%d", ltf_age_bars);
-         PrintFormat("ORIENTATION=%s", orientation);
-         PrintFormat("STATUS=%s", dxy_status_str);
-         if(dxy_status_str != "PASS") PrintFormat("REASON=%s", first_reject);
-      }
+      if(first_reject=="") first_reject = dxy_reason;
+      pass = false;
    }
-   else {
-      dxy_status_str = "N/A";
-      orientation = "N/A";
-   }
+
    
    // Gather diagnostic values
    string sym = G_Pairs[idx].symbol;
