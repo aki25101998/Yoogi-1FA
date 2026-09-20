@@ -117,8 +117,6 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
    double atr = CalculateATR_Generic(sym, htf, 14, 1);
    double close = iClose(sym, htf, 1);
    
-   int prev_h1_dir = G_DXY_TF[dxy_idx].h1_direction;
-   
    G_DXY_TF[dxy_idx].h1_ema_aligned = false;
    G_DXY_TF[dxy_idx].h1_slope_valid = false;
    G_DXY_TF[dxy_idx].h1_price_position_valid = false;
@@ -183,21 +181,6 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
          G_DXY_TF[dxy_idx].h1_last_confirmed_time = iTime(sym, htf, 1);
       }
    }
-   
-   // Retention Logic
-   if(G_DXY_TF[dxy_idx].h1_direction == 0 && prev_h1_dir != 0)
-   {
-      if(prev_h1_dir == 1 && buy_struct)
-      {
-         G_DXY_TF[dxy_idx].h1_direction = 1;
-         G_DXY_TF[dxy_idx].h1_structure_valid = true;
-      }
-      else if(prev_h1_dir == -1 && sell_struct)
-      {
-         G_DXY_TF[dxy_idx].h1_direction = -1;
-         G_DXY_TF[dxy_idx].h1_structure_valid = true;
-      }
-   }
 }
 
 // ==================================================================
@@ -205,8 +188,6 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
 // ==================================================================
 void EvaluateDXY_M15(int dxy_idx, string sym, ENUM_TIMEFRAMES mtf, int h1_dir)
 {
-   int prev_m15_dir = G_DXY_TF[dxy_idx].m15_direction;
-   
    G_DXY_TF[dxy_idx].m15_direction = 0;
    G_DXY_TF[dxy_idx].m15_aligned = false;
    G_DXY_TF[dxy_idx].m15_structure_valid = false;
@@ -249,15 +230,6 @@ void EvaluateDXY_M15(int dxy_idx, string sym, ENUM_TIMEFRAMES mtf, int h1_dir)
          }
       }
    }
-   
-   // Retention Logic
-   if(G_DXY_TF[dxy_idx].m15_direction == 0 && prev_m15_dir == h1_dir && h1_dir != 0)
-   {
-      if(G_DXY_TF[dxy_idx].m15_structure_valid)
-      {
-         G_DXY_TF[dxy_idx].m15_direction = h1_dir;
-      }
-   }
 }
 
 // ==================================================================
@@ -265,8 +237,6 @@ void EvaluateDXY_M15(int dxy_idx, string sym, ENUM_TIMEFRAMES mtf, int h1_dir)
 // ==================================================================
 void EvaluateDXY_M5(int dxy_idx, string sym, ENUM_TIMEFRAMES ltf, int expected_dir)
 {
-   int prev_m5_dir = G_DXY_TF[dxy_idx].m5_direction;
-
    G_DXY_TF[dxy_idx].m5_direction = 0;
    G_DXY_TF[dxy_idx].m5_continuation = false;
    G_DXY_TF[dxy_idx].m5_displacement = false;
@@ -327,15 +297,6 @@ void EvaluateDXY_M5(int dxy_idx, string sym, ENUM_TIMEFRAMES ltf, int expected_d
          G_DXY_TF[dxy_idx].m5_last_confirmed_time = iTime(sym, ltf, 1);
       }
    }
-   
-   // Retention Logic
-   if(G_DXY_TF[dxy_idx].m5_direction == 0 && prev_m5_dir == expected_dir && expected_dir != 0)
-   {
-      if(G_DXY_TF[dxy_idx].m5_structure_valid)
-      {
-         G_DXY_TF[dxy_idx].m5_direction = expected_dir;
-      }
-   }
 }
 
 // ==================================================================
@@ -381,60 +342,89 @@ bool CheckDXYTrendFollowingConfirmation(int pair_idx, int pair_direction, string
    bool pass = true;
    string status_str = "PASS";
    
-   if(G_DXY_TF[dxy_idx].h1_direction != expected_dxy_direction)
+   // --- H1 Check ---
+   if(!G_DXY_TF[dxy_idx].h1_structure_valid)
    {
-      pass = false;
-      if(!G_DXY_TF[dxy_idx].h1_not_sideway) reason = "DXY_H1_SIDEWAY";
-      else if(!G_DXY_TF[dxy_idx].h1_structure_valid) reason = "DXY_H1_STRUCTURE_INVALID";
-      else if(!G_DXY_TF[dxy_idx].h1_ema_aligned) reason = "DXY_H1_EMA_NOT_ALIGNED";
-      else if(!G_DXY_TF[dxy_idx].h1_price_position_valid) reason = "DXY_H1_PRICE_POSITION_INVALID";
-      else if(!G_DXY_TF[dxy_idx].h1_slope_valid) reason = "DXY_H1_SLOPE_INVALID";
-      else reason = "DXY_H1_DIRECTION_MISMATCH";
-      
-      if(G_DXY_TF[dxy_idx].h1_direction == 0 && reason == "") reason = "DXY_H1_NEUTRAL";
-      status_str = "FAIL";
+      reason = "DXY_H1_STRUCTURE_INVALID"; pass = false;
+   }
+   else if(!G_DXY_TF[dxy_idx].h1_not_sideway)
+   {
+      reason = "DXY_H1_SIDEWAY"; pass = false;
+   }
+   else if(!G_DXY_TF[dxy_idx].h1_ema_aligned)
+   {
+      reason = "DXY_H1_EMA_NOT_ALIGNED"; pass = false;
+   }
+   else if(!G_DXY_TF[dxy_idx].h1_price_position_valid)
+   {
+      reason = "DXY_H1_PRICE_POSITION_INVALID"; pass = false;
+   }
+   else if(!G_DXY_TF[dxy_idx].h1_slope_valid)
+   {
+      reason = "DXY_H1_SLOPE_INVALID"; pass = false;
+   }
+   else if(G_DXY_TF[dxy_idx].h1_direction != expected_dxy_direction)
+   {
+      reason = "DXY_H1_DIRECTION_MISMATCH"; pass = false;
+   }
+   else if(G_DXY_TF[dxy_idx].h1_last_confirmed_time <= 0)
+   {
+      reason = "DXY_H1_NOT_INITIALIZED"; pass = false;
    }
    else if(!IsDXYH1Fresh(sym, G_DXY_TF[dxy_idx].h1_last_confirmed_time))
    {
-      pass = false;
-      if (G_DXY_TF[dxy_idx].h1_last_confirmed_time <= 0) reason = "DXY_H1_NOT_INITIALIZED";
-      else reason = "DXY_H1_STALE";
-      status_str = "FAIL";
-      G_DXY_TF[dxy_idx].h1_direction = 0; // reset retention
+      reason = "DXY_H1_STALE"; pass = false;
+   }
+   
+   // --- M15 Check ---
+   else if(!G_DXY_TF[dxy_idx].m15_structure_valid)
+   {
+      reason = "DXY_M15_STRUCTURE_INVALID"; pass = false;
+   }
+   else if(!G_DXY_TF[dxy_idx].m15_aligned)
+   {
+      reason = "DXY_M15_NOT_ALIGNED"; pass = false;
    }
    else if(G_DXY_TF[dxy_idx].m15_direction != expected_dxy_direction)
    {
-      pass = false;
-      if(!G_DXY_TF[dxy_idx].m15_structure_valid) reason = "DXY_M15_STRUCTURE_INVALID";
-      else if(!G_DXY_TF[dxy_idx].m15_aligned) reason = "DXY_M15_NOT_ALIGNED";
-      else reason = "DXY_M15_DIRECTION_MISMATCH";
-      status_str = "FAIL";
+      reason = "DXY_M15_DIRECTION_MISMATCH"; pass = false;
+   }
+   else if(G_DXY_TF[dxy_idx].m15_last_confirmed_time <= 0)
+   {
+      reason = "DXY_M15_NOT_INITIALIZED"; pass = false;
    }
    else if(!IsDXYM15Fresh(sym, G_DXY_TF[dxy_idx].m15_last_confirmed_time))
    {
-      pass = false;
-      if (G_DXY_TF[dxy_idx].m15_last_confirmed_time <= 0) reason = "DXY_M15_NOT_INITIALIZED";
-      else reason = "DXY_M15_STALE";
-      status_str = "FAIL";
-      G_DXY_TF[dxy_idx].m15_direction = 0;
+      reason = "DXY_M15_STALE"; pass = false;
+   }
+   
+   // --- M5 Check ---
+   else if(!G_DXY_TF[dxy_idx].m5_structure_valid)
+   {
+      reason = "DXY_M5_PROTECTED_STRUCTURE_BROKEN"; pass = false;
+   }
+   else if(!G_DXY_TF[dxy_idx].m5_continuation)
+   {
+      reason = "DXY_M5_CONTINUATION_MISSING"; pass = false;
+   }
+   else if(!G_DXY_TF[dxy_idx].m5_momentum)
+   {
+      reason = "DXY_M5_MOMENTUM_MISSING"; pass = false;
    }
    else if(G_DXY_TF[dxy_idx].m5_direction != expected_dxy_direction)
    {
-      pass = false;
-      if(!G_DXY_TF[dxy_idx].m5_structure_valid) reason = "DXY_M5_PROTECTED_STRUCTURE_BROKEN";
-      else if(!G_DXY_TF[dxy_idx].m5_continuation) reason = "DXY_M5_CONTINUATION_MISSING";
-      else if(!G_DXY_TF[dxy_idx].m5_momentum) reason = "DXY_M5_MOMENTUM_MISSING";
-      else reason = "DXY_M5_DIRECTION_MISMATCH";
-      status_str = "FAIL";
+      reason = "DXY_M5_DIRECTION_MISMATCH"; pass = false;
+   }
+   else if(G_DXY_TF[dxy_idx].m5_last_confirmed_time <= 0)
+   {
+      reason = "DXY_M5_NOT_INITIALIZED"; pass = false;
    }
    else if(!IsDXYM5Fresh(sym, G_DXY_TF[dxy_idx].m5_last_confirmed_time))
    {
-      pass = false;
-      if (G_DXY_TF[dxy_idx].m5_last_confirmed_time <= 0) reason = "DXY_M5_NOT_INITIALIZED";
-      else reason = "DXY_M5_STALE";
-      status_str = "FAIL";
-      G_DXY_TF[dxy_idx].m5_direction = 0;
+      reason = "DXY_M5_STALE"; pass = false;
    }
+   
+   if(!pass) status_str = "FAIL";
    
    G_DXY_TF[dxy_idx].status = status_str;
    G_DXY_TF[dxy_idx].reject_reason = reason;

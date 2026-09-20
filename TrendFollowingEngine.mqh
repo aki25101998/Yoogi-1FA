@@ -1753,15 +1753,10 @@ int CheckTrendFollowingSignal(int idx)
       }
       else
       {
-         if(rejectReason == "DXY_CONFLICT")
+         if(StringFind(rejectReason, "DXY_") == 0)
          {
-            LogTFDecision(idx, dir, "REJECT", rejectReason, score);
-            ResetTFSetup(idx, rejectReason);
+            G_TF[idx].status = "WAIT: " + rejectReason;
             return 0;
-         }
-         else if(rejectReason == "DXY_NOT_READY")
-         {
-            G_TF[idx].status = "WAIT_DXY";
          }
          else if(rejectReason == "ENTRY_DISTANCE_TOO_FAR")
          {
