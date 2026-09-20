@@ -80,6 +80,32 @@ bool CheckDXYMomentum(string sym, ENUM_TIMEFRAMES tf, int direction)
    return false;
 }
 
+// --- Age Helpers ---
+int GetDXYClosedBarAge(string sym, ENUM_TIMEFRAMES tf, datetime confirmed_time)
+{
+   if(confirmed_time <= 0) return -1;
+   int shift = iBarShift(sym, tf, confirmed_time, true);
+   return shift;
+}
+
+bool IsDXYH1Fresh(string sym, datetime confirmed_time)
+{
+   int age = GetDXYClosedBarAge(sym, PERIOD_H1, confirmed_time);
+   return (age >= 0 && age <= DXY_TF_H1_MAX_AGE_BARS);
+}
+
+bool IsDXYM15Fresh(string sym, datetime confirmed_time)
+{
+   int age = GetDXYClosedBarAge(sym, PERIOD_M15, confirmed_time);
+   return (age >= 0 && age <= DXY_TF_M15_MAX_AGE_BARS);
+}
+
+bool IsDXYM5Fresh(string sym, datetime confirmed_time)
+{
+   int age = GetDXYClosedBarAge(sym, PERIOD_M5, confirmed_time);
+   return (age >= 0 && age <= DXY_TF_M5_MAX_AGE_BARS);
+}
+
 // ==================================================================
 // LAYER 1: H1 Trend Regime
 // ==================================================================
@@ -90,6 +116,8 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
    double ema50_prev = CalculateEMA_Generic(sym, htf, 50, 1 + TF_SLOPE_LOOKBACK);
    double atr = CalculateATR_Generic(sym, htf, 14, 1);
    double close = iClose(sym, htf, 1);
+   
+   int prev_h1_dir = G_DXY_TF[dxy_idx].h1_direction;
    
    G_DXY_TF[dxy_idx].h1_ema_aligned = false;
    G_DXY_TF[dxy_idx].h1_slope_valid = false;
@@ -116,6 +144,9 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
    double ll1 = hl1;
    double ll2 = hl2;
    
+   bool buy_struct = (hh1 > hh2 && hl1 > hl2 && close > hl1 && hh1 > 0 && hh2 > 0 && hl1 > 0 && hl2 > 0);
+   bool sell_struct = (lh1 < lh2 && ll1 < ll2 && close < lh1 && lh1 > 0 && lh2 > 0 && ll1 > 0 && ll2 > 0);
+   
    // Potential BUY
    if(ema20 > ema50 && close > ema50)
    {
@@ -123,8 +154,7 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
       if(close > ema20 && close > ema50) G_DXY_TF[dxy_idx].h1_price_position_valid = true;
       if(ema50 > ema50_prev) G_DXY_TF[dxy_idx].h1_slope_valid = true;
       
-      // BUY Structure: hh1 (recent) > hh2 (older) and hl1 (recent) > hl2 (older) and close > hl1
-      if(hh1 > hh2 && hl1 > hl2 && close > hl1 && hh1 > 0 && hh2 > 0 && hl1 > 0 && hl2 > 0)
+      if(buy_struct)
       {
          G_DXY_TF[dxy_idx].h1_structure_valid = true;
       }
@@ -142,8 +172,7 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
       if(close < ema20 && close < ema50) G_DXY_TF[dxy_idx].h1_price_position_valid = true;
       if(ema50 < ema50_prev) G_DXY_TF[dxy_idx].h1_slope_valid = true;
       
-      // SELL Structure: lh1 (recent) < lh2 (older) and ll1 (recent) < ll2 (older) and close < lh1
-      if(lh1 < lh2 && ll1 < ll2 && close < lh1 && lh1 > 0 && lh2 > 0 && ll1 > 0 && ll2 > 0)
+      if(sell_struct)
       {
          G_DXY_TF[dxy_idx].h1_structure_valid = true;
       }
@@ -154,6 +183,21 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
          G_DXY_TF[dxy_idx].h1_last_confirmed_time = iTime(sym, htf, 1);
       }
    }
+   
+   // Retention Logic
+   if(G_DXY_TF[dxy_idx].h1_direction == 0 && prev_h1_dir != 0)
+   {
+      if(prev_h1_dir == 1 && buy_struct)
+      {
+         G_DXY_TF[dxy_idx].h1_direction = 1;
+         G_DXY_TF[dxy_idx].h1_structure_valid = true;
+      }
+      else if(prev_h1_dir == -1 && sell_struct)
+      {
+         G_DXY_TF[dxy_idx].h1_direction = -1;
+         G_DXY_TF[dxy_idx].h1_structure_valid = true;
+      }
+   }
 }
 
 // ==================================================================
@@ -161,6 +205,8 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
 // ==================================================================
 void EvaluateDXY_M15(int dxy_idx, string sym, ENUM_TIMEFRAMES mtf, int h1_dir)
 {
+   int prev_m15_dir = G_DXY_TF[dxy_idx].m15_direction;
+   
    G_DXY_TF[dxy_idx].m15_direction = 0;
    G_DXY_TF[dxy_idx].m15_aligned = false;
    G_DXY_TF[dxy_idx].m15_structure_valid = false;
@@ -203,6 +249,15 @@ void EvaluateDXY_M15(int dxy_idx, string sym, ENUM_TIMEFRAMES mtf, int h1_dir)
          }
       }
    }
+   
+   // Retention Logic
+   if(G_DXY_TF[dxy_idx].m15_direction == 0 && prev_m15_dir == h1_dir && h1_dir != 0)
+   {
+      if(G_DXY_TF[dxy_idx].m15_structure_valid)
+      {
+         G_DXY_TF[dxy_idx].m15_direction = h1_dir;
+      }
+   }
 }
 
 // ==================================================================
@@ -210,6 +265,8 @@ void EvaluateDXY_M15(int dxy_idx, string sym, ENUM_TIMEFRAMES mtf, int h1_dir)
 // ==================================================================
 void EvaluateDXY_M5(int dxy_idx, string sym, ENUM_TIMEFRAMES ltf, int expected_dir)
 {
+   int prev_m5_dir = G_DXY_TF[dxy_idx].m5_direction;
+
    G_DXY_TF[dxy_idx].m5_direction = 0;
    G_DXY_TF[dxy_idx].m5_continuation = false;
    G_DXY_TF[dxy_idx].m5_displacement = false;
@@ -270,6 +327,15 @@ void EvaluateDXY_M5(int dxy_idx, string sym, ENUM_TIMEFRAMES ltf, int expected_d
          G_DXY_TF[dxy_idx].m5_last_confirmed_time = iTime(sym, ltf, 1);
       }
    }
+   
+   // Retention Logic
+   if(G_DXY_TF[dxy_idx].m5_direction == 0 && prev_m5_dir == expected_dir && expected_dir != 0)
+   {
+      if(G_DXY_TF[dxy_idx].m5_structure_valid)
+      {
+         G_DXY_TF[dxy_idx].m5_direction = expected_dir;
+      }
+   }
 }
 
 // ==================================================================
@@ -328,6 +394,14 @@ bool CheckDXYTrendFollowingConfirmation(int pair_idx, int pair_direction, string
       if(G_DXY_TF[dxy_idx].h1_direction == 0 && reason == "") reason = "DXY_H1_NEUTRAL";
       status_str = "FAIL";
    }
+   else if(!IsDXYH1Fresh(sym, G_DXY_TF[dxy_idx].h1_last_confirmed_time))
+   {
+      pass = false;
+      if (G_DXY_TF[dxy_idx].h1_last_confirmed_time <= 0) reason = "DXY_H1_NOT_INITIALIZED";
+      else reason = "DXY_H1_STALE";
+      status_str = "FAIL";
+      G_DXY_TF[dxy_idx].h1_direction = 0; // reset retention
+   }
    else if(G_DXY_TF[dxy_idx].m15_direction != expected_dxy_direction)
    {
       pass = false;
@@ -335,6 +409,14 @@ bool CheckDXYTrendFollowingConfirmation(int pair_idx, int pair_direction, string
       else if(!G_DXY_TF[dxy_idx].m15_aligned) reason = "DXY_M15_NOT_ALIGNED";
       else reason = "DXY_M15_DIRECTION_MISMATCH";
       status_str = "FAIL";
+   }
+   else if(!IsDXYM15Fresh(sym, G_DXY_TF[dxy_idx].m15_last_confirmed_time))
+   {
+      pass = false;
+      if (G_DXY_TF[dxy_idx].m15_last_confirmed_time <= 0) reason = "DXY_M15_NOT_INITIALIZED";
+      else reason = "DXY_M15_STALE";
+      status_str = "FAIL";
+      G_DXY_TF[dxy_idx].m15_direction = 0;
    }
    else if(G_DXY_TF[dxy_idx].m5_direction != expected_dxy_direction)
    {
@@ -345,9 +427,24 @@ bool CheckDXYTrendFollowingConfirmation(int pair_idx, int pair_direction, string
       else reason = "DXY_M5_DIRECTION_MISMATCH";
       status_str = "FAIL";
    }
+   else if(!IsDXYM5Fresh(sym, G_DXY_TF[dxy_idx].m5_last_confirmed_time))
+   {
+      pass = false;
+      if (G_DXY_TF[dxy_idx].m5_last_confirmed_time <= 0) reason = "DXY_M5_NOT_INITIALIZED";
+      else reason = "DXY_M5_STALE";
+      status_str = "FAIL";
+      G_DXY_TF[dxy_idx].m5_direction = 0;
+   }
    
    G_DXY_TF[dxy_idx].status = status_str;
    G_DXY_TF[dxy_idx].reject_reason = reason;
+   
+   int h1_age = GetDXYClosedBarAge(sym, htf, G_DXY_TF[dxy_idx].h1_last_confirmed_time);
+   bool h1_fresh = IsDXYH1Fresh(sym, G_DXY_TF[dxy_idx].h1_last_confirmed_time);
+   int m15_age = GetDXYClosedBarAge(sym, mtf, G_DXY_TF[dxy_idx].m15_last_confirmed_time);
+   bool m15_fresh = IsDXYM15Fresh(sym, G_DXY_TF[dxy_idx].m15_last_confirmed_time);
+   int m5_age = GetDXYClosedBarAge(sym, ltf, G_DXY_TF[dxy_idx].m5_last_confirmed_time);
+   bool m5_fresh = IsDXYM5Fresh(sym, G_DXY_TF[dxy_idx].m5_last_confirmed_time);
    
    Print("\n[DXY_TF][", G_Pairs[pair_idx].symbol, "]");
    PrintFormat("PAIR_DIRECTION=%s", (pair_direction == 1 ? "BUY" : "SELL"));
@@ -359,14 +456,20 @@ bool CheckDXYTrendFollowingConfirmation(int pair_idx, int pair_direction, string
    PrintFormat("H1_SLOPE=%s", (G_DXY_TF[dxy_idx].h1_slope_valid ? "PASS" : "FAIL"));
    PrintFormat("H1_PRICE=%s", (G_DXY_TF[dxy_idx].h1_price_position_valid ? "PASS" : "FAIL"));
    PrintFormat("H1_SIDEWAY=%s", (G_DXY_TF[dxy_idx].h1_not_sideway ? "PASS" : "FAIL"));
+   PrintFormat("H1_AGE_BARS=%d", h1_age);
+   PrintFormat("H1_FRESH=%s", (h1_fresh ? "PASS" : "FAIL"));
    Print("");
    PrintFormat("M15_DIRECTION=%s", (G_DXY_TF[dxy_idx].m15_direction == 1 ? "BUY" : (G_DXY_TF[dxy_idx].m15_direction == -1 ? "SELL" : "NONE")));
    PrintFormat("M15_STRUCTURE=%s", (G_DXY_TF[dxy_idx].m15_structure_valid ? "PASS" : "FAIL"));
    PrintFormat("M15_ALIGNMENT=%s", (G_DXY_TF[dxy_idx].m15_aligned ? "PASS" : "FAIL"));
+   PrintFormat("M15_AGE_BARS=%d", m15_age);
+   PrintFormat("M15_FRESH=%s", (m15_fresh ? "PASS" : "FAIL"));
    Print("");
    PrintFormat("M5_STRUCTURE=%s", (G_DXY_TF[dxy_idx].m5_continuation ? "PASS" : "FAIL"));
    PrintFormat("M5_MOMENTUM=%s", (G_DXY_TF[dxy_idx].m5_momentum ? "PASS" : "FAIL"));
    PrintFormat("M5_PROTECTED=%s", (G_DXY_TF[dxy_idx].m5_structure_valid ? "PASS" : "FAIL"));
+   PrintFormat("M5_AGE_BARS=%d", m5_age);
+   PrintFormat("M5_FRESH=%s", (m5_fresh ? "PASS" : "FAIL"));
    Print("");
    PrintFormat("FINAL=%s", status_str);
    if(!pass) PrintFormat("REASON=%s", reason);

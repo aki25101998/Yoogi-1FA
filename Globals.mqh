@@ -244,6 +244,11 @@ const bool   TF_REQUIRE_RETEST         = false; // Module ready, default OFF
 const int    TF_DXY_MAX_AGE_BARS_HTF   = 48;    // DXY HTF signal max age (bars)
 const int    TF_DXY_MAX_AGE_BARS_LTF   = 288;   // DXY LTF signal max age (bars)
 
+// --- Internal Constants for DXY TF Engine Freshness ---
+const int    DXY_TF_H1_MAX_AGE_BARS    = 3;
+const int    DXY_TF_M15_MAX_AGE_BARS   = 4;
+const int    DXY_TF_M5_MAX_AGE_BARS    = 3;
+
 struct TrendFollowingContext
 {
    // H1 Trend Regime
