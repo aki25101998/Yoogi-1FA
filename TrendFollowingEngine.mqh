@@ -1364,6 +1364,12 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    
    // 8. DXY Confirmation
    string dxy_reason = "";
+   
+   if(G_Pairs[idx].isUSDPair && score == 100.0)
+   {
+      PrintFormat("\n[TF_DXY_GATE]\nPAIR=%s\nCALLING=DXYTrendFollowingEngine", G_Pairs[idx].symbol);
+   }
+   
    bool dxy_pass = CheckDXYTrendFollowingConfirmation(idx, direction, dxy_reason);
    if(!dxy_pass)
    {

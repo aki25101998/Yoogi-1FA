@@ -66,6 +66,10 @@ int OnInit()
    // [CẬP NHẬT] Thay đổi nội dung log in ra tab Expert
    Print(">>> Yoogi One For All đã khởi động trên EURUSD.");
    Print(">>> Chế độ: 7 Pairs Fixed - Optimized Timer (3s).");
+   
+   Print("\n[DXY_TF_INIT]");
+   Print("ENGINE=ACTIVE");
+   Print("ENGINE_VERSION=TF_DXY_V2\n");
 
    return(INIT_SUCCEEDED);
 }
