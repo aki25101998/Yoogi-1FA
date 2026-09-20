@@ -9,12 +9,13 @@
 const int DXY_TF_SWING_PERIOD = 3; 
 
 // --- Helpers ---
-double GetDXYSwingHigh(string sym, ENUM_TIMEFRAMES tf, int start_idx)
+double GetDXYSwingHigh(string sym, ENUM_TIMEFRAMES tf, int start_idx, int nth_swing = 1)
 {
    double high[];
    ArraySetAsSeries(high, true);
    if(CopyHigh(sym, tf, start_idx, 100, high) < 50) return 0.0;
    
+   int found_count = 0;
    for(int i = DXY_TF_SWING_PERIOD; i < 40; i++)
    {
       bool isSwing = true;
@@ -26,17 +27,23 @@ double GetDXYSwingHigh(string sym, ENUM_TIMEFRAMES tf, int start_idx)
             break;
          }
       }
-      if(isSwing) return high[i];
+      if(isSwing)
+      {
+         found_count++;
+         if(found_count == nth_swing) return high[i];
+         i += DXY_TF_SWING_PERIOD; // Skip adjacent bars to ensure distinct swing
+      }
    }
    return 0.0;
 }
 
-double GetDXYSwingLow(string sym, ENUM_TIMEFRAMES tf, int start_idx)
+double GetDXYSwingLow(string sym, ENUM_TIMEFRAMES tf, int start_idx, int nth_swing = 1)
 {
    double low[];
    ArraySetAsSeries(low, true);
    if(CopyLow(sym, tf, start_idx, 100, low) < 50) return 0.0;
    
+   int found_count = 0;
    for(int i = DXY_TF_SWING_PERIOD; i < 40; i++)
    {
       bool isSwing = true;
@@ -48,7 +55,12 @@ double GetDXYSwingLow(string sym, ENUM_TIMEFRAMES tf, int start_idx)
             break;
          }
       }
-      if(isSwing) return low[i];
+      if(isSwing)
+      {
+         found_count++;
+         if(found_count == nth_swing) return low[i];
+         i += DXY_TF_SWING_PERIOD; // Skip adjacent bars to ensure distinct swing
+      }
    }
    return 0.0;
 }
@@ -62,8 +74,8 @@ bool CheckDXYMomentum(string sym, ENUM_TIMEFRAMES tf, int direction)
    
    if(hl > 0)
    {
-      // Yêu cầu nến 1 có body > 50% range để gọi là có momentum/displacement
-      if (body / hl > 0.5) return true;
+      // Yêu cầu nến 1 có body >= 50% range để gọi là có momentum/displacement
+      if (body / hl >= 0.5) return true;
    }
    return false;
 }
@@ -76,39 +88,71 @@ void EvaluateDXY_H1(int dxy_idx, string sym, ENUM_TIMEFRAMES htf)
    double ema20 = CalculateEMA_Generic(sym, htf, 20, 1);
    double ema50 = CalculateEMA_Generic(sym, htf, 50, 1);
    double ema50_prev = CalculateEMA_Generic(sym, htf, 50, 1 + TF_SLOPE_LOOKBACK);
+   double atr = CalculateATR_Generic(sym, htf, 14, 1);
    double close = iClose(sym, htf, 1);
    
    G_DXY_TF[dxy_idx].h1_ema_aligned = false;
    G_DXY_TF[dxy_idx].h1_slope_valid = false;
    G_DXY_TF[dxy_idx].h1_price_position_valid = false;
    G_DXY_TF[dxy_idx].h1_structure_valid = false;
-   G_DXY_TF[dxy_idx].h1_not_sideway = true; // Simplified sideway check
+   G_DXY_TF[dxy_idx].h1_not_sideway = false; 
    G_DXY_TF[dxy_idx].h1_direction = 0;
    
-   if(ema20 > ema50 && close > ema50) // Potential BUY
+   // --- Sideway Filter ---
+   double ema_distance_atr = 0.0;
+   if(atr > 0) ema_distance_atr = MathAbs(ema20 - ema50) / atr;
+   
+   // Reject if distance < 0.5 ATR (too tight -> sideway)
+   if(ema_distance_atr >= 0.5) G_DXY_TF[dxy_idx].h1_not_sideway = true;
+   
+   // --- Lấy các swing points ---
+   double hh1 = GetDXYSwingHigh(sym, htf, 1, 1);
+   double hh2 = GetDXYSwingHigh(sym, htf, 1, 2);
+   double hl1 = GetDXYSwingLow(sym, htf, 1, 1);
+   double hl2 = GetDXYSwingLow(sym, htf, 1, 2);
+
+   double lh1 = hh1;
+   double lh2 = hh2;
+   double ll1 = hl1;
+   double ll2 = hl2;
+   
+   // Potential BUY
+   if(ema20 > ema50 && close > ema50)
    {
       G_DXY_TF[dxy_idx].h1_ema_aligned = true;
-      G_DXY_TF[dxy_idx].h1_price_position_valid = true;
+      if(close > ema20 && close > ema50) G_DXY_TF[dxy_idx].h1_price_position_valid = true;
       if(ema50 > ema50_prev) G_DXY_TF[dxy_idx].h1_slope_valid = true;
       
-      // Structure: HH HL
-      double h1 = GetDXYSwingHigh(sym, htf, 1);
-      if(close > h1 || h1 == 0.0) G_DXY_TF[dxy_idx].h1_structure_valid = true; // Phá vỡ đỉnh gần nhất -> cấu trúc tăng tiếp diễn
-      else G_DXY_TF[dxy_idx].h1_structure_valid = true; // Hoặc có thể tạm chấp nhận nếu EMA đủ mạnh
+      // BUY Structure: hh1 (recent) > hh2 (older) and hl1 (recent) > hl2 (older) and close > hl1
+      if(hh1 > hh2 && hl1 > hl2 && close > hl1 && hh1 > 0 && hh2 > 0 && hl1 > 0 && hl2 > 0)
+      {
+         G_DXY_TF[dxy_idx].h1_structure_valid = true;
+      }
       
-      if(G_DXY_TF[dxy_idx].h1_slope_valid) G_DXY_TF[dxy_idx].h1_direction = 1;
+      if(G_DXY_TF[dxy_idx].h1_slope_valid && G_DXY_TF[dxy_idx].h1_price_position_valid && G_DXY_TF[dxy_idx].h1_structure_valid && G_DXY_TF[dxy_idx].h1_not_sideway)
+      {
+         G_DXY_TF[dxy_idx].h1_direction = 1;
+         G_DXY_TF[dxy_idx].h1_last_confirmed_time = iTime(sym, htf, 1);
+      }
    }
-   else if(ema20 < ema50 && close < ema50) // Potential SELL
+   // Potential SELL
+   else if(ema20 < ema50 && close < ema50)
    {
       G_DXY_TF[dxy_idx].h1_ema_aligned = true;
-      G_DXY_TF[dxy_idx].h1_price_position_valid = true;
+      if(close < ema20 && close < ema50) G_DXY_TF[dxy_idx].h1_price_position_valid = true;
       if(ema50 < ema50_prev) G_DXY_TF[dxy_idx].h1_slope_valid = true;
       
-      double l1 = GetDXYSwingLow(sym, htf, 1);
-      if(close < l1 || l1 == 0.0) G_DXY_TF[dxy_idx].h1_structure_valid = true; 
-      else G_DXY_TF[dxy_idx].h1_structure_valid = true; 
+      // SELL Structure: lh1 (recent) < lh2 (older) and ll1 (recent) < ll2 (older) and close < lh1
+      if(lh1 < lh2 && ll1 < ll2 && close < lh1 && lh1 > 0 && lh2 > 0 && ll1 > 0 && ll2 > 0)
+      {
+         G_DXY_TF[dxy_idx].h1_structure_valid = true;
+      }
       
-      if(G_DXY_TF[dxy_idx].h1_slope_valid) G_DXY_TF[dxy_idx].h1_direction = -1;
+      if(G_DXY_TF[dxy_idx].h1_slope_valid && G_DXY_TF[dxy_idx].h1_price_position_valid && G_DXY_TF[dxy_idx].h1_structure_valid && G_DXY_TF[dxy_idx].h1_not_sideway)
+      {
+         G_DXY_TF[dxy_idx].h1_direction = -1;
+         G_DXY_TF[dxy_idx].h1_last_confirmed_time = iTime(sym, htf, 1);
+      }
    }
 }
 
@@ -123,36 +167,40 @@ void EvaluateDXY_M15(int dxy_idx, string sym, ENUM_TIMEFRAMES mtf, int h1_dir)
    
    if(h1_dir == 0) return;
    
+   double ema20 = CalculateEMA_Generic(sym, mtf, 20, 1);
    double ema50 = CalculateEMA_Generic(sym, mtf, 50, 1);
    double close = iClose(sym, mtf, 1);
    
    if(h1_dir == 1) // H1 is BUY
    {
-      double protected_low = GetDXYSwingLow(sym, mtf, 1);
-      G_DXY_TF[dxy_idx].protected_low = protected_low;
+      double protected_low = GetDXYSwingLow(sym, mtf, 1, 1);
+      G_DXY_TF[dxy_idx].protected_low = protected_low; // Set explicitly to recent low
       
-      if(close > protected_low || protected_low == 0.0)
+      if(close > protected_low && protected_low > 0.0)
       {
          G_DXY_TF[dxy_idx].m15_structure_valid = true;
-         // Alignment có thể xét thêm EMA
-         if(close > ema50) G_DXY_TF[dxy_idx].m15_aligned = true;
-         else G_DXY_TF[dxy_idx].m15_aligned = true; // Nới lỏng: pullback vẫn coi là aligned nếu structure valid
-         
-         G_DXY_TF[dxy_idx].m15_direction = 1;
+         if(close > ema20 && close > ema50 && ema20 >= ema50) 
+         {
+            G_DXY_TF[dxy_idx].m15_aligned = true;
+            G_DXY_TF[dxy_idx].m15_direction = 1;
+            G_DXY_TF[dxy_idx].m15_last_confirmed_time = iTime(sym, mtf, 1);
+         }
       }
    }
    else if(h1_dir == -1) // H1 is SELL
    {
-      double protected_high = GetDXYSwingHigh(sym, mtf, 1);
+      double protected_high = GetDXYSwingHigh(sym, mtf, 1, 1);
       G_DXY_TF[dxy_idx].protected_high = protected_high;
       
-      if(close < protected_high || protected_high == 0.0)
+      if(close < protected_high && protected_high > 0.0)
       {
          G_DXY_TF[dxy_idx].m15_structure_valid = true;
-         if(close < ema50) G_DXY_TF[dxy_idx].m15_aligned = true;
-         else G_DXY_TF[dxy_idx].m15_aligned = true;
-         
-         G_DXY_TF[dxy_idx].m15_direction = -1;
+         if(close < ema20 && close < ema50 && ema20 <= ema50)
+         {
+            G_DXY_TF[dxy_idx].m15_aligned = true;
+            G_DXY_TF[dxy_idx].m15_direction = -1;
+            G_DXY_TF[dxy_idx].m15_last_confirmed_time = iTime(sym, mtf, 1);
+         }
       }
    }
 }
@@ -171,36 +219,55 @@ void EvaluateDXY_M5(int dxy_idx, string sym, ENUM_TIMEFRAMES ltf, int expected_d
    if(expected_dir == 0) return;
    
    double close = iClose(sym, ltf, 1);
-   double close2 = iClose(sym, ltf, 2);
    
-   if(expected_dir == 1) // H1 & M15 BUY
+   if(expected_dir == 1) // Expected BUY
    {
-      double prev_high = GetDXYSwingHigh(sym, ltf, 2);
-      if(close > prev_high || close > close2) G_DXY_TF[dxy_idx].m5_continuation = true; // Simplified continuation
+      double recent_swing_high = GetDXYSwingHigh(sym, ltf, 2, 1); // get a formed swing high
+      if(close > recent_swing_high && recent_swing_high > 0.0) 
+      {
+         G_DXY_TF[dxy_idx].m5_continuation = true; 
+      }
       
-      G_DXY_TF[dxy_idx].m5_displacement = CheckDXYMomentum(sym, ltf, 1);
-      G_DXY_TF[dxy_idx].m5_momentum = G_DXY_TF[dxy_idx].m5_displacement;
+      if(CheckDXYMomentum(sym, ltf, 1))
+      {
+         G_DXY_TF[dxy_idx].m5_displacement = true;
+         G_DXY_TF[dxy_idx].m5_momentum = true;
+      }
       
-      if(close > G_DXY_TF[dxy_idx].protected_low || G_DXY_TF[dxy_idx].protected_low == 0.0) G_DXY_TF[dxy_idx].m5_structure_valid = true;
+      if(close > G_DXY_TF[dxy_idx].protected_low && G_DXY_TF[dxy_idx].protected_low > 0.0) 
+      {
+         G_DXY_TF[dxy_idx].m5_structure_valid = true;
+      }
       
-      if(G_DXY_TF[dxy_idx].m5_continuation && G_DXY_TF[dxy_idx].m5_structure_valid)
+      if(G_DXY_TF[dxy_idx].m5_continuation && G_DXY_TF[dxy_idx].m5_structure_valid && G_DXY_TF[dxy_idx].m5_momentum)
       {
          G_DXY_TF[dxy_idx].m5_direction = 1;
+         G_DXY_TF[dxy_idx].m5_last_confirmed_time = iTime(sym, ltf, 1);
       }
    }
-   else if(expected_dir == -1) // H1 & M15 SELL
+   else if(expected_dir == -1) // Expected SELL
    {
-      double prev_low = GetDXYSwingLow(sym, ltf, 2);
-      if(close < prev_low || close < close2) G_DXY_TF[dxy_idx].m5_continuation = true; 
+      double recent_swing_low = GetDXYSwingLow(sym, ltf, 2, 1); // get a formed swing low
+      if(close < recent_swing_low && recent_swing_low > 0.0) 
+      {
+         G_DXY_TF[dxy_idx].m5_continuation = true; 
+      }
       
-      G_DXY_TF[dxy_idx].m5_displacement = CheckDXYMomentum(sym, ltf, -1);
-      G_DXY_TF[dxy_idx].m5_momentum = G_DXY_TF[dxy_idx].m5_displacement;
+      if(CheckDXYMomentum(sym, ltf, -1))
+      {
+         G_DXY_TF[dxy_idx].m5_displacement = true;
+         G_DXY_TF[dxy_idx].m5_momentum = true;
+      }
       
-      if(close < G_DXY_TF[dxy_idx].protected_high || G_DXY_TF[dxy_idx].protected_high == 0.0) G_DXY_TF[dxy_idx].m5_structure_valid = true;
+      if(close < G_DXY_TF[dxy_idx].protected_high && G_DXY_TF[dxy_idx].protected_high > 0.0) 
+      {
+         G_DXY_TF[dxy_idx].m5_structure_valid = true;
+      }
       
-      if(G_DXY_TF[dxy_idx].m5_continuation && G_DXY_TF[dxy_idx].m5_structure_valid)
+      if(G_DXY_TF[dxy_idx].m5_continuation && G_DXY_TF[dxy_idx].m5_structure_valid && G_DXY_TF[dxy_idx].m5_momentum)
       {
          G_DXY_TF[dxy_idx].m5_direction = -1;
+         G_DXY_TF[dxy_idx].m5_last_confirmed_time = iTime(sym, ltf, 1);
       }
    }
 }
@@ -215,13 +282,13 @@ bool CheckDXYTrendFollowingConfirmation(int pair_idx, int pair_direction, string
    if(!g_dxy_available || !InpUseDXYReference)
    {
       reason = "N/A";
-      return true; // Skip DXY check
+      return true; 
    }
    
    if(!G_Pairs[pair_idx].isUSDPair)
    {
       reason = "NOT_USD_PAIR";
-      return true; // EURGBP etc.
+      return true; 
    }
    
    int dxy_idx = G_Pairs[pair_idx].dxy_map_index;
@@ -236,78 +303,72 @@ bool CheckDXYTrendFollowingConfirmation(int pair_idx, int pair_direction, string
    ENUM_TIMEFRAMES mtf = G_DXY_TF[dxy_idx].mtf;
    ENUM_TIMEFRAMES ltf = G_DXY_TF[dxy_idx].ltf;
    
-   // Xác định hướng kỳ vọng của DXY
    int expected_dxy_direction = 0;
-   string orientation = "UNKNOWN";
+   if(G_Pairs[pair_idx].isUSDFirst) expected_dxy_direction = pair_direction;
+   else if(G_Pairs[pair_idx].isUSDSecond) expected_dxy_direction = -pair_direction;
    
-   if(G_Pairs[pair_idx].isUSDFirst) 
-   {
-      expected_dxy_direction = pair_direction; // USDxxx -> Cùng hướng
-      orientation = "USD_FIRST";
-   }
-   else if(G_Pairs[pair_idx].isUSDSecond)
-   {
-      expected_dxy_direction = -pair_direction; // xxxUSD -> Ngược hướng
-      orientation = "USD_SECOND";
-   }
-   
-   // Đánh giá các Layer
+   // Evaluate
    EvaluateDXY_H1(dxy_idx, sym, htf);
    EvaluateDXY_M15(dxy_idx, sym, mtf, G_DXY_TF[dxy_idx].h1_direction);
    EvaluateDXY_M5(dxy_idx, sym, ltf, G_DXY_TF[dxy_idx].m15_direction);
    
-   // Xác nhận
    bool pass = true;
    string status_str = "PASS";
    
    if(G_DXY_TF[dxy_idx].h1_direction != expected_dxy_direction)
    {
       pass = false;
-      reason = "DXY_H1_DIRECTION_MISMATCH";
-      if(G_DXY_TF[dxy_idx].h1_direction == 0) reason = "DXY_H1_NEUTRAL";
+      if(!G_DXY_TF[dxy_idx].h1_not_sideway) reason = "DXY_H1_SIDEWAY";
+      else if(!G_DXY_TF[dxy_idx].h1_structure_valid) reason = "DXY_H1_STRUCTURE_INVALID";
+      else if(!G_DXY_TF[dxy_idx].h1_ema_aligned) reason = "DXY_H1_EMA_NOT_ALIGNED";
+      else if(!G_DXY_TF[dxy_idx].h1_price_position_valid) reason = "DXY_H1_PRICE_POSITION_INVALID";
+      else if(!G_DXY_TF[dxy_idx].h1_slope_valid) reason = "DXY_H1_SLOPE_INVALID";
+      else reason = "DXY_H1_DIRECTION_MISMATCH";
+      
+      if(G_DXY_TF[dxy_idx].h1_direction == 0 && reason == "") reason = "DXY_H1_NEUTRAL";
       status_str = "FAIL";
    }
    else if(G_DXY_TF[dxy_idx].m15_direction != expected_dxy_direction)
    {
       pass = false;
-      reason = "DXY_M15_NOT_ALIGNED";
+      if(!G_DXY_TF[dxy_idx].m15_structure_valid) reason = "DXY_M15_STRUCTURE_INVALID";
+      else if(!G_DXY_TF[dxy_idx].m15_aligned) reason = "DXY_M15_NOT_ALIGNED";
+      else reason = "DXY_M15_DIRECTION_MISMATCH";
       status_str = "FAIL";
    }
    else if(G_DXY_TF[dxy_idx].m5_direction != expected_dxy_direction)
    {
       pass = false;
-      reason = "DXY_M5_CONTINUATION_MISSING";
+      if(!G_DXY_TF[dxy_idx].m5_structure_valid) reason = "DXY_M5_PROTECTED_STRUCTURE_BROKEN";
+      else if(!G_DXY_TF[dxy_idx].m5_continuation) reason = "DXY_M5_CONTINUATION_MISSING";
+      else if(!G_DXY_TF[dxy_idx].m5_momentum) reason = "DXY_M5_MOMENTUM_MISSING";
+      else reason = "DXY_M5_DIRECTION_MISMATCH";
       status_str = "FAIL";
    }
    
-   // Update status logic
    G_DXY_TF[dxy_idx].status = status_str;
    G_DXY_TF[dxy_idx].reject_reason = reason;
    
-   // LOGGING
-   Print("\n[DXY_TF]");
-   PrintFormat("SYMBOL=%s", sym);
-   PrintFormat("PAIR=%s", G_Pairs[pair_idx].symbol);
+   Print("\n[DXY_TF][", G_Pairs[pair_idx].symbol, "]");
    PrintFormat("PAIR_DIRECTION=%s", (pair_direction == 1 ? "BUY" : "SELL"));
+   PrintFormat("DXY_REQUIRED_DIRECTION=%s", (expected_dxy_direction == 1 ? "BUY" : "SELL"));
    Print("");
    PrintFormat("H1_DIRECTION=%s", (G_DXY_TF[dxy_idx].h1_direction == 1 ? "BUY" : (G_DXY_TF[dxy_idx].h1_direction == -1 ? "SELL" : "NONE")));
    PrintFormat("H1_STRUCTURE=%s", (G_DXY_TF[dxy_idx].h1_structure_valid ? "PASS" : "FAIL"));
    PrintFormat("H1_EMA=%s", (G_DXY_TF[dxy_idx].h1_ema_aligned ? "PASS" : "FAIL"));
    PrintFormat("H1_SLOPE=%s", (G_DXY_TF[dxy_idx].h1_slope_valid ? "PASS" : "FAIL"));
+   PrintFormat("H1_PRICE=%s", (G_DXY_TF[dxy_idx].h1_price_position_valid ? "PASS" : "FAIL"));
+   PrintFormat("H1_SIDEWAY=%s", (G_DXY_TF[dxy_idx].h1_not_sideway ? "PASS" : "FAIL"));
    Print("");
    PrintFormat("M15_DIRECTION=%s", (G_DXY_TF[dxy_idx].m15_direction == 1 ? "BUY" : (G_DXY_TF[dxy_idx].m15_direction == -1 ? "SELL" : "NONE")));
    PrintFormat("M15_STRUCTURE=%s", (G_DXY_TF[dxy_idx].m15_structure_valid ? "PASS" : "FAIL"));
    PrintFormat("M15_ALIGNMENT=%s", (G_DXY_TF[dxy_idx].m15_aligned ? "PASS" : "FAIL"));
    Print("");
-   PrintFormat("M5_DIRECTION=%s", (G_DXY_TF[dxy_idx].m5_direction == 1 ? "BUY" : (G_DXY_TF[dxy_idx].m5_direction == -1 ? "SELL" : "NONE")));
-   PrintFormat("M5_CONTINUATION=%s", (G_DXY_TF[dxy_idx].m5_continuation ? "PASS" : "FAIL"));
-   PrintFormat("M5_DISPLACEMENT=%s", (G_DXY_TF[dxy_idx].m5_displacement ? "PASS" : "FAIL"));
+   PrintFormat("M5_STRUCTURE=%s", (G_DXY_TF[dxy_idx].m5_continuation ? "PASS" : "FAIL"));
    PrintFormat("M5_MOMENTUM=%s", (G_DXY_TF[dxy_idx].m5_momentum ? "PASS" : "FAIL"));
+   PrintFormat("M5_PROTECTED=%s", (G_DXY_TF[dxy_idx].m5_structure_valid ? "PASS" : "FAIL"));
    Print("");
-   PrintFormat("ORIENTATION=%s", orientation);
-   PrintFormat("EXPECTED_DXY_DIRECTION=%s", (expected_dxy_direction == 1 ? "BUY" : "SELL"));
-   PrintFormat("ACTUAL_DXY_DIRECTION=%s", (G_DXY_TF[dxy_idx].m5_direction == 1 ? "BUY" : (G_DXY_TF[dxy_idx].m5_direction == -1 ? "SELL" : "NONE")));
-   PrintFormat("STATUS=%s", status_str);
+   PrintFormat("FINAL=%s", status_str);
    if(!pass) PrintFormat("REASON=%s", reason);
    
    return pass;
