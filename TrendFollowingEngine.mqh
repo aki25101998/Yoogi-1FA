@@ -1440,16 +1440,7 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    PrintFormat("  VALID=%s", dist_valid ? "true" : "false");
    PrintFormat("  SCORE=%.0f", G_TF[idx].score_entry_distance);
    Print("");
-   Print("DXY:");
-   PrintFormat("  HTF=%s", (dxy_htf == 1 ? "BUY" : (dxy_htf == -1 ? "SELL" : "NONE")));
-   PrintFormat("  HTF_TIME=%s", TimeToString(htf_time));
-   PrintFormat("  HTF_AGE_BARS=%d", htf_age_bars);
-   PrintFormat("  LTF=%s", (dxy_ltf == 1 ? "BUY" : (dxy_ltf == -1 ? "SELL" : "NONE")));
-   PrintFormat("  LTF_TIME=%s", TimeToString(ltf_time));
-   PrintFormat("  LTF_AGE_BARS=%d", ltf_age_bars);
-   PrintFormat("  ORIENTATION=%s", orientation);
-   PrintFormat("  STATUS=%s", dxy_status_str);
-   Print("");
+
    PrintFormat("TOTAL_SCORE=%.0f", score);
    Print("");
    PrintFormat("FINAL_GATE=%s", pass ? "PASS" : "FAIL");
