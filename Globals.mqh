@@ -234,7 +234,7 @@ PairContext G_Pairs[TOTAL_PAIRS];
 const int    TF_MAX_EVENT_BARS         = 5;     // Sweep→Displacement→MSS must be within 5 M5 bars
 const double TF_MAX_ENTRY_DISTANCE_ATR = 2.0;   // Don't chase price beyond 2x M5 ATR
 const int    TF_MAX_SETUP_BARS         = 100;   // Setup timeout in M5 bars
-const int    TF_MOMENTUM_MAX_BARS      = 3;     // Momentum timeout in M5 bars
+const int    TF_MOMENTUM_MAX_BARS      = 5;     // Momentum timeout in M5 bars
 const int    TF_PULLBACK_MAX_BARS      = 30;    // M15 pullback max age
 const double TF_PULLBACK_MIN_DEPTH_ATR = 0.3;   // Min pullback depth (ATR)
 const double TF_PULLBACK_MAX_DEPTH_ATR = 3.0;   // Max pullback depth before reversal
@@ -280,6 +280,7 @@ struct TrendFollowingContext
    bool   m5_mss;
    bool   m5_momentum_cci;
    bool   m5_momentum_rf;
+   bool   m5_momentum_pc;
    
    // Real timestamp tracking for chronological validation
    datetime m5_sweep_time;
@@ -289,6 +290,7 @@ struct TrendFollowingContext
    datetime m5_momentum_start_time;
    datetime m5_momentum_cci_time;
    datetime m5_momentum_rf_time;
+   datetime m5_momentum_pc_time;
    
    double m5_sweep_price;
    double m5_displacement_price;
@@ -624,6 +626,7 @@ void InitGlobals()
       G_TF[i].m5_mss = false;
       G_TF[i].m5_momentum_cci = false;
       G_TF[i].m5_momentum_rf = false;
+      G_TF[i].m5_momentum_pc = false;
       G_TF[i].m5_sweep_time = 0;
       G_TF[i].m5_displacement_time = 0;
       G_TF[i].m5_mss_time = 0;
@@ -631,6 +634,7 @@ void InitGlobals()
       G_TF[i].m5_momentum_start_time = 0;
       G_TF[i].m5_momentum_cci_time = 0;
       G_TF[i].m5_momentum_rf_time = 0;
+      G_TF[i].m5_momentum_pc_time = 0;
       G_TF[i].m5_sweep_price = 0.0;
       G_TF[i].m5_displacement_price = 0.0;
       G_TF[i].m5_sweep_age = 0;
