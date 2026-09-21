@@ -1419,9 +1419,12 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    if(G_TF[idx].m5_mss_break_level <= 0.0) { if(first_reject=="") first_reject = "MSS_BREAK_LEVEL_INVALID"; pass = false; }
    if(!dist_valid) { if(first_reject=="") first_reject = "ENTRY_DISTANCE_TOO_FAR"; pass = false; }
    
-   // 6. Momentum
-   if(!G_TF[idx].m5_momentum_cci) { if(first_reject=="") first_reject = "MOMENTUM_INCOMPLETE"; pass = false; }
-   if(!G_TF[idx].m5_momentum_rf) { if(first_reject=="") first_reject = "MOMENTUM_INCOMPLETE"; pass = false; }
+   // 6. Momentum (score-based: 2/3 with PC required)
+   if(G_TF[idx].score_momentum < 10.0)
+   {
+      if(first_reject=="") first_reject = "MOMENTUM_INCOMPLETE";
+      pass = false;
+   }
    
    // 7. Score
    double score = CalculateTFScore(idx);
@@ -1502,6 +1505,21 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    PrintFormat("PC_CONFIRMED=%s", G_TF[idx].m5_momentum_pc ? "true" : "false");
    if(G_TF[idx].m5_momentum_pc_time > 0) PrintFormat("PC_CONFIRMED_TIME=%s", TimeToString(G_TF[idx].m5_momentum_pc_time));
    Print("");
+   // Momentum Reason diagnostic
+   int mom_pass_count = 0;
+   if(G_TF[idx].m5_momentum_cci) mom_pass_count++;
+   if(G_TF[idx].m5_momentum_rf)  mom_pass_count++;
+   if(G_TF[idx].m5_momentum_pc)  mom_pass_count++;
+   PrintFormat("MOMENTUM_PASS_COUNT=%d", mom_pass_count);
+   PrintFormat("MOMENTUM_REQUIRED=2");
+   PrintFormat("MOMENTUM_PC_REQUIRED=true");
+   string mom_reason = "";
+   if(G_TF[idx].m5_momentum_pc && mom_pass_count >= 3) mom_reason = "3_OF_3";
+   else if(G_TF[idx].m5_momentum_pc && mom_pass_count >= 2) mom_reason = "2_OF_3_WITH_PRICE_CONTINUATION";
+   else if(!G_TF[idx].m5_momentum_pc && G_TF[idx].m5_momentum_cci && G_TF[idx].m5_momentum_rf) mom_reason = "PRICE_CONTINUATION_REQUIRED";
+   else if(mom_pass_count == 1) mom_reason = "INSUFFICIENT_CONFIRMATIONS";
+   else mom_reason = "NO_CONFIRMATIONS";
+   PrintFormat("MOMENTUM_REASON=%s", mom_reason);
    PrintFormat("MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
    PrintFormat("STATUS=%s", mom_diag_status);
    Print("");
@@ -1801,6 +1819,16 @@ int CheckTrendFollowingSignal(int idx)
    if(score == 100.0)
    {
       Print("\n[SCORE_100_REACHED]");
+      PrintFormat("SYMBOL=%s", sym);
+      PrintFormat("H1=%.0f", G_TF[idx].score_h1_trend);
+      PrintFormat("M15=%.0f", G_TF[idx].score_m15_pullback);
+      PrintFormat("SWEEP=%.0f", G_TF[idx].score_sweep);
+      PrintFormat("DISPLACEMENT=%.0f", G_TF[idx].score_displacement);
+      PrintFormat("MSS=%.0f", G_TF[idx].score_mss);
+      PrintFormat("COHERENCE=%.0f", G_TF[idx].score_event_coherence);
+      PrintFormat("MOMENTUM=%.0f", G_TF[idx].score_momentum);
+      PrintFormat("ENTRY_DISTANCE=%.0f", G_TF[idx].score_entry_distance);
+      PrintFormat("TOTAL=%.0f", score);
       // === FINAL GATE ===
       SetTFState(idx, TF_STATE_ENTRY_READY, "SCORE_100_REACHED");
       
@@ -1811,6 +1839,12 @@ int CheckTrendFollowingSignal(int idx)
       {
          G_TF[idx].status = "TRIGGER";
          LogTFDecision(idx, dir, "ENTRY_READY", "All Gates Passed", score);
+         
+         Print("\n[TF_FINAL_PASS]");
+         PrintFormat("SYMBOL=%s", sym);
+         PrintFormat("DIRECTION=%s", (dir == 1 ? "BUY" : "SELL"));
+         PrintFormat("SCORE=%.0f", score);
+         PrintFormat("DXY=PASS");
          
          int result = dir;
          ResetTFSetup(idx, "Entry Triggered - Reset");
