@@ -26,6 +26,7 @@
 #include "ReversalEngine.mqh"
 #include "DXYTrendFollowingEngine.mqh"
 #include "TrendFollowingEngine.mqh"
+#include "DynamicExitEngine.mqh"
 #include "CoreLogic.mqh"
 #include "InfoDisplay.mqh"
 #include "Security.mqh"
@@ -57,6 +58,7 @@ int OnInit()
    // --- 3. KHỞI TẠO LOGIC ĐA CẶP ---
    InitGlobals();    // Khởi tạo 7 cặp tiền và Risk % cứng
    InitIndicators(); // Khởi tạo chỉ báo cho 7 cặp
+   InitAllTradeProfiles(); // Khởi tạo Dynamic Exit Profiles
    CreateDisplay();  // Vẽ giao diện Dashboard
 
    // --- [TỐI ƯU HÓA HIỆU SUẤT] ---
@@ -86,21 +88,39 @@ int OnInit()
    Print("ENTRY_REQUIRED_SCORE=100");
    PrintFormat("TF_MAX_EVENT_BARS=%d", TF_MAX_EVENT_BARS);
    
-   if(InpEnableDCA)
-   {
-       Print("[DCA] Mode: ENABLED");
-       PrintFormat("[DCA] Step: %d pips", InpKhoangMoPip);
-   }
-   else
-   {
-       Print("[DCA] Mode: DISABLED");
-       Print("[DCA] Single Trade Mode");
-       PrintFormat("[DCA] Step %d pips is used as Stop Loss", InpKhoangMoPip);
-       PrintFormat("[DCA] TP = %d pips", InpMasterTPPips);
-       PrintFormat("[DCA] SL = %d pips", InpKhoangMoPip);
-   }
-   
-   Print("==================================================\n");
+    if(InpEnableDCA)
+    {
+        Print("[DCA] Mode: ENABLED");
+        PrintFormat("[DCA] Step: %d pips", InpKhoangMoPip);
+    }
+    else
+    {
+        Print("[DCA] Mode: DISABLED");
+        Print("[DCA] Single Trade Mode");
+        PrintFormat("[DCA] Step %d pips is used as Stop Loss", InpKhoangMoPip);
+        PrintFormat("[DCA] TP = %d pips", InpMasterTPPips);
+        PrintFormat("[DCA] SL = %d pips", InpKhoangMoPip);
+    }
+    
+    // --- DYNAMIC EXIT ENGINE DIAGNOSTIC ---
+    Print("");
+    if(InpEnableDynamicTP)
+    {
+        Print("[DYNAMIC-TP] Mode: ENABLED");
+        PrintFormat("[DYNAMIC-TP] MinTP: %d pips", InpDynamicTP_MinPips);
+        PrintFormat("[DYNAMIC-TP] MaxTP: %d pips", InpDynamicTP_MaxPips);
+        PrintFormat("[DYNAMIC-TP] ATR_Multiplier: %.2f", InpDynamicTP_ATRMultiplier);
+        PrintFormat("[DYNAMIC-TP] Compression: %s", InpEnableTPCompression ? "ON" : "OFF");
+        PrintFormat("[DYNAMIC-TP] Runner (FT): %s", InpEnableRunnerMode ? "ON" : "OFF");
+        PrintFormat("[DYNAMIC-TP] Fallback TP: %d pips", InpMasterTPPips);
+    }
+    else
+    {
+        Print("[DYNAMIC-TP] Mode: DISABLED (Fixed TP)");
+        PrintFormat("[DYNAMIC-TP] Fixed TP: %d pips", InpMasterTPPips);
+    }
+    
+    Print("==================================================\n");
 
    return(INIT_SUCCEEDED);
 }

@@ -137,6 +137,7 @@ void CloseAllInChain_Multi(int idx)
          }
       }
    }
+   ResetTradeProfile(idx);
    ClearChainState_Multi(idx);
 }
 
@@ -178,8 +179,10 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
    // --- [QUAN TRỌNG] NẾU LOT = 0 (DO RISK = 0%), DỮNG NGAY ---
    if(initial_lot <= 0.0) return;
 
+   // --- DETERMINE STRATEGY TYPE ---
+   int strategy_type = GetStrategyType(entry_mode);
+
    // --- XAC DINH TP VA SL THEO CHE DO ---
-   int tp_pips = InpMasterTPPips;  // Mac dinh Auto
    int sl_pips = 0;
    
    if(!InpEnableDCA)
@@ -187,17 +190,54 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       sl_pips = InpKhoangMoPip; // Use Step as SL in Single Trade Mode
    }
 
+   // --- PRE-INIT Trade Profile (needed for Dynamic TP calculation) ---
+   // We need to calculate entry price first for the profile
+   double entry_price = (signal == 1) ? SymbolInfoDouble(sym, SYMBOL_ASK)
+                                      : SymbolInfoDouble(sym, SYMBOL_BID);
+
+   // --- CALCULATE TP ---
+   double tp_pips_d = 0.0;
+   if(InpEnableDynamicTP)
+   {
+      // Pre-init profile for TP calculation
+      G_TradeProfile[idx].strategy_type = strategy_type;
+      G_TradeProfile[idx].direction = signal;
+      G_TradeProfile[idx].entry_price = entry_price;
+      G_TradeProfile[idx].is_valid = true;
+      tp_pips_d = CalculateNaturalTP(idx, signal, strategy_type);
+      if(tp_pips_d <= 0.0) tp_pips_d = (double)InpMasterTPPips; // Failsafe
+   }
+   else
+   {
+      tp_pips_d = (double)InpMasterTPPips;  // Fixed 60 pip fallback
+   }
+
    if(signal == 1)
    {
       double price = SymbolInfoDouble(sym, SYMBOL_ASK);
-      if(tp_pips > 0) tp = price + tp_pips * G_Pairs[idx].pip_value;
+      if(InpEnableDCA)
+      {
+         // DCA ON: Don't set TP on individual order — basket manages exit
+         tp = 0;
+      }
+      else
+      {
+         tp = price + tp_pips_d * G_Pairs[idx].pip_value;
+      }
       if(sl_pips > 0) sl = price - sl_pips * G_Pairs[idx].pip_value;
       res = trade.Buy(initial_lot, sym, price, sl, tp, comment);
    }
    else if(signal == -1)
    {
       double price = SymbolInfoDouble(sym, SYMBOL_BID);
-      if(tp_pips > 0) tp = price - tp_pips * G_Pairs[idx].pip_value;
+      if(InpEnableDCA)
+      {
+         tp = 0;
+      }
+      else
+      {
+         tp = price - tp_pips_d * G_Pairs[idx].pip_value;
+      }
       if(sl_pips > 0) sl = price + sl_pips * G_Pairs[idx].pip_value;
       res = trade.Sell(initial_lot, sym, price, sl, tp, comment);
    }
@@ -220,6 +260,12 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       G_Pairs[idx].setup_direction = 0;
       G_Pairs[idx].rev_status = "NO SETUP";
 
+      // --- INIT DYNAMIC EXIT TRADE PROFILE ---
+      if(InpEnableDynamicTP)
+      {
+         InitTradeProfile(idx, signal, strategy_type, entry_price);
+      }
+
       SaveChainState_Multi(idx);
 
       PrintFormat("[%s] >>> OPEN MASTER [%s]: %.2f lots (Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
@@ -227,9 +273,9 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
                   
       string mode_str = InpEnableDCA ? "DCA Mode" : "Single Trade";
       string dir_str = (signal == 1) ? "BUY" : "SELL";
-      PrintFormat("[ENTRY] %s %s\n[MODE] %s\n[ENTRY] Price: %.5f\n[SL] %d pips\n[TP] %d pips",
+      PrintFormat("[ENTRY] %s %s\n[MODE] %s\n[ENTRY] Price: %.5f\n[SL] %d pips\n[TP] %.1f pips (Dynamic=%s)",
                   (entry_mode == "TF" ? "Following Trend" : (entry_mode == "CT" ? "Counter Trend" : "Dual Trend")),
-                  dir_str, mode_str, (signal == 1 ? SymbolInfoDouble(sym, SYMBOL_ASK) : SymbolInfoDouble(sym, SYMBOL_BID)), sl_pips, tp_pips);
+                  dir_str, mode_str, entry_price, sl_pips, tp_pips_d, InpEnableDynamicTP ? "YES" : "NO");
    }
 }
 
@@ -476,15 +522,80 @@ void ManagePairs()
             LoadChainState_Multi(i, expected_chain_id);
          }
 
-         double working_balance = (G_Pairs[i].locked_balance > 0) ? G_Pairs[i].locked_balance : real_balance;
-         double base_tp_usd = CalculateAutoTP(sym, working_balance);
-         double total_target = base_tp_usd + G_Pairs[i].realized_bleed_loss;
-
-         if(pnl >= total_target)
+         // --- DYNAMIC EXIT ENGINE ---
+         if(InpEnableDynamicTP && G_TradeProfile[i].is_valid)
          {
-            PrintFormat("[%s] >>> TAKE PROFIT: $%.2f (Target $%.2f). Closing...", sym, pnl, total_target);
-            CloseAllInChain_Multi(i);
-            continue;
+            // Update Dynamic Exit state (compression, runner, basket avg)
+            UpdateDynamicExit(i);
+
+            int basket_dir = (m_type == POSITION_TYPE_BUY) ? 1 : -1;
+
+            if(InpEnableDCA)
+            {
+               // DCA ON: Use basket average entry for TP
+               double avg_entry = CalcBasketAverageEntry(i);
+               double basket_tp = GetBasketTPPrice(i, avg_entry, basket_dir);
+               double current_price = (basket_dir == 1) ? SymbolInfoDouble(sym, SYMBOL_BID)
+                                                       : SymbolInfoDouble(sym, SYMBOL_ASK);
+
+               // Check Runner exit
+               if(G_TradeProfile[i].runner_active && IsRunnerStopped(i))
+               {
+                  PrintFormat("[%s] >>> RUNNER EXIT: Trailing stop hit. Closing...", sym);
+                  CloseAllInChain_Multi(i);
+                  continue;
+               }
+
+               // Check basket TP hit
+               bool tp_hit = false;
+               if(basket_dir == 1 && current_price >= basket_tp) tp_hit = true;
+               if(basket_dir == -1 && current_price <= basket_tp) tp_hit = true;
+
+               if(tp_hit && !G_TradeProfile[i].runner_active)
+               {
+                  // Check if runner should activate instead of closing
+                  if(CheckRunnerConditions(i))
+                  {
+                     ActivateRunner(i);
+                     // Don't close, runner will manage exit
+                  }
+                  else
+                  {
+                     PrintFormat("[%s] >>> DYNAMIC TP HIT: AvgEntry=%.5f TP=%.5f Current=%.5f (%.1f pips). Closing...",
+                                 sym, avg_entry, basket_tp, current_price, G_TradeProfile[i].current_dynamic_tp);
+
+                     PrintFormat("[DCA] Step=%d pips | AvgEntry=%.5f | BasketTP=%.5f",
+                                 InpKhoangMoPip, avg_entry, basket_tp);
+
+                     CloseAllInChain_Multi(i);
+                     continue;
+                  }
+               }
+            }
+            else
+            {
+               // DCA OFF: TP is on the order itself, but also check runner
+               if(G_TradeProfile[i].runner_active && IsRunnerStopped(i))
+               {
+                  PrintFormat("[%s] >>> RUNNER EXIT (Single): Trailing stop hit. Closing...", sym);
+                  CloseAllInChain_Multi(i);
+                  continue;
+               }
+            }
+         }
+         else
+         {
+            // --- ORIGINAL LOGIC (fallback when Dynamic TP disabled) ---
+            double working_balance = (G_Pairs[i].locked_balance > 0) ? G_Pairs[i].locked_balance : real_balance;
+            double base_tp_usd = CalculateAutoTP(sym, working_balance);
+            double total_target = base_tp_usd + G_Pairs[i].realized_bleed_loss;
+
+            if(pnl >= total_target)
+            {
+               PrintFormat("[%s] >>> TAKE PROFIT: $%.2f (Target $%.2f). Closing...", sym, pnl, total_target);
+               CloseAllInChain_Multi(i);
+               continue;
+            }
          }
 
          ApplySmartTrimming(i);
