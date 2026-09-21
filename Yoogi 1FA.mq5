@@ -85,6 +85,21 @@ int OnInit()
    PrintFormat("TF_MOMENTUM_MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
    Print("ENTRY_REQUIRED_SCORE=100");
    PrintFormat("TF_MAX_EVENT_BARS=%d", TF_MAX_EVENT_BARS);
+   
+   if(InpEnableDCA)
+   {
+       Print("[DCA] Mode: ENABLED");
+       PrintFormat("[DCA] Step: %d pips", InpKhoangMoPip);
+   }
+   else
+   {
+       Print("[DCA] Mode: DISABLED");
+       Print("[DCA] Single Trade Mode");
+       PrintFormat("[DCA] Step %d pips is used as Stop Loss", InpKhoangMoPip);
+       PrintFormat("[DCA] TP = %d pips", InpMasterTPPips);
+       PrintFormat("[DCA] SL = %d pips", InpKhoangMoPip);
+   }
+   
    Print("==================================================\n");
 
    return(INIT_SUCCEEDED);

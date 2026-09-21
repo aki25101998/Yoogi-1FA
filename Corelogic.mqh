@@ -181,6 +181,11 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
    // --- XAC DINH TP VA SL THEO CHE DO ---
    int tp_pips = InpMasterTPPips;  // Mac dinh Auto
    int sl_pips = 0;
+   
+   if(!InpEnableDCA)
+   {
+      sl_pips = InpKhoangMoPip; // Use Step as SL in Single Trade Mode
+   }
 
    if(signal == 1)
    {
@@ -219,6 +224,12 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
       PrintFormat("[%s] >>> OPEN MASTER [%s]: %.2f lots (Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
                   sym, entry_mode, initial_lot, current_bal, lot_calculation_bal, new_chain_id);
+                  
+      string mode_str = InpEnableDCA ? "DCA Mode" : "Single Trade";
+      string dir_str = (signal == 1) ? "BUY" : "SELL";
+      PrintFormat("[ENTRY] %s %s\n[MODE] %s\n[ENTRY] Price: %.5f\n[SL] %d pips\n[TP] %d pips",
+                  (entry_mode == "TF" ? "Following Trend" : (entry_mode == "CT" ? "Counter Trend" : "Dual Trend")),
+                  dir_str, mode_str, (signal == 1 ? SymbolInfoDouble(sym, SYMBOL_ASK) : SymbolInfoDouble(sym, SYMBOL_BID)), sl_pips, tp_pips);
    }
 }
 
@@ -477,7 +488,10 @@ void ManagePairs()
          }
 
          ApplySmartTrimming(i);
-         ManageTrendDCA_Multi(i, count, m_type);
+         if(InpEnableDCA)
+         {
+            ManageTrendDCA_Multi(i, count, m_type);
+         }
       }
       else
       {
