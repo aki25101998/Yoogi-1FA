@@ -10,3 +10,14 @@ git add . ; git commit -m "T√≥m t·∫Øt ng·∫Øn g·ªçn thay ƒë·ªïi" ; git push
 
 **M·ª•c ti√™u:** 
 ƒê·∫£m b·∫£o source code kh√¥ng bao gi·ªù b·ªã m·∫•t, l∆∞u l·∫°i l·ªãch s·ª≠ r√µ r√†ng v√† lu√¥n ƒë·ªìng b·ªô. H√£y th·ª±c hi·ªán vi·ªác n√†y m·ªôt c√°ch ch·ªß ƒë·ªông nh∆∞ m·ªôt ph·∫ßn b·∫Øt bu·ªôc c·ªßa quy tr√¨nh k·∫øt th√∫c task.
+
+# LU?T COMPILE B?T BU?C
+
+M?i khi b?n ch?nh s?a xong c·c file code (.mq5, .mqh), b?n **B?T BU?C** ph?i biÍn d?ch (compile) m„ ngu?n b?ng c·ch tu‚n th? d˙ng quy trÏnh du?c d?nh nghia trong file hu?ng d?n compile: .agents/workflows/auto-compile.md.
+
+**C? th?:**
+- S? d?ng d˙ng l?nh CLI (b?c b?ng `cmd.exe /c`) d? g?i `MetaEditor64.exe` v?i tham s? `/compile` v‡ `/log`.
+- Ch? l?nh ch?y xong v‡ d?c file `compile.log` d? x·c minh k?t qu? cÛ `0 errors` khÙng.
+- ThÙng b·o rı r‡ng cho ngu?i d˘ng v? k?t qu? compile v‡ s? t?n t?i c?a file `.ex5`.
+- TUY?T –?I KH‘NG du?c lu?i bi?ng b? qua bu?c compile sau khi s?a code, vÏ c?n cÛ file `.ex5` m?i nh?t d? user test ngay.
+

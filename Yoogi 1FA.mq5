@@ -5,6 +5,7 @@
 //| (v12.3 - Yoogi One For All - Timer Optimized 3s - No Lag)        |
 //+------------------------------------------------------------------+
 #property version   "v33.0"
+#define YOOGI_BUILD_VERSION "TF_MOMENTUM_10BAR"
 #property description "💼 Chào mừng bạn đến với Yoogi One For All – Trade For Living\n\n"
 #property description "Thông tin cần biết cho lần đầu sử dụng:\n\n"
 #property description "1. Mở Tool > Options > Expert Advisors.\n\n"
@@ -70,6 +71,21 @@ int OnInit()
    Print("\n[DXY_TF_INIT]");
    Print("ENGINE=ACTIVE");
    Print("ENGINE_VERSION=TF_DXY_V2\n");
+
+   if(TF_MOMENTUM_MAX_BARS != 10)
+   {
+      Print("[FATAL] TF_MOMENTUM_MAX_BARS IS NOT 10");
+      return(INIT_FAILED);
+   }
+
+   Print("==================================================");
+   Print("[YOOGI_BUILD_DIAGNOSTIC]");
+   Print("==================================================");
+   PrintFormat("VERSION=%s", TF_ENGINE_VERSION);
+   PrintFormat("TF_MOMENTUM_MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
+   Print("ENTRY_REQUIRED_SCORE=100");
+   PrintFormat("TF_MAX_EVENT_BARS=%d", TF_MAX_EVENT_BARS);
+   Print("==================================================\n");
 
    return(INIT_SUCCEEDED);
 }

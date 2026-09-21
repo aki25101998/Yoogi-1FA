@@ -8,6 +8,8 @@
 //+------------------------------------------------------------------+
 #property strict
 
+const string TF_ENGINE_VERSION = "TF_MOMENTUM_10BAR";
+
 // ==================================================================
 // HELPER: TF State Diagnostic Logging
 // ==================================================================
@@ -1368,6 +1370,12 @@ double CalculateTFScore(int idx)
    double d_atr=0, max_d=0;
    bool dist_valid = ValidateTFEntryDistance(idx, G_TF[idx].h1_trend_direction, d_atr, max_d);
    G_TF[idx].score_entry_distance = dist_valid ? 10.0 : 0.0;
+   
+   if(CheckTFEventCoherence(idx)) {
+      G_TF[idx].score_event_coherence = 10.0;
+   } else {
+      G_TF[idx].score_event_coherence = 0.0;
+   }
 
    G_TF[idx].total_score = G_TF[idx].score_h1_trend
                          + G_TF[idx].score_m15_pullback
