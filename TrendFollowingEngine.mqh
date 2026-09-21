@@ -1105,7 +1105,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
             PrintFormat("MSS_TIME=%s", TimeToString(G_TF[idx].m5_mss_time));
             PrintFormat("CLOSED_M5_TIME=%s", TimeToString(closed_m5_time));
-            PrintFormat("BARS_SINCE_MSS=%d", bars_elapsed);
+            PrintFormat("BARS=%d/%d", bars_elapsed, TF_MOMENTUM_MAX_BARS);
             PrintFormat("MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
             PrintFormat("CCI_CONFIRMED=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
             PrintFormat("RF_CONFIRMED=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
@@ -1121,7 +1121,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          return;
       }
       
-      // Step 5: Within window (bars_elapsed 1..5) → evaluate Momentum confirmation on closed candle
+      // Step 5: Within window (bars_elapsed 1..10) → evaluate Momentum confirmation on closed candle
       EvaluateTFMomentumConfirmation(idx, trend_dir, G_TF[idx].m5_momentum_cci, G_TF[idx].m5_momentum_rf, G_TF[idx].m5_momentum_pc);
       
       // Step 6: Update momentum score
@@ -1147,7 +1147,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
       PrintFormat("MSS_TIME=%s", TimeToString(G_TF[idx].m5_mss_time));
       PrintFormat("CLOSED_M5_TIME=%s", TimeToString(closed_m5_time));
-      PrintFormat("BARS_SINCE_MSS=%d", bars_elapsed);
+      PrintFormat("BAR=%d/%d", bars_elapsed, TF_MOMENTUM_MAX_BARS);
       PrintFormat("CCI=%s", G_TF[idx].m5_momentum_cci ? "PASS" : "FAIL");
       PrintFormat("RF=%s", G_TF[idx].m5_momentum_rf ? "PASS" : "FAIL");
       PrintFormat("PRICE_CONTINUATION=%s", G_TF[idx].m5_momentum_pc ? "PASS" : "FAIL");
