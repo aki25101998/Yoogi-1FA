@@ -342,86 +342,18 @@ bool CheckDXYTrendFollowingConfirmation(int pair_idx, int pair_direction, string
    bool pass = true;
    string status_str = "PASS";
    
-   // --- H1 Check ---
-   if(!G_DXY_TF[dxy_idx].h1_structure_valid)
-   {
-      reason = "DXY_H1_STRUCTURE_INVALID"; pass = false;
-   }
-   else if(!G_DXY_TF[dxy_idx].h1_not_sideway)
-   {
-      reason = "DXY_H1_SIDEWAY"; pass = false;
-   }
-   else if(!G_DXY_TF[dxy_idx].h1_ema_aligned)
-   {
-      reason = "DXY_H1_EMA_NOT_ALIGNED"; pass = false;
-   }
-   else if(!G_DXY_TF[dxy_idx].h1_price_position_valid)
-   {
-      reason = "DXY_H1_PRICE_POSITION_INVALID"; pass = false;
-   }
-   else if(!G_DXY_TF[dxy_idx].h1_slope_valid)
-   {
-      reason = "DXY_H1_SLOPE_INVALID"; pass = false;
-   }
-   else if(G_DXY_TF[dxy_idx].h1_direction != expected_dxy_direction)
-   {
-      reason = "DXY_H1_DIRECTION_MISMATCH"; pass = false;
-   }
-   else if(G_DXY_TF[dxy_idx].h1_last_confirmed_time <= 0)
-   {
-      reason = "DXY_H1_NOT_INITIALIZED"; pass = false;
-   }
-   else if(!IsDXYH1Fresh(sym, G_DXY_TF[dxy_idx].h1_last_confirmed_time))
-   {
-      reason = "DXY_H1_STALE"; pass = false;
-   }
+   // DXY FILTER LOGIC:
+   // The constitution states: "Nếu DXY đồng pha (chống lại setup) -> Cấm lệnh (Block)."
+   // This means we only block if DXY is explicitly trending in the OPPOSITE direction of what we expect.
+   // We DO NOT require DXY to perfectly conform to the expected direction.
    
-   // --- M15 Check ---
-   else if(!G_DXY_TF[dxy_idx].m15_structure_valid)
+   if(G_DXY_TF[dxy_idx].h1_direction != 0 && G_DXY_TF[dxy_idx].h1_direction == -expected_dxy_direction)
    {
-      reason = "DXY_M15_STRUCTURE_INVALID"; pass = false;
+      reason = "DXY_H1_OPPOSING_TREND"; pass = false;
    }
-   else if(!G_DXY_TF[dxy_idx].m15_aligned)
+   else if(G_DXY_TF[dxy_idx].m15_direction != 0 && G_DXY_TF[dxy_idx].m15_direction == -expected_dxy_direction)
    {
-      reason = "DXY_M15_NOT_ALIGNED"; pass = false;
-   }
-   else if(G_DXY_TF[dxy_idx].m15_direction != expected_dxy_direction)
-   {
-      reason = "DXY_M15_DIRECTION_MISMATCH"; pass = false;
-   }
-   else if(G_DXY_TF[dxy_idx].m15_last_confirmed_time <= 0)
-   {
-      reason = "DXY_M15_NOT_INITIALIZED"; pass = false;
-   }
-   else if(!IsDXYM15Fresh(sym, G_DXY_TF[dxy_idx].m15_last_confirmed_time))
-   {
-      reason = "DXY_M15_STALE"; pass = false;
-   }
-   
-   // --- M5 Check ---
-   else if(!G_DXY_TF[dxy_idx].m5_structure_valid)
-   {
-      reason = "DXY_M5_PROTECTED_STRUCTURE_BROKEN"; pass = false;
-   }
-   else if(!G_DXY_TF[dxy_idx].m5_continuation)
-   {
-      reason = "DXY_M5_CONTINUATION_MISSING"; pass = false;
-   }
-   else if(!G_DXY_TF[dxy_idx].m5_momentum)
-   {
-      reason = "DXY_M5_MOMENTUM_MISSING"; pass = false;
-   }
-   else if(G_DXY_TF[dxy_idx].m5_direction != expected_dxy_direction)
-   {
-      reason = "DXY_M5_DIRECTION_MISMATCH"; pass = false;
-   }
-   else if(G_DXY_TF[dxy_idx].m5_last_confirmed_time <= 0)
-   {
-      reason = "DXY_M5_NOT_INITIALIZED"; pass = false;
-   }
-   else if(!IsDXYM5Fresh(sym, G_DXY_TF[dxy_idx].m5_last_confirmed_time))
-   {
-      reason = "DXY_M5_STALE"; pass = false;
+      reason = "DXY_M15_OPPOSING_TREND"; pass = false;
    }
    
    if(!pass) status_str = "FAIL";
