@@ -18,7 +18,7 @@ input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = d
 input group "=== ENTRY ENGINE ==="
 input bool InpEnableCounterTrend    = true;   // Counter-Trend Engine (ON/OFF)
 input bool InpEnableTrendFollowing  = true;   // Trend-Following Engine (ON/OFF)
-input bool InpEnableDCA             = true;   // Enable DCA = true / false
+
 input int  InpMaxDCAPerChain        = 3;      // Max DCA per chain (0 = no DCA)
 input int  InpDCA_MinStepPips       = 30;     // Min Dynamic Step (pips)
 input int  InpDCA_MaxStepPips       = 60;     // Max Dynamic Step (pips)

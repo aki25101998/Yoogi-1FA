@@ -279,10 +279,7 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
    // --- XAC DINH TP VA SL THEO CHE DO ---
    int sl_pips = 0;
    
-   if(!InpEnableDCA)
-   {
-      sl_pips = InpKhoangMoPip; // Use Step as SL in Single Trade Mode
-   }
+   // DCA Mode: SL is 0, TP is 0 on individual orders, managed by basket
 
    // --- PRE-INIT Trade Profile (needed for Dynamic TP calculation) ---
    // We need to calculate entry price first for the profile
@@ -309,29 +306,15 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
    if(signal == 1)
    {
       double price = SymbolInfoDouble(sym, SYMBOL_ASK);
-      if(InpEnableDCA)
-      {
-         // DCA ON: Don't set TP on individual order — basket manages exit
-         tp = 0;
-      }
-      else
-      {
-         tp = price + tp_pips_d * G_Pairs[idx].pip_value;
-      }
+      // DCA ON: Don't set TP on individual order — basket manages exit
+      tp = 0;
       if(sl_pips > 0) sl = price - sl_pips * G_Pairs[idx].pip_value;
       res = trade.Buy(initial_lot, sym, price, sl, tp, comment);
    }
    else if(signal == -1)
    {
       double price = SymbolInfoDouble(sym, SYMBOL_BID);
-      if(InpEnableDCA)
-      {
-         tp = 0;
-      }
-      else
-      {
-         tp = price - tp_pips_d * G_Pairs[idx].pip_value;
-      }
+      tp = 0;
       if(sl_pips > 0) sl = price + sl_pips * G_Pairs[idx].pip_value;
       res = trade.Sell(initial_lot, sym, price, sl, tp, comment);
    }
@@ -384,7 +367,7 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       PrintFormat("[%s] >>> OPEN MASTER [%s]: %.2f lots (Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
                   sym, entry_mode, initial_lot, current_bal, lot_calculation_bal, new_chain_id);
                   
-      string mode_str = InpEnableDCA ? "DCA Mode" : "Single Trade";
+      string mode_str = "DCA Mode (ALWAYS ON)";
       string dir_str = (signal == 1) ? "BUY" : "SELL";
       PrintFormat("[ENTRY] %s %s\n[MODE] %s\n[ENTRY] Price: %.5f\n[SL] %d pips\n[TP] %.1f pips (Dynamic=%s)",
                   (entry_mode == "TF" ? "Following Trend" : (entry_mode == "CT" ? "Counter Trend" : "Dual Trend")),
@@ -397,7 +380,7 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 // ==================================================================
 void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master_type)
 {
-   if(!InpEnableDCA) return;
+
    if(InpMaxDCAPerChain <= 0) return;
 
    string sym = G_Pairs[idx].symbol;
@@ -726,8 +709,6 @@ void ManagePairs()
 
             int basket_dir = (m_type == POSITION_TYPE_BUY) ? 1 : -1;
 
-            if(InpEnableDCA)
-            {
                // DCA ON: Use basket average entry for TP
                double avg_entry = CalcBasketAverageEntry(i);
                double basket_tp = GetBasketTPPrice(i, avg_entry, basket_dir);
@@ -767,17 +748,6 @@ void ManagePairs()
                      continue;
                   }
                }
-            }
-            else
-            {
-               // DCA OFF: TP is on the order itself, but also check runner
-               if(G_TradeProfile[i].runner_active && IsRunnerStopped(i))
-               {
-                  PrintFormat("[%s] >>> RUNNER EXIT (Single): Trailing stop hit. Closing...", sym);
-                  CloseAndResolveChain(i, "RUNNER");
-                  continue;
-               }
-            }
          }
          else
          {
@@ -795,10 +765,7 @@ void ManagePairs()
          }
 
          ApplySmartTrimming(i);
-         if(InpEnableDCA)
-         {
-            ManageTrendDCA_Multi(i, count, m_type);
-         }
+         ManageTrendDCA_Multi(i, count, m_type);
       }
       else
       {
