@@ -642,7 +642,13 @@ void ActivateRunner(int idx)
          }
       }
       
-      if(found_pos && !modify_success)
+      if(!found_pos)
+      {
+         PrintFormat("[RUNNER-ACTIVATION-ERROR] SYMBOL=%s Position not found. Runner activation aborted.", sym);
+         return;
+      }
+      
+      if(!modify_success)
       {
          return; // Abort runner activation if TP removal fails
       }
