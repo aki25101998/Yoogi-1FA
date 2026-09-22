@@ -211,7 +211,8 @@ struct PairContext
    // --- Persistence (Bộ nhớ) ---
    double   realized_bleed_loss; // Nợ tích lũy
    double   locked_balance;      // Balance dùng để tính lot (nếu cần)
-   int      virtual_step;        // Bước DCA hiện tại
+   int      chain_dca_count;     // Đếm số lệnh DCA trong chuỗi hiện tại
+   int      recovery_level;      // Cấp độ khôi phục tổng thể (không reset khi chuỗi đóng lỗ)
    ulong    active_chain_id;     // ID chuỗi đang chạy
 };
 
@@ -598,7 +599,8 @@ void InitGlobals()
       // Reset Persistence
       G_Pairs[i].realized_bleed_loss = 0.0;
       G_Pairs[i].locked_balance = 0.0;
-      G_Pairs[i].virtual_step = 0;
+      G_Pairs[i].chain_dca_count = 0;
+      G_Pairs[i].recovery_level = 0;
       G_Pairs[i].active_chain_id = 0;
 
       // Reset Trend-Following Context

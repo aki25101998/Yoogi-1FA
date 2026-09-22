@@ -81,23 +81,53 @@ void SaveChainState_Multi(int idx)
 
    if(id == 0) return;
 
-   GlobalVariableSet(GetVarName_Bleed(sym, id), G_Pairs[idx].realized_bleed_loss);
-   GlobalVariableSet(GetVarName_Step(sym, id),  (double)G_Pairs[idx].virtual_step);
+   // Persistent State
+   GlobalVariableSet("Yoogi_Debt_" + sym, G_Pairs[idx].realized_bleed_loss);
+   GlobalVariableSet("Yoogi_RecLvl_" + sym, (double)G_Pairs[idx].recovery_level);
+
+   // Chain Specific State
+   GlobalVariableSet(GetVarName_Step(sym, id),  (double)G_Pairs[idx].chain_dca_count);
    GlobalVariableSet(GetVarName_LockedBal(sym, id), G_Pairs[idx].locked_balance);
 }
 
 void LoadChainState_Multi(int idx, ulong chain_id)
 {
    string sym = G_Pairs[idx].symbol;
+   
+   // Load Persistent State
+   if(GlobalVariableCheck("Yoogi_Debt_" + sym)) 
+      G_Pairs[idx].realized_bleed_loss = GlobalVariableGet("Yoogi_Debt_" + sym);
+   else 
+      G_Pairs[idx].realized_bleed_loss = 0.0;
+      
+   if(GlobalVariableCheck("Yoogi_RecLvl_" + sym)) 
+      G_Pairs[idx].recovery_level = (int)GlobalVariableGet("Yoogi_RecLvl_" + sym);
+   else 
+      G_Pairs[idx].recovery_level = 0;
+
+   // Migrate old bleed if it exists
    string n_bleed = GetVarName_Bleed(sym, chain_id);
+   if(GlobalVariableCheck(n_bleed)) {
+       double old_bleed = GlobalVariableGet(n_bleed);
+       if(old_bleed > G_Pairs[idx].realized_bleed_loss) {
+           G_Pairs[idx].realized_bleed_loss = old_bleed;
+           GlobalVariableSet("Yoogi_Debt_" + sym, old_bleed);
+       }
+       GlobalVariableDel(n_bleed);
+   }
+
+   // Load Chain Specific State
    string n_step  = GetVarName_Step(sym, chain_id);
    string n_bal   = GetVarName_LockedBal(sym, chain_id);
 
-   if(GlobalVariableCheck(n_bleed)) G_Pairs[idx].realized_bleed_loss = GlobalVariableGet(n_bleed);
-   else                             G_Pairs[idx].realized_bleed_loss = 0.0;
+   if(GlobalVariableCheck(n_step))  G_Pairs[idx].chain_dca_count = (int)GlobalVariableGet(n_step);
+   else                             G_Pairs[idx].chain_dca_count = 0;
 
-   if(GlobalVariableCheck(n_step))  G_Pairs[idx].virtual_step = (int)GlobalVariableGet(n_step);
-   else                             G_Pairs[idx].virtual_step = 0;
+   // Infer recovery_level from chain_dca_count if missing or lower (for active chains during update)
+   if(G_Pairs[idx].recovery_level < G_Pairs[idx].chain_dca_count) {
+       G_Pairs[idx].recovery_level = G_Pairs[idx].chain_dca_count;
+       GlobalVariableSet("Yoogi_RecLvl_" + sym, (double)G_Pairs[idx].recovery_level);
+   }
 
    if(GlobalVariableCheck(n_bal))   G_Pairs[idx].locked_balance = GlobalVariableGet(n_bal);
    else                             G_Pairs[idx].locked_balance = 0.0;
@@ -110,22 +140,38 @@ void ClearChainState_Multi(int idx)
 
    if(id == 0) return;
 
-   GlobalVariableDel(GetVarName_Bleed(sym, id));
+   // Only delete chain specific state
    GlobalVariableDel(GetVarName_Step(sym, id));
    GlobalVariableDel(GetVarName_LockedBal(sym, id));
 
-   // Reset memory
-   G_Pairs[idx].realized_bleed_loss = 0.0;
-   G_Pairs[idx].virtual_step = 0;
+   // Reset chain specific memory
+   G_Pairs[idx].chain_dca_count = 0;
    G_Pairs[idx].locked_balance = 0.0;
    G_Pairs[idx].active_chain_id = 0;
 }
 
-void CloseAllInChain_Multi(int idx)
+void CloseAndResolveChain(int idx, string reason)
 {
    string sym = G_Pairs[idx].symbol;
    ulong  id  = G_Pairs[idx].active_chain_id;
+   
+   if(id == 0) return;
 
+   // 1. Calculate PnL of this chain
+   double pnl = 0.0;
+   for (int i = PositionsTotal() - 1; i >= 0; --i)
+   {
+      ulong t = PositionGetTicket(i);
+      if (t > 0 && PositionSelectByTicket(t))
+      {
+         if(PositionGetString(POSITION_SYMBOL) == sym && (ulong)PositionGetInteger(POSITION_MAGIC) == id)
+         {
+            pnl += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) + PositionGetDouble(POSITION_COMMISSION);
+         }
+      }
+   }
+
+   // 2. Close all positions
    for (int i = PositionsTotal() - 1; i >= 0; --i)
    {
       ulong t = PositionGetTicket(i);
@@ -137,7 +183,43 @@ void CloseAllInChain_Multi(int idx)
          }
       }
    }
+   
+   double debt_before = G_Pairs[idx].realized_bleed_loss;
+
+   // 3. Update Debt and Recovery Level
+   if (reason == "MAX_DCA")
+   {
+       double net_loss = (pnl < 0) ? MathAbs(pnl) : -pnl; 
+       G_Pairs[idx].realized_bleed_loss += net_loss;
+       if(G_Pairs[idx].realized_bleed_loss < 0) G_Pairs[idx].realized_bleed_loss = 0;
+       
+       G_Pairs[idx].recovery_level++; // Increment for next chain
+       
+       PrintFormat("[ RECOVERY-DEBT ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nNEXT_RECOVERY_LEVEL=%d",
+                   sym, pnl, debt_before, net_loss, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level + 1);
+   }
+   else
+   {
+       // Normal TP or Runner Exit
+       G_Pairs[idx].realized_bleed_loss -= pnl;
+       
+       if (G_Pairs[idx].realized_bleed_loss <= 0)
+       {
+           G_Pairs[idx].realized_bleed_loss = 0.0;
+           G_Pairs[idx].recovery_level = 0; // Reset to Level 1
+           PrintFormat("[ RECOVERY-COMPLETE ]\nSYMBOL=%s\nDEBT=0\nRECOVERY_LEVEL_RESET=1", sym);
+       }
+       else
+       {
+           // Partially recovered
+           PrintFormat("[ RECOVERY-PARTIAL ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_REDUCED_TO=%.2f\nREMAINING_RECOVERY_LEVEL=%d",
+                       sym, pnl, debt_before, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level + 1);
+       }
+   }
+
+   // 4. Save persistent state & clear chain state
    ResetTradeProfile(idx);
+   SaveChainState_Multi(idx);
    ClearChainState_Multi(idx);
 }
 
@@ -174,7 +256,8 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
    }
 
    // Gọi hàm tính Lot từ Globals (Đã gán cứng Risk%)
-   double initial_lot = CalculateAutoLot(idx, lot_calculation_bal);
+   double base_lot = CalculateAutoLot(idx, lot_calculation_bal);
+   double initial_lot = NormalizeLot(sym, base_lot * MathPow(InpHeSoLot, G_Pairs[idx].recovery_level));
 
    // --- [QUAN TRỌNG] NẾU LOT = 0 (DO RISK = 0%), DỮNG NGAY ---
    if(initial_lot <= 0.0) return;
@@ -248,8 +331,16 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
       // Cập nhật trạng thái Global cho cặp này
       G_Pairs[idx].active_chain_id = new_chain_id;
-      G_Pairs[idx].virtual_step    = 0;
-      G_Pairs[idx].realized_bleed_loss = 0.0;
+      G_Pairs[idx].chain_dca_count = 0;
+
+      // Lưu Balance lấy tính Lot làm mốc để DCA sau này
+      G_Pairs[idx].locked_balance = lot_calculation_bal;
+
+      if(G_Pairs[idx].recovery_level > 0)
+      {
+         PrintFormat("[ RECOVERY-ENTRY ]\nSYMBOL=%s\nRECOVERY_LEVEL=%d\nDEBT=%.2f\nLOT=%.2f",
+                     sym, G_Pairs[idx].recovery_level + 1, G_Pairs[idx].realized_bleed_loss, initial_lot);
+      }
 
       // Lưu Balance lấy tính Lot làm mốc để DCA sau này
       G_Pairs[idx].locked_balance = lot_calculation_bal;
@@ -308,7 +399,14 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
    if(enough)
    {
-      int next_step_index = G_Pairs[idx].virtual_step + 1;
+      if(G_Pairs[idx].chain_dca_count >= InpMaxDCAPerChain)
+      {
+         PrintFormat("[ DCA-LIMIT ]\nSYMBOL=%s\nCHAIN_DCA_COUNT=%d\nMAX_DCA=%d\nACTION=CLOSE_CHAIN", sym, G_Pairs[idx].chain_dca_count, InpMaxDCAPerChain);
+         CloseAndResolveChain(idx, "MAX_DCA");
+         return;
+      }
+
+      int next_step_index = G_Pairs[idx].chain_dca_count + 1;
 
       // 3. Tính Lot (Dùng Locked Balance hoặc Fallback về Actual Balance)
       double working_balance = (G_Pairs[idx].locked_balance > 0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
@@ -320,7 +418,7 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
       double base_lot = CalculateAutoLot(idx, working_balance);
 
-      double calculated_lot = base_lot * MathPow(InpHeSoLot, next_step_index);
+      double calculated_lot = base_lot * MathPow(InpHeSoLot, G_Pairs[idx].recovery_level + 1);
       double new_lot = NormalizeLot(sym, calculated_lot);
 
       // 4. Mở lệnh
@@ -329,10 +427,11 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
       if(res)
       {
-         G_Pairs[idx].virtual_step = next_step_index;
+         G_Pairs[idx].chain_dca_count++;
+         G_Pairs[idx].recovery_level++;
          SaveChainState_Multi(idx);
 
-         PrintFormat("[%s] >>> DCA Step %d: %.2f lots. Ref Bal: $%.2f", sym, next_step_index, new_lot, working_balance);
+         PrintFormat("[%s] >>> DCA Step %d (RecLvl %d): %.2f lots. Ref Bal: $%.2f", sym, next_step_index, G_Pairs[idx].recovery_level, new_lot, working_balance);
 
          ApplySmartTrimming(idx);
       }
@@ -542,7 +641,7 @@ void ManagePairs()
                if(G_TradeProfile[i].runner_active && IsRunnerStopped(i))
                {
                   PrintFormat("[%s] >>> RUNNER EXIT: Trailing stop hit. Closing...", sym);
-                  CloseAllInChain_Multi(i);
+                  CloseAndResolveChain(i, "RUNNER");
                   continue;
                }
 
@@ -567,7 +666,7 @@ void ManagePairs()
                      PrintFormat("[DCA] Step=%d pips | AvgEntry=%.5f | BasketTP=%.5f",
                                  InpKhoangMoPip, avg_entry, basket_tp);
 
-                     CloseAllInChain_Multi(i);
+                     CloseAndResolveChain(i, "TP");
                      continue;
                   }
                }
@@ -578,7 +677,7 @@ void ManagePairs()
                if(G_TradeProfile[i].runner_active && IsRunnerStopped(i))
                {
                   PrintFormat("[%s] >>> RUNNER EXIT (Single): Trailing stop hit. Closing...", sym);
-                  CloseAllInChain_Multi(i);
+                  CloseAndResolveChain(i, "RUNNER");
                   continue;
                }
             }
@@ -593,7 +692,7 @@ void ManagePairs()
             if(pnl >= total_target)
             {
                PrintFormat("[%s] >>> TAKE PROFIT: $%.2f (Target $%.2f). Closing...", sym, pnl, total_target);
-               CloseAllInChain_Multi(i);
+               CloseAndResolveChain(i, "TP");
                continue;
             }
          }

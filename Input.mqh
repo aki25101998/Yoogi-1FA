@@ -19,6 +19,7 @@ input group "=== ENTRY ENGINE ==="
 input bool InpEnableCounterTrend    = true;   // Counter-Trend Engine (ON/OFF)
 input bool InpEnableTrendFollowing  = true;   // Trend-Following Engine (ON/OFF)
 input bool InpEnableDCA             = true;   // Enable DCA = true / false
+input int  InpMaxDCAPerChain        = 3;      // Max DCA per chain (0 = no DCA)
 
 input group "=== DYNAMIC EXIT ENGINE ==="
 input bool   InpEnableDynamicTP          = true;   // Dynamic TP (false = fixed 60 pip)
