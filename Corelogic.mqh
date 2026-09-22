@@ -397,6 +397,9 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 // ==================================================================
 void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master_type)
 {
+   if(!InpEnableDCA) return;
+   if(InpMaxDCAPerChain <= 0) return;
+
    string sym = G_Pairs[idx].symbol;
    ulong  id  = G_Pairs[idx].active_chain_id;
 
@@ -534,6 +537,75 @@ int CheckDXYConvergence_Dual(int idx)
       G_DXY_TrapSignal_LTF[di] = 0;
       return 0;
    }
+}
+
+// ==================================================================
+// HELPER: EXACTLY-ONCE DCA OFF / BROKER CLOSE RESOLUTION
+// ==================================================================
+bool ResolveClosedChainFromHistory(int idx, ulong chain_id)
+{
+   if(chain_id == 0) return false;
+   string sym = G_Pairs[idx].symbol;
+   
+   string gv_name = "Yoogi_LastDeal_" + sym;
+   ulong last_processed_ticket = 0;
+   if(GlobalVariableCheck(gv_name))
+   {
+       last_processed_ticket = (ulong)GlobalVariableGet(gv_name);
+   }
+
+   datetime from_date = TimeCurrent() - 30 * 24 * 60 * 60;
+   if(!HistorySelect(from_date, TimeCurrent() + 86400)) return false;
+
+   int deals = HistoryDealsTotal();
+   double realized_pnl = 0.0;
+   int close_deals_found = 0;
+   ulong max_ticket_found = last_processed_ticket;
+
+   for(int d = 0; d < deals; d++)
+   {
+      ulong ticket = HistoryDealGetTicket(d);
+      if(ticket > 0 && ticket > last_processed_ticket)
+      {
+         if(HistoryDealGetString(ticket, DEAL_SYMBOL) == sym && 
+            HistoryDealGetInteger(ticket, DEAL_MAGIC) == chain_id)
+         {
+            long deal_entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+            if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_INOUT || deal_entry == DEAL_ENTRY_OUT_BY)
+            {
+               realized_pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT) + 
+                               HistoryDealGetDouble(ticket, DEAL_COMMISSION) + 
+                               HistoryDealGetDouble(ticket, DEAL_SWAP);
+               close_deals_found++;
+            }
+            if(ticket > max_ticket_found) max_ticket_found = ticket;
+         }
+      }
+   }
+
+   if(close_deals_found == 0) return false;
+
+   double debt_before = G_Pairs[idx].realized_bleed_loss;
+   
+   // Apply normal SL / TP semantics
+   G_Pairs[idx].realized_bleed_loss -= realized_pnl;
+
+   if(G_Pairs[idx].realized_bleed_loss <= 0)
+   {
+       G_Pairs[idx].realized_bleed_loss = 0.0;
+       G_Pairs[idx].recovery_level = 0;
+       PrintFormat("[ DCA-OFF-RESOLVE-COMPLETE ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT=0\nRECOVERY_LEVEL_RESET=0", sym, realized_pnl);
+   }
+   else
+   {
+       PrintFormat("[ DCA-OFF-RESOLVE-PARTIAL ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f\nREMAINING_RECOVERY_LEVEL=%d",
+                   sym, realized_pnl, debt_before, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level);
+   }
+   
+   GlobalVariableSet(gv_name, (double)max_ticket_found);
+   SaveChainState_Multi(idx);
+   
+   return true;
 }
 
 // ==================================================================
@@ -730,7 +802,13 @@ void ManagePairs()
       }
       else
       {
-         if(G_Pairs[i].active_chain_id != 0) ClearChainState_Multi(i);
+         if(G_Pairs[i].active_chain_id != 0)
+         {
+             if(ResolveClosedChainFromHistory(i, G_Pairs[i].active_chain_id))
+             {
+                 ClearChainState_Multi(i);
+             }
+         }
 
          // === DUAL ENTRY ENGINE — SIGNAL MANAGER ===
          if(InpAutoSignalTrading && allow_new_entry && G_Pairs[i].enabled)
