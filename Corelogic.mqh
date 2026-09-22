@@ -87,6 +87,7 @@ void SaveChainState_Multi(int idx)
 
    // Chain Specific State
    GlobalVariableSet(GetVarName_Step(sym, id),  (double)G_Pairs[idx].chain_dca_count);
+   GlobalVariableSet("Yoogi_DCAStep_" + sym + "_" + IntegerToString(id), (double)G_Pairs[idx].chain_step_pips);
    GlobalVariableSet(GetVarName_LockedBal(sym, id), G_Pairs[idx].locked_balance);
 }
 
@@ -119,9 +120,13 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    // Load Chain Specific State
    string n_step  = GetVarName_Step(sym, chain_id);
    string n_bal   = GetVarName_LockedBal(sym, chain_id);
+   string n_dca_step = "Yoogi_DCAStep_" + sym + "_" + IntegerToString(chain_id);
 
    if(GlobalVariableCheck(n_step))  G_Pairs[idx].chain_dca_count = (int)GlobalVariableGet(n_step);
    else                             G_Pairs[idx].chain_dca_count = 0;
+
+   if(GlobalVariableCheck(n_dca_step)) G_Pairs[idx].chain_step_pips = (int)GlobalVariableGet(n_dca_step);
+   else                                G_Pairs[idx].chain_step_pips = InpDCA_MinStepPips;
 
    // Infer recovery_level from chain_dca_count if missing or lower (for active chains during update)
    if(G_Pairs[idx].recovery_level < G_Pairs[idx].chain_dca_count) {
@@ -142,10 +147,12 @@ void ClearChainState_Multi(int idx)
 
    // Only delete chain specific state
    GlobalVariableDel(GetVarName_Step(sym, id));
+   GlobalVariableDel("Yoogi_DCAStep_" + sym + "_" + IntegerToString(id));
    GlobalVariableDel(GetVarName_LockedBal(sym, id));
 
    // Reset chain specific memory
    G_Pairs[idx].chain_dca_count = 0;
+   G_Pairs[idx].chain_step_pips = 0;
    G_Pairs[idx].locked_balance = 0.0;
    G_Pairs[idx].active_chain_id = 0;
 }
@@ -189,14 +196,16 @@ void CloseAndResolveChain(int idx, string reason)
    // 3. Update Debt and Recovery Level
    if (reason == "MAX_DCA")
    {
-       double net_loss = (pnl < 0) ? MathAbs(pnl) : -pnl; 
-       G_Pairs[idx].realized_bleed_loss += net_loss;
-       if(G_Pairs[idx].realized_bleed_loss < 0) G_Pairs[idx].realized_bleed_loss = 0;
+       double net_loss = 0.0;
+       if(pnl < 0) {
+           net_loss = MathAbs(pnl);
+           G_Pairs[idx].realized_bleed_loss += net_loss;
+       }
        
        G_Pairs[idx].recovery_level++; // Increment for next chain
        
        PrintFormat("[ RECOVERY-DEBT ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nNEXT_RECOVERY_LEVEL=%d",
-                   sym, pnl, debt_before, net_loss, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level + 1);
+                   sym, pnl, debt_before, net_loss, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level);
    }
    else
    {
@@ -211,9 +220,9 @@ void CloseAndResolveChain(int idx, string reason)
        }
        else
        {
-           // Partially recovered
+            // Partially recovered
            PrintFormat("[ RECOVERY-PARTIAL ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_REDUCED_TO=%.2f\nREMAINING_RECOVERY_LEVEL=%d",
-                       sym, pnl, debt_before, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level + 1);
+                       sym, pnl, debt_before, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level);
        }
    }
 
@@ -329,21 +338,32 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
    {
       lastOpenTime = TimeCurrent();
 
+      // Tính toán Dynamic Step
+      double atr_val = CalculateATR_Generic(sym, PERIOD_M15, 14, 1);
+      int dyn_step = InpDCA_MinStepPips;
+      if (atr_val > 0) {
+          double atr_pips = atr_val / G_Pairs[idx].pip_value;
+          dyn_step = (int)MathRound(atr_pips * InpDCA_Step_ATRMultiplier);
+          if(dyn_step < InpDCA_MinStepPips) dyn_step = InpDCA_MinStepPips;
+          if(dyn_step > InpDCA_MaxStepPips) dyn_step = InpDCA_MaxStepPips;
+      }
+
       // Cập nhật trạng thái Global cho cặp này
       G_Pairs[idx].active_chain_id = new_chain_id;
       G_Pairs[idx].chain_dca_count = 0;
+      G_Pairs[idx].chain_step_pips = dyn_step;
 
       // Lưu Balance lấy tính Lot làm mốc để DCA sau này
       G_Pairs[idx].locked_balance = lot_calculation_bal;
+
+      PrintFormat("[DCA-CHAIN-START]\nSYMBOL=%s\nRECOVERY_LEVEL=%d\nDYNAMIC_STEP=%d\nATR_M15=%.5f\nMAX_DCA=%d",
+                  sym, G_Pairs[idx].recovery_level, dyn_step, atr_val, InpMaxDCAPerChain);
 
       if(G_Pairs[idx].recovery_level > 0)
       {
-         PrintFormat("[ RECOVERY-ENTRY ]\nSYMBOL=%s\nRECOVERY_LEVEL=%d\nDEBT=%.2f\nLOT=%.2f",
-                     sym, G_Pairs[idx].recovery_level + 1, G_Pairs[idx].realized_bleed_loss, initial_lot);
+         PrintFormat("[ RECOVERY-ENTRY ]\nSYMBOL=%s\nRECOVERY_LEVEL=%d\nDEBT=%.2f\nLOT=%.2f\nSTEP=%d",
+                     sym, G_Pairs[idx].recovery_level, G_Pairs[idx].realized_bleed_loss, initial_lot, dyn_step);
       }
-
-      // Lưu Balance lấy tính Lot làm mốc để DCA sau này
-      G_Pairs[idx].locked_balance = lot_calculation_bal;
 
       // Reset Reversal Engine sau khi vào lệnh thành công
       G_Pairs[idx].htf_trap_signal = 0;
@@ -388,8 +408,9 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
       return;
    }
 
-   // 2. Logic Khoảng cách (Auto dung mac dinh)
-   int step_pips = InpKhoangMoPip; // Mac dinh Auto = 30
+   // 2. Logic Khoảng cách
+   int step_pips = G_Pairs[idx].chain_step_pips;
+   if(step_pips <= 0) step_pips = InpDCA_MinStepPips; // Fallback an toàn
    double step = step_pips * G_Pairs[idx].pip_value;
    double current_price = (master_type==POSITION_TYPE_BUY) ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK);
 
@@ -406,7 +427,8 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
          return;
       }
 
-      int next_step_index = G_Pairs[idx].chain_dca_count + 1;
+      int current_dca = G_Pairs[idx].chain_dca_count + 1;
+      int current_rec_lvl = G_Pairs[idx].recovery_level + 1;
 
       // 3. Tính Lot (Dùng Locked Balance hoặc Fallback về Actual Balance)
       double working_balance = (G_Pairs[idx].locked_balance > 0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
@@ -418,20 +440,21 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
       double base_lot = CalculateAutoLot(idx, working_balance);
 
-      double calculated_lot = base_lot * MathPow(InpHeSoLot, G_Pairs[idx].recovery_level + 1);
+      double calculated_lot = base_lot * MathPow(InpHeSoLot, current_rec_lvl);
       double new_lot = NormalizeLot(sym, calculated_lot);
 
       // 4. Mở lệnh
-      string cmt = "DCA Step " + IntegerToString(next_step_index);
+      string cmt = "DCA Step " + IntegerToString(current_dca);
       bool res = OpenChildOrder_Multi(idx, master_type, new_lot, cmt);
 
       if(res)
       {
-         G_Pairs[idx].chain_dca_count++;
-         G_Pairs[idx].recovery_level++;
+         G_Pairs[idx].chain_dca_count = current_dca;
+         G_Pairs[idx].recovery_level = current_rec_lvl;
          SaveChainState_Multi(idx);
 
-         PrintFormat("[%s] >>> DCA Step %d (RecLvl %d): %.2f lots. Ref Bal: $%.2f", sym, next_step_index, G_Pairs[idx].recovery_level, new_lot, working_balance);
+         PrintFormat("[DCA-ENTRY]\nSYMBOL=%s\nDCA_COUNT=%d\nRECOVERY_LEVEL=%d\nSTEP=%d\nLOT=%.2f", 
+                     sym, current_dca, current_rec_lvl, step_pips, new_lot);
 
          ApplySmartTrimming(idx);
       }

@@ -20,6 +20,9 @@ input bool InpEnableCounterTrend    = true;   // Counter-Trend Engine (ON/OFF)
 input bool InpEnableTrendFollowing  = true;   // Trend-Following Engine (ON/OFF)
 input bool InpEnableDCA             = true;   // Enable DCA = true / false
 input int  InpMaxDCAPerChain        = 3;      // Max DCA per chain (0 = no DCA)
+input int  InpDCA_MinStepPips       = 30;     // Min Dynamic Step (pips)
+input int  InpDCA_MaxStepPips       = 60;     // Max Dynamic Step (pips)
+input double InpDCA_Step_ATRMultiplier = 1.0; // ATR Multiplier cho Dynamic Step
 
 input group "=== DYNAMIC EXIT ENGINE ==="
 input bool   InpEnableDynamicTP          = true;   // Dynamic TP (false = fixed 60 pip)
