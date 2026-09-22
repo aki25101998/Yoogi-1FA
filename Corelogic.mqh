@@ -129,10 +129,7 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    else                                G_Pairs[idx].chain_step_pips = InpDCA_MinStepPips;
 
    // Infer recovery_level from chain_dca_count if missing or lower (for active chains during update)
-   if(G_Pairs[idx].recovery_level < G_Pairs[idx].chain_dca_count) {
-       G_Pairs[idx].recovery_level = G_Pairs[idx].chain_dca_count;
-       GlobalVariableSet("Yoogi_RecLvl_" + sym, (double)G_Pairs[idx].recovery_level);
-   }
+   // REMOVED: recovery_level must not be inferred from chain_dca_count. They are independent.
 
    if(GlobalVariableCheck(n_bal))   G_Pairs[idx].locked_balance = GlobalVariableGet(n_bal);
    else                             G_Pairs[idx].locked_balance = 0.0;
@@ -200,12 +197,17 @@ void CloseAndResolveChain(int idx, string reason)
        if(pnl < 0) {
            net_loss = MathAbs(pnl);
            G_Pairs[idx].realized_bleed_loss += net_loss;
+           
+           G_Pairs[idx].recovery_level++; // ONLY IF LOSS
+           
+           PrintFormat("[ RECOVERY-DEBT ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nNEXT_RECOVERY_LEVEL=%d",
+                       sym, pnl, debt_before, net_loss, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level);
        }
-       
-       G_Pairs[idx].recovery_level++; // Increment for next chain
-       
-       PrintFormat("[ RECOVERY-DEBT ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nNEXT_RECOVERY_LEVEL=%d",
-                   sym, pnl, debt_before, net_loss, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level);
+       else
+       {
+           PrintFormat("[ RECOVERY-MAX-DCA-NO-DEBT ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=0\nDEBT_AFTER=%.2f\nRECOVERY_LEVEL_UNCHANGED=%d",
+                       sym, pnl, debt_before, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level);
+       }
    }
    else
    {
