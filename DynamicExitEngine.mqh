@@ -322,15 +322,12 @@ double CalculateNaturalTP(int idx, int direction, int strategy_type)
 // ==================================================================
 // INIT TRADE PROFILE — Called when a new trade is opened
 // ==================================================================
-void InitTradeProfile(int idx, int direction, int strategy_type, double entry_price)
+void InitTradeProfile(int idx, int direction, int strategy_type, double entry_price, double natural_tp)
 {
    G_TradeProfile[idx].strategy_type = strategy_type;
    G_TradeProfile[idx].direction = direction;
    G_TradeProfile[idx].entry_price = entry_price;
    G_TradeProfile[idx].initial_atr = CalculateATR_Generic(G_Pairs[idx].symbol, PERIOD_M15, InpReversal_ATR_Period, 1);
-
-   // Calculate initial Dynamic TP
-   double natural_tp = CalculateNaturalTP(idx, direction, strategy_type);
 
    G_TradeProfile[idx].initial_dynamic_tp = natural_tp;
    G_TradeProfile[idx].current_dynamic_tp = natural_tp;
@@ -473,29 +470,86 @@ bool TryTPCompression(int idx)
    // --- Clamp ---
    if(new_tp < InpDynamicTP_MinPips) new_tp = (double)InpDynamicTP_MinPips;
 
-   // --- Apply Compression ---
    double old_tp = current_tp;
+   double new_tp_price = 0.0;
+   if(direction == 1)
+      new_tp_price = entry + PipsToPrice(idx, new_tp);
+   else
+      new_tp_price = entry - PipsToPrice(idx, new_tp);
+
+   // --- DCA OFF: Synchronize TP with broker ---
+   double current_sl_price = 0.0;
+   if(!InpEnableDCA)
+   {
+      ulong chain_id = G_Pairs[idx].active_chain_id;
+      bool modify_success = true;
+      bool found_pos = false;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+      {
+         ulong t = PositionGetTicket(i);
+         if(t > 0 && PositionSelectByTicket(t))
+         {
+            if(PositionGetString(POSITION_SYMBOL) == sym && (ulong)PositionGetInteger(POSITION_MAGIC) == chain_id)
+            {
+               found_pos = true;
+               current_sl_price = PositionGetDouble(POSITION_SL);
+               
+               // Failsafe: check distance from current price
+               double current_price_for_check = (direction == 1) ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK);
+               double stop_level = SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL) * SymbolInfoDouble(sym, SYMBOL_POINT);
+               
+               bool valid_tp = true;
+               if(direction == 1 && new_tp_price <= current_price_for_check + stop_level) valid_tp = false;
+               if(direction == -1 && new_tp_price >= current_price_for_check - stop_level) valid_tp = false;
+               
+               if(valid_tp)
+               {
+                  if(!trade.PositionModify(t, current_sl_price, new_tp_price))
+                  {
+                     modify_success = false;
+                     PrintFormat("[DYNAMIC-TP-COMPRESSION-ERROR]\nSYMBOL=%s\nMode=DCA_OFF\nOldTP=%.1f\nRequestedTP=%.1f\nBrokerModify=FAILED\nRetcode=%d\nReason=%s", 
+                                 sym, old_tp, new_tp, trade.ResultRetcode(), reason);
+                  }
+               }
+               else
+               {
+                  PrintFormat("[DYNAMIC-TP-COMPRESSION-SKIP]\nReason=BROKER_STOP_LEVEL");
+                  modify_success = false;
+               }
+               break; // Assuming 1 position for DCA OFF
+            }
+         }
+      }
+      
+      if(found_pos && !modify_success)
+      {
+         return false; // Stop internal update, return false
+      }
+   }
+
+   // --- Apply Compression (Update Internal State) ---
    G_TradeProfile[idx].current_dynamic_tp = new_tp;
    G_TradeProfile[idx].compression_active = true;
    G_TradeProfile[idx].last_compression_tp = new_tp;
    G_TradeProfile[idx].last_update_time = TimeCurrent();
    G_TradeProfile[idx].momentum_state = new_mom_state;
-
-   // Update absolute TP price
-   if(direction == 1)
-      G_TradeProfile[idx].tp_price = entry + PipsToPrice(idx, new_tp);
-   else
-      G_TradeProfile[idx].tp_price = entry - PipsToPrice(idx, new_tp);
+   G_TradeProfile[idx].tp_price = new_tp_price;
 
    // --- LOG ---
-   Print("\n[DYNAMIC-TP-UPDATE]");
-   PrintFormat("SYMBOL=%s", sym);
-   PrintFormat("Strategy=%s", (G_TradeProfile[idx].strategy_type == STRATEGY_CT) ? "CT" : "FT");
-   PrintFormat("OldTP=%.1f pips", old_tp);
-   PrintFormat("NewTP=%.1f pips", new_tp);
-   PrintFormat("Reason=%s", reason);
-   PrintFormat("InitialTP=%.1f pips", G_TradeProfile[idx].initial_dynamic_tp);
-   PrintFormat("Profit=%.1f pips", profit_pips);
+   if(!InpEnableDCA)
+   {
+      double sl_pips = (current_sl_price > 0.0) ? PriceToPips(idx, MathAbs(entry - current_sl_price)) : 0.0;
+      PrintFormat("\n[DYNAMIC-TP-COMPRESSION]\nSYMBOL=%s\nMode=DCA_OFF\nDirection=%s\nOldTP=%.1f pips\nNewTP=%.1f pips\nOldTPPrice=%.5f\nNewTPPrice=%.5f\nSLPrice=%.5f\nReason=%s\nBrokerModify=SUCCESS",
+                  sym, (direction == 1) ? "BUY" : "SELL", old_tp, new_tp,
+                  (direction == 1) ? entry + PipsToPrice(idx, old_tp) : entry - PipsToPrice(idx, old_tp),
+                  new_tp_price, current_sl_price, reason);
+   }
+   else
+   {
+      PrintFormat("\n[DYNAMIC-TP-UPDATE]\nSYMBOL=%s\nStrategy=%s\nMode=BASKET\nOldTP=%.1f\nNewTP=%.1f\nAverageEntry=%.5f\nBasketTP=%.5f\nReason=%s",
+                  sym, (G_TradeProfile[idx].strategy_type == STRATEGY_CT) ? "CT" : "FT",
+                  old_tp, new_tp, G_TradeProfile[idx].entry_price, G_TradeProfile[idx].tp_price, reason);
+   }
 
    return true;
 }
@@ -560,22 +614,64 @@ void ActivateRunner(int idx)
                                            : SymbolInfoDouble(sym, SYMBOL_ASK);
 
    // Set initial trailing stop using ATR
+   double initial_sl = 0.0;
+   
+   if(!InpEnableDCA)
+   {
+      ulong chain_id = G_Pairs[idx].active_chain_id;
+      bool modify_success = true;
+      bool found_pos = false;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+      {
+         ulong t = PositionGetTicket(i);
+         if(t > 0 && PositionSelectByTicket(t))
+         {
+            if(PositionGetString(POSITION_SYMBOL) == sym && (ulong)PositionGetInteger(POSITION_MAGIC) == chain_id)
+            {
+               found_pos = true;
+               initial_sl = PositionGetDouble(POSITION_SL);
+               
+               // Remove broker TP
+               if(!trade.PositionModify(t, initial_sl, 0.0))
+               {
+                  PrintFormat("[RUNNER-ACTIVATION-ERROR] SYMBOL=%s Failed to remove broker TP. Retcode=%d", sym, trade.ResultRetcode());
+                  modify_success = false;
+               }
+               break;
+            }
+         }
+      }
+      
+      if(found_pos && !modify_success)
+      {
+         return; // Abort runner activation if TP removal fails
+      }
+   }
+
    if(direction == 1)
-      G_TradeProfile[idx].runner_trail_price = current_price - atr * 1.5;
+   {
+      double candidate = current_price - atr * 1.5;
+      if(!InpEnableDCA && initial_sl > 0.0 && candidate < initial_sl)
+         candidate = initial_sl;
+      G_TradeProfile[idx].runner_trail_price = candidate;
+   }
    else
-      G_TradeProfile[idx].runner_trail_price = current_price + atr * 1.5;
+   {
+      double candidate = current_price + atr * 1.5;
+      if(!InpEnableDCA && initial_sl > 0.0 && candidate > initial_sl)
+         candidate = initial_sl;
+      G_TradeProfile[idx].runner_trail_price = candidate;
+   }
 
    G_TradeProfile[idx].runner_active = true;
 
    // --- LOG ---
-   Print("\n[DYNAMIC-TP-RUNNER]");
-   PrintFormat("SYMBOL=%s", sym);
-   PrintFormat("Strategy=FT");
-   PrintFormat("Trigger=THRESHOLD_80PCT");
-   PrintFormat("TrailingMode=ATR");
-   PrintFormat("InitialTrail=%.5f", G_TradeProfile[idx].runner_trail_price);
-   PrintFormat("CurrentPrice=%.5f", current_price);
-   PrintFormat("ATR=%.5f", atr);
+   double profit_pips = (direction == 1) ? PriceToPips(idx, current_price - G_TradeProfile[idx].entry_price)
+                                         : PriceToPips(idx, G_TradeProfile[idx].entry_price - current_price);
+   double threshold = G_TradeProfile[idx].initial_dynamic_tp * 0.8;
+   
+   PrintFormat("\n[RUNNER]\nSYMBOL=%s\nStrategy=FT\nInitialTP=%.1f\nThreshold=%.1f\nProfit=%.1f\nMomentum=STRONG\nRunner=ACTIVATED",
+               sym, G_TradeProfile[idx].initial_dynamic_tp, threshold, profit_pips);
 }
 
 // Update runner trailing stop (move trail only in favor direction)
@@ -592,17 +688,62 @@ void UpdateRunnerTrail(int idx)
                                            : SymbolInfoDouble(sym, SYMBOL_ASK);
    double trail_distance = atr * 1.5;
 
+   bool sl_updated = false;
+   double old_trail = G_TradeProfile[idx].runner_trail_price;
+
    if(direction == 1)
    {
       double new_trail = current_price - trail_distance;
       if(new_trail > G_TradeProfile[idx].runner_trail_price)
+      {
          G_TradeProfile[idx].runner_trail_price = new_trail;
+         sl_updated = true;
+      }
    }
    else
    {
       double new_trail = current_price + trail_distance;
       if(new_trail < G_TradeProfile[idx].runner_trail_price)
+      {
          G_TradeProfile[idx].runner_trail_price = new_trail;
+         sl_updated = true;
+      }
+   }
+   
+   if(sl_updated && !InpEnableDCA)
+   {
+       ulong chain_id = G_Pairs[idx].active_chain_id;
+       for(int i = PositionsTotal() - 1; i >= 0; i--)
+       {
+           ulong t = PositionGetTicket(i);
+           if(t > 0 && PositionSelectByTicket(t))
+           {
+               if(PositionGetString(POSITION_SYMBOL) == sym && (ulong)PositionGetInteger(POSITION_MAGIC) == chain_id)
+               {
+                   double current_sl = PositionGetDouble(POSITION_SL);
+                   double broker_tp = PositionGetDouble(POSITION_TP);
+                   double new_sl = G_TradeProfile[idx].runner_trail_price;
+                   
+                   // SL check: only increase SL for BUY, decrease for SELL
+                   bool valid_sl = false;
+                   if(direction == 1 && new_sl > current_sl) valid_sl = true;
+                   if(direction == -1 && (current_sl == 0.0 || new_sl < current_sl)) valid_sl = true;
+                   
+                   // Check broker limit
+                   double stop_level = SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL) * SymbolInfoDouble(sym, SYMBOL_POINT);
+                   if(direction == 1 && new_sl >= current_price - stop_level) valid_sl = false;
+                   if(direction == -1 && new_sl <= current_price + stop_level) valid_sl = false;
+                   
+                   if(valid_sl)
+                   {
+                       trade.PositionModify(t, new_sl, broker_tp);
+                       double profit_pips = PriceToPips(idx, MathAbs(current_price - G_TradeProfile[idx].entry_price));
+                       PrintFormat("\n[RUNNER-TRAIL]\nSYMBOL=%s\nOldSL=%.5f\nNewSL=%.5f\nProfit=%.1f pips", sym, current_sl, new_sl, profit_pips);
+                   }
+                   break;
+               }
+           }
+       }
    }
 }
 

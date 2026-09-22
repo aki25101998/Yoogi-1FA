@@ -263,7 +263,7 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       // --- INIT DYNAMIC EXIT TRADE PROFILE ---
       if(InpEnableDynamicTP)
       {
-         InitTradeProfile(idx, signal, strategy_type, entry_price);
+         InitTradeProfile(idx, signal, strategy_type, entry_price, tp_pips_d);
       }
 
       SaveChainState_Multi(idx);
