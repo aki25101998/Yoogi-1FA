@@ -27,7 +27,7 @@ input double InpDCA_Step_ATRMultiplier = 1.0; // ATR Multiplier cho Dynamic Step
 input group "=== DYNAMIC EXIT ENGINE ==="
 input bool   InpEnableDynamicTP          = true;   // Dynamic TP (false = fixed 60 pip)
 input int    InpDynamicTP_MinPips        = 15;     // Min TP (pips)
-input int    InpDynamicTP_MaxPips        = 120;    // Max TP (pips)
+input int    InpDynamicTP_MaxPips        = 80;    // Max TP (pips)
 input double InpDynamicTP_ATRMultiplier  = 2.0;    // ATR Multiplier for TP
 input bool   InpEnableTPCompression      = true;   // TP Compression (adapt TP mid-trade)
 input bool   InpEnableRunnerMode         = true;   // Runner Mode (FT only, trail profits)
