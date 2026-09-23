@@ -217,6 +217,10 @@ struct PairContext
    int      ft_recovery_level;
    int      dual_recovery_level;
    
+   int      ct_dca_sequence;
+   int      ft_dca_sequence;
+   int      dual_dca_sequence;
+   
    string   active_chain_strategy; // "CT", "FT", or "DUAL"
 
    double   locked_balance;      // Balance dùng để tính lot (nếu cần)
@@ -617,6 +621,11 @@ void InitGlobals()
       else 
          G_Pairs[i].ct_recovery_level = 0;
          
+      if(GlobalVariableCheck("Yoogi_CT_DCASeq_" + G_Pairs[i].symbol)) 
+         G_Pairs[i].ct_dca_sequence = (int)GlobalVariableGet("Yoogi_CT_DCASeq_" + G_Pairs[i].symbol);
+      else 
+         G_Pairs[i].ct_dca_sequence = 0;
+         
       // --- FT ---
       if(GlobalVariableCheck("Yoogi_FT_Debt_" + G_Pairs[i].symbol)) 
          G_Pairs[i].ft_realized_bleed_loss = GlobalVariableGet("Yoogi_FT_Debt_" + G_Pairs[i].symbol);
@@ -628,6 +637,11 @@ void InitGlobals()
       else 
          G_Pairs[i].ft_recovery_level = 0;
          
+      if(GlobalVariableCheck("Yoogi_FT_DCASeq_" + G_Pairs[i].symbol)) 
+         G_Pairs[i].ft_dca_sequence = (int)GlobalVariableGet("Yoogi_FT_DCASeq_" + G_Pairs[i].symbol);
+      else 
+         G_Pairs[i].ft_dca_sequence = 0;
+         
       // --- DUAL ---
       if(GlobalVariableCheck("Yoogi_DUAL_Debt_" + G_Pairs[i].symbol)) 
          G_Pairs[i].dual_realized_bleed_loss = GlobalVariableGet("Yoogi_DUAL_Debt_" + G_Pairs[i].symbol);
@@ -638,6 +652,11 @@ void InitGlobals()
          G_Pairs[i].dual_recovery_level = (int)GlobalVariableGet("Yoogi_DUAL_RecLvl_" + G_Pairs[i].symbol);
       else 
          G_Pairs[i].dual_recovery_level = 0;
+
+      if(GlobalVariableCheck("Yoogi_DUAL_DCASeq_" + G_Pairs[i].symbol)) 
+         G_Pairs[i].dual_dca_sequence = (int)GlobalVariableGet("Yoogi_DUAL_DCASeq_" + G_Pairs[i].symbol);
+      else 
+         G_Pairs[i].dual_dca_sequence = 0;
 
       G_Pairs[i].active_chain_strategy = "";
 

@@ -88,6 +88,10 @@ void SaveChainState_Multi(int idx)
    GlobalVariableSet("Yoogi_FT_RecLvl_" + sym, (double)G_Pairs[idx].ft_recovery_level);
    GlobalVariableSet("Yoogi_DUAL_Debt_" + sym, G_Pairs[idx].dual_realized_bleed_loss);
    GlobalVariableSet("Yoogi_DUAL_RecLvl_" + sym, (double)G_Pairs[idx].dual_recovery_level);
+   
+   GlobalVariableSet("Yoogi_CT_DCASeq_" + sym, (double)G_Pairs[idx].ct_dca_sequence);
+   GlobalVariableSet("Yoogi_FT_DCASeq_" + sym, (double)G_Pairs[idx].ft_dca_sequence);
+   GlobalVariableSet("Yoogi_DUAL_DCASeq_" + sym, (double)G_Pairs[idx].dual_dca_sequence);
 
    // Chain Specific State
    GlobalVariableSet(GetVarName_Step(sym, id),  (double)G_Pairs[idx].chain_dca_count);
@@ -122,6 +126,15 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    
    if(GlobalVariableCheck("Yoogi_DUAL_RecLvl_" + sym)) G_Pairs[idx].dual_recovery_level = (int)GlobalVariableGet("Yoogi_DUAL_RecLvl_" + sym);
    else G_Pairs[idx].dual_recovery_level = 0;
+   
+   if(GlobalVariableCheck("Yoogi_CT_DCASeq_" + sym)) G_Pairs[idx].ct_dca_sequence = (int)GlobalVariableGet("Yoogi_CT_DCASeq_" + sym);
+   else G_Pairs[idx].ct_dca_sequence = 0;
+
+   if(GlobalVariableCheck("Yoogi_FT_DCASeq_" + sym)) G_Pairs[idx].ft_dca_sequence = (int)GlobalVariableGet("Yoogi_FT_DCASeq_" + sym);
+   else G_Pairs[idx].ft_dca_sequence = 0;
+
+   if(GlobalVariableCheck("Yoogi_DUAL_DCASeq_" + sym)) G_Pairs[idx].dual_dca_sequence = (int)GlobalVariableGet("Yoogi_DUAL_DCASeq_" + sym);
+   else G_Pairs[idx].dual_dca_sequence = 0;
 
    // Migrate old bleed if it exists
    string n_bleed = GetVarName_Bleed(sym, chain_id);
@@ -319,11 +332,13 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       current_debt = G_Pairs[idx].dual_realized_bleed_loss;
    }
 
+   int current_dca_seq = 0;
+   if(entry_mode == "CT") current_dca_seq = G_Pairs[idx].ct_dca_sequence;
+   else if(entry_mode == "FT") current_dca_seq = G_Pairs[idx].ft_dca_sequence;
+   else if(entry_mode == "DUAL") current_dca_seq = G_Pairs[idx].dual_dca_sequence;
+
    // --- COMMENT VỚI ENTRY MODE ---
    string comment = entry_mode + " | ENTRY";
-   if(current_rec_lvl > 0) {
-      comment = entry_mode + " | DCA " + IntegerToString(current_rec_lvl);
-   }
    
    bool   res     = false;
    double sl=0.0, tp=0.0;
@@ -440,6 +455,8 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
                   
       string mode_str = "DCA Mode (ALWAYS ON)";
       string dir_str = (signal == 1) ? "BUY" : "SELL";
+      PrintFormat("[ENTRY]\nSYMBOL=%s\nSTRAT=%s\nTYPE=MASTER\nCOMMENT=%s\nRECOVERY_LEVEL=%d\nDCA_SEQUENCE=%d",
+                  sym, entry_mode, comment, current_rec_lvl, current_dca_seq);
       PrintFormat("[ENTRY] %s %s\n[MODE] %s\n[ENTRY] Price: %.5f\n[SL] %d pips\n[TP] %.1f pips (Dynamic=%s)",
                   (entry_mode == "FT" ? "Following Trend" : (entry_mode == "CT" ? "Counter Trend" : "Dual Trend")),
                   dir_str, mode_str, entry_price, sl_pips, tp_pips_d, InpEnableDynamicTP ? "YES" : "NO");
@@ -488,14 +505,25 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
       int current_dca = G_Pairs[idx].chain_dca_count + 1;
       
-      // Select correct recovery level based on strategy
+      // Select correct recovery level and dca sequence based on strategy
       string strat = G_Pairs[idx].active_chain_strategy;
       if (strat == "") strat = "CT"; // Fallback
       
       int current_rec_lvl = 0;
-      if(strat == "CT") current_rec_lvl = G_Pairs[idx].ct_recovery_level + 1;
-      else if(strat == "FT") current_rec_lvl = G_Pairs[idx].ft_recovery_level + 1;
-      else if(strat == "DUAL") current_rec_lvl = G_Pairs[idx].dual_recovery_level + 1;
+      int next_dca_seq = 0;
+      
+      if(strat == "CT") {
+         current_rec_lvl = G_Pairs[idx].ct_recovery_level + 1;
+         next_dca_seq = G_Pairs[idx].ct_dca_sequence + 1;
+      }
+      else if(strat == "FT") {
+         current_rec_lvl = G_Pairs[idx].ft_recovery_level + 1;
+         next_dca_seq = G_Pairs[idx].ft_dca_sequence + 1;
+      }
+      else if(strat == "DUAL") {
+         current_rec_lvl = G_Pairs[idx].dual_recovery_level + 1;
+         next_dca_seq = G_Pairs[idx].dual_dca_sequence + 1;
+      }
 
       // 3. Tính Lot (Dùng Locked Balance hoặc Fallback về Actual Balance)
       double working_balance = (G_Pairs[idx].locked_balance > 0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
@@ -511,21 +539,28 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
       double new_lot = NormalizeLot(sym, calculated_lot);
 
       // 4. Mở lệnh
-      string cmt = strat + " | DCA " + IntegerToString(current_rec_lvl);
+      string cmt = strat + " | DCA " + IntegerToString(next_dca_seq);
       bool res = OpenChildOrder_Multi(idx, master_type, new_lot, cmt);
 
       if(res)
       {
          G_Pairs[idx].chain_dca_count = current_dca;
          
-         if(strat == "CT") G_Pairs[idx].ct_recovery_level = current_rec_lvl;
-         else if(strat == "FT") G_Pairs[idx].ft_recovery_level = current_rec_lvl;
-         else if(strat == "DUAL") G_Pairs[idx].dual_recovery_level = current_rec_lvl;
+         if(strat == "CT") {
+            G_Pairs[idx].ct_recovery_level = current_rec_lvl;
+            G_Pairs[idx].ct_dca_sequence = next_dca_seq;
+         } else if(strat == "FT") {
+            G_Pairs[idx].ft_recovery_level = current_rec_lvl;
+            G_Pairs[idx].ft_dca_sequence = next_dca_seq;
+         } else if(strat == "DUAL") {
+            G_Pairs[idx].dual_recovery_level = current_rec_lvl;
+            G_Pairs[idx].dual_dca_sequence = next_dca_seq;
+         }
          
          SaveChainState_Multi(idx);
 
-         PrintFormat("[DCA-ENTRY]\nSYMBOL=%s\nSTRAT=%s\nDCA_COUNT=%d\nRECOVERY_LEVEL=%d\nSTEP=%d\nLOT=%.2f", 
-                     sym, strat, current_dca, current_rec_lvl, step_pips, new_lot);
+         PrintFormat("[DCA-ENTRY]\nSYMBOL=%s\nSTRAT=%s\nDCA_SEQUENCE=%d\nCHAIN_DCA_COUNT=%d\nRECOVERY_LEVEL=%d\nSTEP=%d\nLOT=%.2f", 
+                     sym, strat, next_dca_seq, current_dca, current_rec_lvl, step_pips, new_lot);
 
          ApplySmartTrimming(idx);
       }
@@ -651,21 +686,44 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id)
 
    if(close_deals_found == 0) return false;
 
-   double debt_before = G_Pairs[idx].realized_bleed_loss;
+   string strat = G_Pairs[idx].active_chain_strategy;
+   if(strat == "") strat = "CT"; // Fallback
    
-   // Apply normal SL / TP semantics
-   G_Pairs[idx].realized_bleed_loss -= realized_pnl;
+   double debt_before_print = 0.0;
+   int rec_lvl = 0;
+   
+   if(strat == "CT") {
+      debt_before_print = G_Pairs[idx].ct_realized_bleed_loss;
+      rec_lvl = G_Pairs[idx].ct_recovery_level;
+   } else if(strat == "FT") {
+      debt_before_print = G_Pairs[idx].ft_realized_bleed_loss;
+      rec_lvl = G_Pairs[idx].ft_recovery_level;
+   } else if(strat == "DUAL") {
+      debt_before_print = G_Pairs[idx].dual_realized_bleed_loss;
+      rec_lvl = G_Pairs[idx].dual_recovery_level;
+   }
+   
+   double debt_after = debt_before_print - realized_pnl;
 
-   if(G_Pairs[idx].realized_bleed_loss <= 0)
+   if(debt_after <= 0)
    {
-       G_Pairs[idx].realized_bleed_loss = 0.0;
-       G_Pairs[idx].recovery_level = 0;
-       PrintFormat("[ DCA-OFF-RESOLVE-COMPLETE ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT=0\nRECOVERY_LEVEL_RESET=0", sym, realized_pnl);
+       debt_after = 0.0;
+       rec_lvl = 0;
+       
+       if(strat == "CT") { G_Pairs[idx].ct_realized_bleed_loss = 0.0; G_Pairs[idx].ct_recovery_level = 0; }
+       else if(strat == "FT") { G_Pairs[idx].ft_realized_bleed_loss = 0.0; G_Pairs[idx].ft_recovery_level = 0; }
+       else if(strat == "DUAL") { G_Pairs[idx].dual_realized_bleed_loss = 0.0; G_Pairs[idx].dual_recovery_level = 0; }
+
+       PrintFormat("[ DCA-OFF-RESOLVE-COMPLETE ]\nSYMBOL=%s\nSTRAT=%s\nCHAIN_RESULT=%.2f\nDEBT=0\nRECOVERY_LEVEL_RESET=0", sym, strat, realized_pnl);
    }
    else
    {
-       PrintFormat("[ DCA-OFF-RESOLVE-PARTIAL ]\nSYMBOL=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f\nREMAINING_RECOVERY_LEVEL=%d",
-                   sym, realized_pnl, debt_before, G_Pairs[idx].realized_bleed_loss, G_Pairs[idx].recovery_level);
+       if(strat == "CT") { G_Pairs[idx].ct_realized_bleed_loss = debt_after; }
+       else if(strat == "FT") { G_Pairs[idx].ft_realized_bleed_loss = debt_after; }
+       else if(strat == "DUAL") { G_Pairs[idx].dual_realized_bleed_loss = debt_after; }
+
+       PrintFormat("[ DCA-OFF-RESOLVE-PARTIAL ]\nSYMBOL=%s\nSTRAT=%s\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f\nREMAINING_RECOVERY_LEVEL=%d",
+                   sym, strat, realized_pnl, debt_before_print, debt_after, rec_lvl);
    }
    
    GlobalVariableSet(gv_name, (double)max_ticket_found);
