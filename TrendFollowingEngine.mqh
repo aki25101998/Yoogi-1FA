@@ -35,7 +35,7 @@ void SetTFState(int idx, int new_state, string reason)
       string sym = G_Pairs[idx].symbol;
       string old_str = TFStateToString(G_TF[idx].setup_state);
       string new_str = TFStateToString(new_state);
-      PrintFormat("[TF_STATE][%s] FROM=%s TO=%s REASON=%s", sym, old_str, new_str, reason);
+      PrintFormat("[FT_STATE][%s] FROM=%s TO=%s REASON=%s", sym, old_str, new_str, reason);
       G_TF[idx].setup_state = new_state;
    }
 }
@@ -44,7 +44,7 @@ void LogTFReset(int idx, string scope, string reason)
 {
    string sym = G_Pairs[idx].symbol;
    string prev_str = TFStateToString(G_TF[idx].setup_state);
-   PrintFormat("[TF_RESET] SYMBOL=%s SCOPE=%s PREV_STATE=%s REASON=%s", sym, scope, prev_str, reason);
+   PrintFormat("[FT_RESET] SYMBOL=%s SCOPE=%s PREV_STATE=%s REASON=%s", sym, scope, prev_str, reason);
 }
 
 // ==================================================================

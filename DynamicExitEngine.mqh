@@ -65,8 +65,8 @@ TradeProfile G_TradeProfile[TOTAL_PAIRS];
 int GetStrategyType(string entry_mode)
 {
    if(entry_mode == "CT")    return STRATEGY_CT;
-   if(entry_mode == "TF")    return STRATEGY_FT;
-   if(entry_mode == "CT+TF") return STRATEGY_DUAL;
+   if(entry_mode == "FT")    return STRATEGY_FT;
+   if(entry_mode == "DUAL")  return STRATEGY_DUAL;
    return STRATEGY_CT; // Default fallback
 }
 
