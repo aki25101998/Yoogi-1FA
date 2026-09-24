@@ -834,8 +834,14 @@ void InitGlobals()
 double GetTotalSystemDebt()
 {
    double debt = 0.0;
-   for(int i=0; i<TOTAL_PAIRS; i++)
-      debt += G_Pairs[i].realized_bleed_loss;
+
+   for(int i = 0; i < TOTAL_PAIRS; i++)
+   {
+      debt += G_Pairs[i].ct_realized_bleed_loss;
+      debt += G_Pairs[i].ft_realized_bleed_loss;
+      debt += G_Pairs[i].dual_realized_bleed_loss;
+   }
+
    return debt;
 }
 

@@ -59,6 +59,11 @@ struct TradeProfile
 
 TradeProfile G_TradeProfile[TOTAL_PAIRS];
 
+// Forward declarations for persistence
+void SaveTradeProfile(int idx, ulong chain_id);
+void LoadTradeProfile(int idx, ulong chain_id);
+void ClearTradeProfilePersistence(int idx, ulong chain_id);
+
 // ==================================================================
 // HELPER: Determine strategy type from entry_mode string
 // ==================================================================
@@ -368,6 +373,9 @@ void InitTradeProfile(int idx, int direction, int strategy_type, double entry_pr
    PrintFormat("FinalTP=%.1f pips", natural_tp);
    PrintFormat("TP_Price=%.5f", G_TradeProfile[idx].tp_price);
    PrintFormat("MinTP=%d | MaxTP=%d", InpDynamicTP_MinPips, InpDynamicTP_MaxPips);
+
+   if(G_Pairs[idx].active_chain_id > 0)
+      SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
 }
 
 // ==================================================================
@@ -492,6 +500,8 @@ bool TryTPCompression(int idx)
                sym, (G_TradeProfile[idx].strategy_type == STRATEGY_CT) ? "CT" : "FT",
                old_tp, new_tp, G_TradeProfile[idx].entry_price, G_TradeProfile[idx].tp_price, reason);
 
+   SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
+
    return true;
 }
 
@@ -568,6 +578,7 @@ void ActivateRunner(int idx)
    }
 
    G_TradeProfile[idx].runner_active = true;
+   SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
 
    // --- LOG ---
    double profit_pips = (direction == 1) ? PriceToPips(idx, current_price - G_TradeProfile[idx].entry_price)
@@ -614,7 +625,10 @@ void UpdateRunnerTrail(int idx)
       }
    }
    
-
+   if(sl_updated)
+   {
+      SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
+   }
 }
 
 // Check if runner trailing stop is hit → should exit
@@ -727,6 +741,94 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
    }
 
    return tp_price;
+}
+
+// ==================================================================
+// DYNAMIC EXIT PERSISTENCE (SURVIVE EA RESTARTS)
+// ==================================================================
+void SaveTradeProfile(int idx, ulong chain_id)
+{
+   if(chain_id == 0 || !G_TradeProfile[idx].is_valid) return;
+   string sym = G_Pairs[idx].symbol;
+   string id_str = IntegerToString(chain_id);
+
+   GlobalVariableSet("Yoogi_DynTP_Valid_" + sym + "_" + id_str, 1.0);
+   GlobalVariableSet("Yoogi_DynTP_Strat_" + sym + "_" + id_str, (double)G_TradeProfile[idx].strategy_type);
+   GlobalVariableSet("Yoogi_DynTP_Dir_" + sym + "_" + id_str, (double)G_TradeProfile[idx].direction);
+   GlobalVariableSet("Yoogi_DynTP_Entry_" + sym + "_" + id_str, G_TradeProfile[idx].entry_price);
+   GlobalVariableSet("Yoogi_DynTP_ATR_" + sym + "_" + id_str, G_TradeProfile[idx].initial_atr);
+   GlobalVariableSet("Yoogi_DynTP_Init_" + sym + "_" + id_str, G_TradeProfile[idx].initial_dynamic_tp);
+   GlobalVariableSet("Yoogi_DynTP_Curr_" + sym + "_" + id_str, G_TradeProfile[idx].current_dynamic_tp);
+   GlobalVariableSet("Yoogi_DynTP_Price_" + sym + "_" + id_str, G_TradeProfile[idx].tp_price);
+   GlobalVariableSet("Yoogi_Runner_Active_" + sym + "_" + id_str, G_TradeProfile[idx].runner_active ? 1.0 : 0.0);
+   GlobalVariableSet("Yoogi_Runner_Trail_" + sym + "_" + id_str, G_TradeProfile[idx].runner_trail_price);
+   GlobalVariableSet("Yoogi_DynTP_Compress_" + sym + "_" + id_str, G_TradeProfile[idx].compression_active ? 1.0 : 0.0);
+   GlobalVariableSet("Yoogi_DynTP_LastComp_" + sym + "_" + id_str, G_TradeProfile[idx].last_compression_tp);
+}
+
+void LoadTradeProfile(int idx, ulong chain_id)
+{
+   if(chain_id == 0) return;
+   string sym = G_Pairs[idx].symbol;
+   string id_str = IntegerToString(chain_id);
+
+   if(GlobalVariableCheck("Yoogi_DynTP_Valid_" + sym + "_" + id_str))
+   {
+      G_TradeProfile[idx].strategy_type       = (int)GlobalVariableGet("Yoogi_DynTP_Strat_" + sym + "_" + id_str);
+      G_TradeProfile[idx].direction           = (int)GlobalVariableGet("Yoogi_DynTP_Dir_" + sym + "_" + id_str);
+      G_TradeProfile[idx].entry_price         = GlobalVariableGet("Yoogi_DynTP_Entry_" + sym + "_" + id_str);
+      G_TradeProfile[idx].initial_atr         = GlobalVariableGet("Yoogi_DynTP_ATR_" + sym + "_" + id_str);
+      G_TradeProfile[idx].initial_dynamic_tp  = GlobalVariableGet("Yoogi_DynTP_Init_" + sym + "_" + id_str);
+      G_TradeProfile[idx].current_dynamic_tp  = GlobalVariableGet("Yoogi_DynTP_Curr_" + sym + "_" + id_str);
+      G_TradeProfile[idx].tp_price            = GlobalVariableGet("Yoogi_DynTP_Price_" + sym + "_" + id_str);
+      G_TradeProfile[idx].runner_active       = (GlobalVariableGet("Yoogi_Runner_Active_" + sym + "_" + id_str) > 0.5);
+      G_TradeProfile[idx].runner_trail_price  = GlobalVariableGet("Yoogi_Runner_Trail_" + sym + "_" + id_str);
+      G_TradeProfile[idx].compression_active  = (GlobalVariableGet("Yoogi_DynTP_Compress_" + sym + "_" + id_str) > 0.5);
+      G_TradeProfile[idx].last_compression_tp = GlobalVariableGet("Yoogi_DynTP_LastComp_" + sym + "_" + id_str);
+      G_TradeProfile[idx].last_update_time    = TimeCurrent();
+      G_TradeProfile[idx].is_valid            = true;
+
+      PrintFormat("[%s] >>> DYNAMIC EXIT RESTORED: Strat=%d, Dir=%d, InitTP=%.1f, CurrTP=%.1f, Runner=%s, Trail=%.5f",
+                  sym, G_TradeProfile[idx].strategy_type, G_TradeProfile[idx].direction,
+                  G_TradeProfile[idx].initial_dynamic_tp, G_TradeProfile[idx].current_dynamic_tp,
+                  G_TradeProfile[idx].runner_active ? "YES" : "NO", G_TradeProfile[idx].runner_trail_price);
+   }
+   else
+   {
+      // Fallback: If chain exists but no saved TradeProfile, recover from chain positions
+      int dir = GetBasketDirection(idx);
+      if(dir != 0)
+      {
+         string strat = G_Pairs[idx].active_chain_strategy;
+         int st = GetStrategyType(strat);
+         double avg_entry = CalcBasketAverageEntry(idx);
+         double natural_tp = CalculateNaturalTP(idx, dir, st);
+         InitTradeProfile(idx, dir, st, avg_entry, natural_tp);
+         SaveTradeProfile(idx, chain_id);
+         PrintFormat("[%s] >>> DYNAMIC EXIT RE-INITIALIZED FROM CHAIN: Strat=%s, Dir=%d, AvgEntry=%.5f, NaturalTP=%.1f",
+                     sym, strat, dir, avg_entry, natural_tp);
+      }
+   }
+}
+
+void ClearTradeProfilePersistence(int idx, ulong chain_id)
+{
+   if(chain_id == 0) return;
+   string sym = G_Pairs[idx].symbol;
+   string id_str = IntegerToString(chain_id);
+
+   GlobalVariableDel("Yoogi_DynTP_Valid_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_Strat_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_Dir_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_Entry_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_ATR_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_Init_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_Curr_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_Price_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_Runner_Active_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_Runner_Trail_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_Compress_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_DynTP_LastComp_" + sym + "_" + id_str);
 }
 
 // ==================================================================

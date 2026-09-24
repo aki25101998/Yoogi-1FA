@@ -245,8 +245,7 @@ void UpdateDisplay()
 
    // --- TÍNH TOÁN ---
    double real_bal = AccountInfoDouble(ACCOUNT_BALANCE);
-   double total_debt = 0.0;
-   for(int i=0; i<TOTAL_PAIRS; i++) total_debt += G_Pairs[i].realized_bleed_loss;
+   double total_debt = GetTotalSystemDebt();
    double virt_bal = real_bal + total_debt;
 
    // --- STATUS ---
@@ -323,7 +322,7 @@ void UpdateDisplay()
          }
       }
 
-      double debt = G_Pairs[i].realized_bleed_loss;
+      double debt = G_Pairs[i].ct_realized_bleed_loss + G_Pairs[i].ft_realized_bleed_loss + G_Pairs[i].dual_realized_bleed_loss;
       double risk = G_Pairs[i].risk_percent;
 
       // Color Logic

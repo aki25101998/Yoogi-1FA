@@ -113,16 +113,35 @@ void ApplySmartTrimming(int idx)
       // F. Ghi sổ nợ & Lưu trữ (Persistence vào đúng struct của cặp)
       if(res)
       {
-         // Nếu PnL < 0, cộng lỗ vào realized_bleed_loss của cặp này
+         // Nếu PnL < 0, cộng lỗ vào realized_bleed_loss theo strategy của chain này
          if(realized_loss_now < 0)
          {
             double loss_positive = -realized_loss_now;
-            G_Pairs[idx].realized_bleed_loss += loss_positive;
+            string strat = G_Pairs[idx].active_chain_strategy;
+            double current_debt = 0.0;
 
-            PrintFormat("[%s] > Ghi nợ: +$%.2f. Tổng nợ cặp này: $%.2f", sym, loss_positive, G_Pairs[idx].realized_bleed_loss);
+            if(strat == "FT")
+            {
+               G_Pairs[idx].ft_realized_bleed_loss += loss_positive;
+               current_debt = G_Pairs[idx].ft_realized_bleed_loss;
+               GlobalVariableSet("Yoogi_FT_Debt_" + sym, current_debt);
+            }
+            else if(strat == "DUAL")
+            {
+               G_Pairs[idx].dual_realized_bleed_loss += loss_positive;
+               current_debt = G_Pairs[idx].dual_realized_bleed_loss;
+               GlobalVariableSet("Yoogi_DUAL_Debt_" + sym, current_debt);
+            }
+            else // Default or "CT"
+            {
+               G_Pairs[idx].ct_realized_bleed_loss += loss_positive;
+               current_debt = G_Pairs[idx].ct_realized_bleed_loss;
+               GlobalVariableSet("Yoogi_CT_Debt_" + sym, current_debt);
+            }
+
+            PrintFormat("[%s] > Ghi nợ (%s): +$%.2f. Tổng nợ %s cặp này: $%.2f", sym, strat, loss_positive, strat, current_debt);
 
             // LƯU NGAY VÀO Ổ CỨNG (Dùng tên biến persistent)
-            GlobalVariableSet("Yoogi_Debt_" + sym, G_Pairs[idx].realized_bleed_loss);
             GlobalVariableSet(GetVarName_Step(sym, chain_id),  (double)G_Pairs[idx].chain_dca_count);
          }
 

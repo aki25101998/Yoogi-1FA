@@ -102,6 +102,11 @@ void SaveChainState_Multi(int idx)
    if(G_Pairs[idx].active_chain_strategy == "FT") strat_val = 2;
    else if(G_Pairs[idx].active_chain_strategy == "DUAL") strat_val = 3;
    GlobalVariableSet("Yoogi_Strat_" + sym + "_" + IntegerToString(id), (double)strat_val);
+
+   if(InpEnableDynamicTP && G_TradeProfile[idx].is_valid)
+   {
+      SaveTradeProfile(idx, id);
+   }
 }
 
 void LoadChainState_Multi(int idx, ulong chain_id)
@@ -170,6 +175,11 @@ void LoadChainState_Multi(int idx, ulong chain_id)
 
    if(GlobalVariableCheck(n_bal))   G_Pairs[idx].locked_balance = GlobalVariableGet(n_bal);
    else                             G_Pairs[idx].locked_balance = 0.0;
+
+   if(InpEnableDynamicTP)
+   {
+      LoadTradeProfile(idx, chain_id);
+   }
 }
 
 void ClearChainState_Multi(int idx)
@@ -184,6 +194,7 @@ void ClearChainState_Multi(int idx)
    GlobalVariableDel("Yoogi_DCAStep_" + sym + "_" + IntegerToString(id));
    GlobalVariableDel(GetVarName_LockedBal(sym, id));
    GlobalVariableDel("Yoogi_Strat_" + sym + "_" + IntegerToString(id));
+   ClearTradeProfilePersistence(idx, id);
 
    // Reset chain specific memory
    G_Pairs[idx].chain_dca_count = 0;
@@ -838,6 +849,10 @@ void ManagePairs()
             G_Pairs[i].active_chain_id = expected_chain_id;
             LoadChainState_Multi(i, expected_chain_id);
          }
+         else if(InpEnableDynamicTP && !G_TradeProfile[i].is_valid)
+         {
+            LoadTradeProfile(i, G_Pairs[i].active_chain_id);
+         }
 
          // --- DYNAMIC EXIT ENGINE ---
          if(InpEnableDynamicTP && G_TradeProfile[i].is_valid)
@@ -892,7 +907,19 @@ void ManagePairs()
             // --- ORIGINAL LOGIC (fallback when Dynamic TP disabled) ---
             double working_balance = (G_Pairs[i].locked_balance > 0) ? G_Pairs[i].locked_balance : real_balance;
             double base_tp_usd = CalculateAutoTP(sym, working_balance);
-            double total_target = base_tp_usd + G_Pairs[i].realized_bleed_loss;
+
+            string strat = G_Pairs[i].active_chain_strategy;
+            double current_debt = 0.0;
+            if(strat == "CT")
+               current_debt = G_Pairs[i].ct_realized_bleed_loss;
+            else if(strat == "FT")
+               current_debt = G_Pairs[i].ft_realized_bleed_loss;
+            else if(strat == "DUAL")
+               current_debt = G_Pairs[i].dual_realized_bleed_loss;
+            else
+               current_debt = G_Pairs[i].ct_realized_bleed_loss; // Safe fallback
+
+            double total_target = base_tp_usd + current_debt;
 
             if(pnl >= total_target)
             {
