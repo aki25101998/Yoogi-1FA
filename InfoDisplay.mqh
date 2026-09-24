@@ -1,239 +1,240 @@
 //+------------------------------------------------------------------+
 //|                                              InfoDisplay.mqh     |
 //|                                                  Yoogi Trading   |
-//|      (Final Version: Hardcoded Settings - "Yoogi One For All")   |
+//|         Trading Control Dashboard — "Yoogi One For All"          |
 //+------------------------------------------------------------------+
 #property strict
 
-//--- Prefix tên đối tượng
+#include "ReversalDisplayData.mqh"
+
+// ==================================================================
+// 1. CONFIGURATION & LAYOUT TOKENS
+// ==================================================================
 #define INFO_PREFIX "YDG_Mother_"
 #define BG_PREFIX   "YDG_BG_"
 
-// ==================================================================
-// 1. CẤU HÌNH CỐ ĐỊNH (HARDCODED SETTINGS)
-// ==================================================================
-
-// --- LAYOUT & POSITIONS ---
+// --- CORNER & ANCHOR (FIXED, NO SHIFTING) ---
 const ENUM_BASE_CORNER DASH_CORNER = CORNER_LEFT_LOWER;
-const int    DASH_X          = 40;   // Tọa độ X Gốc
-const int    DASH_Y          = 310;  // Tọa độ Y Gốc
-const int    DASH_LINE_H     = 20;   // Dòng thông tin chung
-const int    TABLE_ROW_H     = 18;   // Dòng bảng
-const int    FONT_SIZE       = 11;
+const int    DASH_X          = 20;   // X Base Offset
+const int    DASH_Y          = 485;  // Y Base Offset (Top anchor in LEFT_LOWER)
+const int    DASH_LINE_H     = 16;   // Standard Line Height
+const int    TABLE_ROW_H     = 16;   // Table Row Height
+const int    FONT_SIZE       = 10;   // Data Font Size
+const int    FONT_TITLE_SIZE = 12;   // Main Title Font Size
+const int    FONT_SEC_SIZE   = 10;   // Section Title Font Size
 const string FONT_NAME       = "Consolas";
-const int    VAL_OFFSET      = 100;  // Khoảng cách số liệu
 
-// --- HEADER & FOOTER OFFSETS ---
-const int    HEAD_OFF_X      = 42;
-const int    FOOT_OFF_X      = 30;
-
-#include "ReversalDisplayData.mqh"
-
-// --- HEADER POSITIONS (X) ---
-const int    H_PAIR_X        = 0;
-const int    H_TREND_X       = 60;
-const int    H_BIAS_X        = 140;
-const int    H_SCORE_X       = 200;
-const int    H_PROG_X        = 250;
-const int    H_STAT_X        = 300;
-const int    H_WAIT_X        = 420;
-const int    H_ENTRY_X       = 560;
-
-// --- SEPARATOR POSITIONS (X) ---
-const int    SEP_TREND_X     = 50;
-const int    SEP_BIAS_X      = 130;
-const int    SEP_SCORE_X     = 190;
-const int    SEP_PROG_X      = 240;
-const int    SEP_STAT_X      = 290;
-const int    SEP_WAIT_X      = 410;
-const int    SEP_ENTRY_X     = 550;
-
-// --- DATA POSITIONS (X) ---
-const int    D_PAIR_X        = 0;
-const int    D_TREND_X       = 60;
-const int    D_BIAS_X        = 140;
-const int    D_SCORE_X       = 200;
-const int    D_PROG_X        = 250;
-const int    D_STAT_X        = 300;
-const int    D_WAIT_X        = 420;
-const int    D_ENTRY_X       = 560;
-
-// --- BACKGROUND ---
+// --- BACKGROUND PANEL ---
 const bool   USE_BACK        = true;
-const color  C_BACK          = clrDarkSlateGray;
-const int    BACK_W          = 650;
-const int    BACK_H          = 340;
-const int    BACK_OFF_X      = -20;
-const int    BACK_OFF_Y      = 40;
+const color  C_BACK          = C'15,22,28';  // Deep Slate Charcoal
+const int    BACK_W          = 625;
+const int    BACK_H          = 495;
+const int    BACK_OFF_X      = -10;
+const int    BACK_OFF_Y      = 12;
 
-// --- FOOTER ---
-const int    FOOT_SIZE       = 12;
-const int    FOOT_GAP        = 28;
-const color  C_FOOTER        = clrGold;
-
-// --- COLORS ---
+// --- COLOR PALETTE (CONSISTENT VISUAL LANGUAGE) ---
 const color  C_HEADER        = clrGold;
+const color  C_SECTION       = clrGold;
 const color  C_TEXT          = clrWhite;
+const color  C_SUB           = clrLightGray;
 const color  C_VALUE         = clrLime;
-const color  C_WARN          = clrRed;
+const color  C_WARN          = clrIndianRed;
 const color  C_LIMIT         = clrOrange;
-const color  C_SUB           = clrWhite;
-const color  C_SEP           = clrWhite;
+const color  C_SEP           = C'65,75,85';
 
-// --- TABLE ROW COLORS ---
+// Table Row Colors
 const color  R_PROFIT        = clrLime;
 const color  R_LOSS          = clrIndianRed;
 const color  R_DEBT          = clrOrange;
-const color  R_OFF           = clrWhite;
-const color  R_SLEEP         = clrWhite;
 
-// --- TEXT CONTENTS ---
+// --- TEXT LABELS ---
 const string TXT_HEADER      = "=== YOOGI ONE FOR ALL ===";
-const string TXT_STAT_LBL    = "Status :";
-const string TXT_REAL_BAL    = "Balance :";
-const string TXT_VIRT_BAL    = "Balance ảo :";
-const string TXT_DEBT_PRE    = "( Nợ :";
-const string TXT_SEP_LINE    = "------------------------------------";
+const string TXT_FOOTER      = "YOOGI 1FA — TRADE FOR LIVING";
 const string TXT_SEP_SYM     = "|";
-const string TXT_FOOTER      = "YOOGI 1FA - TRADE FOR LIVING";
 
-const string TXT_H_PAIR      = "PAIR";
-const string TXT_H_TREND     = "TREND";
-const string TXT_H_BIAS      = "BIAS";
-const string TXT_H_SCORE     = "SCORE";
-const string TXT_H_PROG      = "PROG";
-const string TXT_H_STAT      = "STATE";
-const string TXT_H_WAIT      = "WAITING FOR";
-const string TXT_H_ENTRY     = "ENTRY";
-
-const string TXT_STAT_RUN    = "Running";
-const string TXT_STAT_LOW    = "Balance cần > 10k";
-const string TXT_STAT_LIMIT  = "Balance cần < 500k";
-const string TXT_WAIT        = "Waiting...";
-const string TXT_OFF         = "OFF";
-
+// Table Columns X Offsets
+const int P_PAIR = 0;
+const int P_SEP1 = 52;
+const int P_MODE = 60;
+const int P_SEP2 = 96;
+const int P_DIR  = 104;
+const int P_SEP3 = 140;
+const int P_SCOR = 148;
+const int P_SEP4 = 208;
+const int P_STAT = 216;
+const int P_SEP5 = 328;
+const int P_NEXT = 336;
+const int P_SEP6 = 448;
+const int P_CHN  = 456;
+const int P_SEP7 = 514;
+const int P_PNL  = 522;
 
 // ==================================================================
-// 2. LOGIC XỬ LÝ GIAO DIỆN
+// 2. FORWARD DECLARATIONS
 // ==================================================================
-
-//--- Khai báo hàm
 void CreateDisplay();
 void UpdateDisplay();
 void DeleteDisplay();
-//--- Hàm nội bộ
-void CreateLabel(string name, string text, int x, int y, int corner, int font_size, color clr);
+
+void CreateLabel(string name, string text, int x, int y, int corner, int font_size, color clr, bool bold = false);
 void CreatePanel(string name, int x, int y, int w, int h, int corner, color bg_clr);
+void SetLabelText(string name, string text, color clr);
 
 //+------------------------------------------------------------------+
-//| TẠO GIAO DIỆN BẢNG THÔNG TIN                                     |
+//| CREATE DASHBOARD DISPLAY (CREATE ONCE)                           |
 //+------------------------------------------------------------------+
 void CreateDisplay()
 {
-   DeleteDisplay(); 
+   DeleteDisplay();
 
-   // 0. VẼ BACKGROUND
+   // 0. BACKGROUND PANEL
    if(USE_BACK)
    {
       int bg_x = DASH_X + BACK_OFF_X;
-      int bg_y = DASH_Y + BACK_OFF_Y; 
+      int bg_y = DASH_Y + BACK_OFF_Y;
       CreatePanel(BG_PREFIX + "Main", bg_x, bg_y, BACK_W, BACK_H, DASH_CORNER, C_BACK);
    }
 
-   // --- BẮT ĐẦU VẼ CÁC THÀNH PHẦN ---
-   int y      = DASH_Y;
-   int x_base = DASH_X; 
-   int x_val  = DASH_X + VAL_OFFSET; 
+   int y = DASH_Y;
+   int x = DASH_X;
 
-   // 1. HEADER CHÍNH
-   CreateLabel(INFO_PREFIX + "Header", TXT_HEADER, x_base + HEAD_OFF_X, y, DASH_CORNER, FONT_SIZE + 2, C_HEADER);
+   // 1. MAIN TITLE
+   CreateLabel(INFO_PREFIX + "Header", TXT_HEADER, x + 160, y, DASH_CORNER, FONT_TITLE_SIZE, C_HEADER, true);
+   y -= 22;
+
+   // ===============================================================
+   // SECTION A — SYSTEM SUMMARY
+   // ===============================================================
+   CreateLabel(INFO_PREFIX + "SecA_Title", "=== SYSTEM SUMMARY ===", x, y, DASH_CORNER, FONT_SEC_SIZE, C_SECTION, true);
+   y -= 17;
+
+   int col1_lbl = x;
+   int col1_val = x + 115;
+   int col2_lbl = x + 310;
+   int col2_val = x + 420;
+
+   // Row A1: Balance & DXY
+   CreateLabel(INFO_PREFIX + "Sys_Bal_Lbl",  "Balance     :", col1_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_Bal_Val",  "$0.00",        col1_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
+   CreateLabel(INFO_PREFIX + "Sys_DXY_Lbl",  "DXY         :", col2_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_DXY_Val",  "--",           col2_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
+   y -= DASH_LINE_H;
+
+   // Row A2: Virtual Balance & CT
+   CreateLabel(INFO_PREFIX + "Sys_VBal_Lbl", "Virtual Bal :", col1_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_VBal_Val", "$0.00",        col1_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
+   CreateLabel(INFO_PREFIX + "Sys_CT_Lbl",   "CT Engine   :", col2_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_CT_Val",   "ACTIVE",       col2_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
+   y -= DASH_LINE_H;
+
+   // Row A3: Debt & FT
+   CreateLabel(INFO_PREFIX + "Sys_Debt_Lbl", "Total Debt  :", col1_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_Debt_Val", "$0.00",        col1_val, y, DASH_CORNER, FONT_SIZE, C_LIMIT);
+   CreateLabel(INFO_PREFIX + "Sys_FT_Lbl",   "FT Engine   :", col2_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_FT_Val",   "ACTIVE",       col2_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
+   y -= DASH_LINE_H;
+
+   // Row A4: Active Chains & DCA
+   CreateLabel(INFO_PREFIX + "Sys_Chain_Lbl","Active Chns :", col1_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_Chain_Val","0",            col1_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
+   CreateLabel(INFO_PREFIX + "Sys_DCA_Lbl",  "DCA Mode    :", col2_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_DCA_Val",  "ALWAYS ON",    col2_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
+   y -= DASH_LINE_H;
+
+   // Row A5: Risk & Dynamic TP
+   CreateLabel(INFO_PREFIX + "Sys_Risk_Lbl", "Risk / Pair :", col1_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_Risk_Val", "0.5%",         col1_val, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+   CreateLabel(INFO_PREFIX + "Sys_DynTP_Lbl","Dynamic TP  :", col2_lbl, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "Sys_DynTP_Val","ACTIVE",       col2_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
    y -= (DASH_LINE_H + 5);
 
-   // 2. SYSTEM STATUS
-   CreateLabel(INFO_PREFIX + "Status_Lbl", TXT_STAT_LBL, x_base, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-   CreateLabel(INFO_PREFIX + "Status_Val", TXT_WAIT, x_val, y, DASH_CORNER, FONT_SIZE, C_VALUE);
-   y -= DASH_LINE_H;
+   // ===============================================================
+   // SECTION B — PAIR MONITOR
+   // ===============================================================
+   CreateLabel(INFO_PREFIX + "SecB_Title", "=== PAIR MONITOR ===", x, y, DASH_CORNER, FONT_SEC_SIZE, C_SECTION, true);
+   y -= 17;
 
-   // 2b. DXY STATUS
-   CreateLabel(INFO_PREFIX + "DXY_Lbl", "DXY :", x_base, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-   CreateLabel(INFO_PREFIX + "DXY_Val", "Detecting...", x_val, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   y -= DASH_LINE_H;
+   // Table Column Headers
+   CreateLabel(INFO_PREFIX + "H_Pair",  "PAIR",      x + P_PAIR, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep1",  TXT_SEP_SYM, x + P_SEP1, y, DASH_CORNER, FONT_SIZE, C_SEP);
+   CreateLabel(INFO_PREFIX + "H_Mode",  "MODE",      x + P_MODE, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep2",  TXT_SEP_SYM, x + P_SEP2, y, DASH_CORNER, FONT_SIZE, C_SEP);
+   CreateLabel(INFO_PREFIX + "H_Dir",   "DIR",       x + P_DIR,  y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep3",  TXT_SEP_SYM, x + P_SEP3, y, DASH_CORNER, FONT_SIZE, C_SEP);
+   CreateLabel(INFO_PREFIX + "H_Score", "SCORE",     x + P_SCOR, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep4",  TXT_SEP_SYM, x + P_SEP4, y, DASH_CORNER, FONT_SIZE, C_SEP);
+   CreateLabel(INFO_PREFIX + "H_Stat",  "STATE",     x + P_STAT, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep5",  TXT_SEP_SYM, x + P_SEP5, y, DASH_CORNER, FONT_SIZE, C_SEP);
+   CreateLabel(INFO_PREFIX + "H_Next",  "NEXT GATE", x + P_NEXT, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep6",  TXT_SEP_SYM, x + P_SEP6, y, DASH_CORNER, FONT_SIZE, C_SEP);
+   CreateLabel(INFO_PREFIX + "H_Chain", "CHAIN",     x + P_CHN,  y, DASH_CORNER, FONT_SIZE, C_SUB);
+   CreateLabel(INFO_PREFIX + "H_Sep7",  TXT_SEP_SYM, x + P_SEP7, y, DASH_CORNER, FONT_SIZE, C_SEP);
+   CreateLabel(INFO_PREFIX + "H_Pnl",   "P/L",       x + P_PNL,  y, DASH_CORNER, FONT_SIZE, C_SUB);
+   y -= TABLE_ROW_H;
 
-   // 2c. REVERSAL ENGINE
-   CreateLabel(INFO_PREFIX + "Rev_Lbl", "Reversal :", x_base, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-   CreateLabel(INFO_PREFIX + "Rev_Val", "Init...", x_val, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   y -= DASH_LINE_H;
-
-
-   // 3. ACCOUNT INFO
-   CreateLabel(INFO_PREFIX + "Acc_Bal", TXT_REAL_BAL, x_base, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-   CreateLabel(INFO_PREFIX + "Acc_Bal_Val", "0.00", x_val + 20, y, DASH_CORNER, FONT_SIZE, C_VALUE);
-   y -= DASH_LINE_H;
-
-   CreateLabel(INFO_PREFIX + "Virt_Bal", TXT_VIRT_BAL, x_base, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "Virt_Bal_Val", "0.00", x_val + 20, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   y -= (DASH_LINE_H + 5);
-
-   CreateLabel(INFO_PREFIX + "Sep1", TXT_SEP_LINE, x_base, y, DASH_CORNER, FONT_SIZE, C_SEP);
-   y -= DASH_LINE_H;
-
-   // 4. TABLE HEADER (TIÊU ĐỀ BẢNG)
-   CreateLabel(INFO_PREFIX + "H_Pair", TXT_H_PAIR, x_base + H_PAIR_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Trend", TXT_H_TREND, x_base + H_TREND_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Bias",  TXT_H_BIAS,  x_base + H_BIAS_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Score", TXT_H_SCORE, x_base + H_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Prog",  TXT_H_PROG,  x_base + H_PROG_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Stat",  TXT_H_STAT,  x_base + H_STAT_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Wait",  TXT_H_WAIT,  x_base + H_WAIT_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Entry", TXT_H_ENTRY, x_base + H_ENTRY_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   
-   // Dấu phân cách Header
-   CreateLabel(INFO_PREFIX + "H_Sep1", TXT_SEP_SYM, x_base + SEP_TREND_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep2", TXT_SEP_SYM, x_base + SEP_BIAS_X,  y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep3", TXT_SEP_SYM, x_base + SEP_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep4", TXT_SEP_SYM, x_base + SEP_PROG_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep5", TXT_SEP_SYM, x_base + SEP_STAT_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep6", TXT_SEP_SYM, x_base + SEP_WAIT_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-   CreateLabel(INFO_PREFIX + "H_Sep7", TXT_SEP_SYM, x_base + SEP_ENTRY_X, y, DASH_CORNER, FONT_SIZE, C_SUB);
-
-   y -= (DASH_LINE_H + 2);
-
-   // 5. ROWS (DỮ LIỆU BẢNG)
+   // Table Data Rows
    for(int i = 0; i < TOTAL_PAIRS; i++)
    {
       string r = IntegerToString(i);
-      
-      // -- DATA COLUMNS --
-      CreateLabel(INFO_PREFIX + "R"+r+"_Pair", TXT_WAIT, x_base + D_PAIR_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Trend", "-",     x_base + D_TREND_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Bias",  "-",     x_base + D_BIAS_X,  y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Score", "-",     x_base + D_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Prog",  "-",     x_base + D_PROG_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Stat",  "-",     x_base + D_STAT_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Wait",  "-",     x_base + D_WAIT_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Entry", "-",     x_base + D_ENTRY_X, y, DASH_CORNER, FONT_SIZE, C_TEXT);
-      
-      // -- SEPARATORS --
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep1", TXT_SEP_SYM, x_base + SEP_TREND_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep2", TXT_SEP_SYM, x_base + SEP_BIAS_X,  y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep3", TXT_SEP_SYM, x_base + SEP_SCORE_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep4", TXT_SEP_SYM, x_base + SEP_PROG_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep5", TXT_SEP_SYM, x_base + SEP_STAT_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep6", TXT_SEP_SYM, x_base + SEP_WAIT_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-      CreateLabel(INFO_PREFIX + "R"+r+"_Sep7", TXT_SEP_SYM, x_base + SEP_ENTRY_X, y, DASH_CORNER, FONT_SIZE, C_SEP);
-
+      CreateLabel(INFO_PREFIX + "R"+r+"_Pair",  "-",         x + P_PAIR, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep1",  TXT_SEP_SYM, x + P_SEP1, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Mode",  "-",         x + P_MODE, y, DASH_CORNER, FONT_SIZE, C_SUB);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep2",  TXT_SEP_SYM, x + P_SEP2, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Dir",   "-",         x + P_DIR,  y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep3",  TXT_SEP_SYM, x + P_SEP3, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Score", "-",         x + P_SCOR, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep4",  TXT_SEP_SYM, x + P_SEP4, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_State", "-",         x + P_STAT, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep5",  TXT_SEP_SYM, x + P_SEP5, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Next",  "-",         x + P_NEXT, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep6",  TXT_SEP_SYM, x + P_SEP6, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Chain", "--",        x + P_CHN,  y, DASH_CORNER, FONT_SIZE, C_SUB);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Sep7",  TXT_SEP_SYM, x + P_SEP7, y, DASH_CORNER, FONT_SIZE, C_SEP);
+      CreateLabel(INFO_PREFIX + "R"+r+"_Pnl",   "--",        x + P_PNL,  y, DASH_CORNER, FONT_SIZE, C_SUB);
       y -= TABLE_ROW_H;
    }
+   y -= 5;
 
-   // 6. FOOTER
-   y = y + TABLE_ROW_H - FOOT_GAP; 
-   CreateLabel(INFO_PREFIX + "Footer", TXT_FOOTER, x_base + FOOT_OFF_X, y, DASH_CORNER, FOOT_SIZE, C_FOOTER);
+   // ===============================================================
+   // SECTION C — ACTIVE CHAIN PANEL
+   // ===============================================================
+   CreateLabel(INFO_PREFIX + "SecC_Title", "=== ACTIVE CHAIN ===", x, y, DASH_CORNER, FONT_SEC_SIZE, C_SECTION, true);
+   y -= 17;
+
+   CreateLabel(INFO_PREFIX + "Chain_L1", "No active chain", x, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   y -= DASH_LINE_H;
+   CreateLabel(INFO_PREFIX + "Chain_L2", " ",               x, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   y -= DASH_LINE_H;
+   CreateLabel(INFO_PREFIX + "Chain_L3", " ",               x, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   y -= (DASH_LINE_H + 5);
+
+   // ===============================================================
+   // SECTION D — ENTRY / DEBUG DETAIL
+   // ===============================================================
+   CreateLabel(INFO_PREFIX + "SecD_Title", "=== ENTRY ANALYSIS ===", x, y, DASH_CORNER, FONT_SEC_SIZE, C_SECTION, true);
+   y -= 17;
+
+   CreateLabel(INFO_PREFIX + "Entry_L1", "Strategy : --   | Direction : --   | Score : --/100 | Mode : --", x, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+   y -= DASH_LINE_H;
+   CreateLabel(INFO_PREFIX + "Entry_L2", "State    : --   | Readiness : --   | Next Gate : --",             x, y, DASH_CORNER, FONT_SIZE, C_TEXT);
+   y -= DASH_LINE_H;
+   CreateLabel(INFO_PREFIX + "Entry_L3", "Block Reason : NONE",                                             x, y, DASH_CORNER, FONT_SIZE, C_VALUE);
+   y -= DASH_LINE_H;
+   CreateLabel(INFO_PREFIX + "Entry_L4", "Score Breakdown: --",                                             x, y, DASH_CORNER, FONT_SIZE, C_SUB);
+   y -= (DASH_LINE_H + 6);
+
+   // ===============================================================
+   // FOOTER
+   // ===============================================================
+   CreateLabel(INFO_PREFIX + "Sep_Foot", "--------------------------------------------------------------------------------", x, y, DASH_CORNER, FONT_SIZE, C_SEP);
+   y -= 15;
+   CreateLabel(INFO_PREFIX + "Footer", TXT_FOOTER, x + 175, y, DASH_CORNER, FONT_SIZE + 1, C_HEADER, true);
 
    ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
-//| CẬP NHẬT DỮ LIỆU ĐỘNG                                            |
+//| UPDATE DASHBOARD DISPLAY (UPDATE PROPERTIES ONLY - NO LAG)       |
 //+------------------------------------------------------------------+
 void UpdateDisplay()
 {
@@ -243,161 +244,275 @@ void UpdateDisplay()
       return;
    }
 
-   // --- TÍNH TOÁN ---
-   double real_bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   // 1. ACCOUNT BALANCES & SYSTEM STATS
+   double real_bal   = AccountInfoDouble(ACCOUNT_BALANCE);
    double total_debt = GetTotalSystemDebt();
-   double virt_bal = real_bal + total_debt;
+   double virt_bal   = real_bal + total_debt;
 
-   // --- STATUS ---
-   string status_msg = TXT_STAT_RUN;
-   color  status_clr = C_VALUE; 
-   if(InpEnableBalanceLimit)
-   {
-      if(virt_bal < LIMIT_MIN_VIRTUAL) { status_msg = TXT_STAT_LOW; status_clr = C_WARN; }
-      else if(virt_bal > LIMIT_MAX_VIRTUAL) { status_msg = TXT_STAT_LIMIT; status_clr = C_LIMIT; }
-   }
+   SetLabelText(INFO_PREFIX + "Sys_Bal_Val",  StringFormat("$%.2f", real_bal), C_VALUE);
+   SetLabelText(INFO_PREFIX + "Sys_VBal_Val", StringFormat("$%.2f", virt_bal), C_VALUE);
+   SetLabelText(INFO_PREFIX + "Sys_Debt_Val", StringFormat("$%.2f", total_debt), (total_debt > 0.01 ? C_LIMIT : C_VALUE));
+   SetLabelText(INFO_PREFIX + "Sys_Risk_Val", StringFormat("%.1f%%", G_Pairs[0].risk_percent), C_TEXT);
 
-   ObjectSetString(0, INFO_PREFIX + "Status_Val", OBJPROP_TEXT, status_msg);
-   ObjectSetInteger(0, INFO_PREFIX + "Status_Val", OBJPROP_COLOR, status_clr);
+   bool ct_on = (InpEnableCounterTrend && InpUseReversalEngine);
+   bool ft_on = InpEnableTrendFollowing;
+   SetLabelText(INFO_PREFIX + "Sys_CT_Val",    (ct_on ? "ACTIVE" : "OFF"), (ct_on ? C_VALUE : C_WARN));
+   SetLabelText(INFO_PREFIX + "Sys_FT_Val",    (ft_on ? "ACTIVE" : "OFF"), (ft_on ? C_VALUE : C_WARN));
+   SetLabelText(INFO_PREFIX + "Sys_DCA_Val",   "ALWAYS ON", C_VALUE);
+   SetLabelText(INFO_PREFIX + "Sys_DynTP_Val", (InpEnableDynamicTP ? "ACTIVE" : "OFF"), (InpEnableDynamicTP ? C_VALUE : C_WARN));
 
-   // --- DXY STATUS ---
+   // DXY Status/Price
    if(!InpUseDXYReference)
    {
-      ObjectSetString(0, INFO_PREFIX + "DXY_Val", OBJPROP_TEXT, "Disabled by User");
-      ObjectSetInteger(0, INFO_PREFIX + "DXY_Val", OBJPROP_COLOR, C_WARN);
+      SetLabelText(INFO_PREFIX + "Sys_DXY_Val", "DISABLED", C_WARN);
    }
    else if(g_dxy_available)
    {
-      ObjectSetString(0, INFO_PREFIX + "DXY_Val", OBJPROP_TEXT, StringFormat("Connected (%s)", DXY_SYMBOL));
-      ObjectSetInteger(0, INFO_PREFIX + "DXY_Val", OBJPROP_COLOR, C_VALUE);
+      double dxy_bid = SymbolInfoDouble(DXY_SYMBOL, SYMBOL_BID);
+      if(dxy_bid > 0.0)
+      {
+         int dxy_dig = (int)SymbolInfoInteger(DXY_SYMBOL, SYMBOL_DIGITS);
+         string dxy_str = DoubleToString(dxy_bid, (dxy_dig > 0 ? dxy_dig : 2));
+         SetLabelText(INFO_PREFIX + "Sys_DXY_Val", dxy_str, C_VALUE);
+      }
+      else
+      {
+         SetLabelText(INFO_PREFIX + "Sys_DXY_Val", "CONNECTED", C_VALUE);
+      }
    }
    else
    {
-      ObjectSetString(0, INFO_PREFIX + "DXY_Val", OBJPROP_TEXT, "Not Available");
-      ObjectSetInteger(0, INFO_PREFIX + "DXY_Val", OBJPROP_COLOR, C_WARN);
+      SetLabelText(INFO_PREFIX + "Sys_DXY_Val", "NOT FOUND", C_WARN);
    }
 
-   // --- REVERSAL ENGINE STATUS ---
-   if(!InpUseReversalEngine)
-   {
-      ObjectSetString(0, INFO_PREFIX + "Rev_Val", OBJPROP_TEXT, "Disabled");
-      ObjectSetInteger(0, INFO_PREFIX + "Rev_Val", OBJPROP_COLOR, C_WARN);
-   }
-   else
-   {
-      // Display the Reversal Score of the EURUSD pair as representative, or an aggregate status.
-      // Since it's a global label, we'll show "Active" and we can add score to the individual pair rows later if needed.
-      ObjectSetString(0, INFO_PREFIX + "Rev_Val", OBJPROP_TEXT, "Active (MTF+Scoring)");
-      ObjectSetInteger(0, INFO_PREFIX + "Rev_Val", OBJPROP_COLOR, C_VALUE);
-   }
+   // 2. SCAN CHAINS & UPDATE PAIR MONITOR ROWS
+   int total_active_chains = 0;
+   int primary_active_pair = -1;
+   int focus_pair = -1;
+   double highest_score = -1.0;
+   int highest_progress = -1;
 
-
-   // --- BAL ---
-   ObjectSetString(0, INFO_PREFIX + "Acc_Bal_Val", OBJPROP_TEXT, StringFormat("$%.2f", real_bal));
-   
-   // [CHỈNH SỬA TẠI ĐÂY] Thêm khoảng trắng để tạo định dạng: ( Nợ : $0 )
-   string debt_str = StringFormat("$%.0f %s $%.0f )", virt_bal, TXT_DEBT_PRE, total_debt);
-   ObjectSetString(0, INFO_PREFIX + "Virt_Bal_Val", OBJPROP_TEXT, debt_str);
-
-   // --- CẬP NHẬT TỪNG MẢNH GHÉP CỦA BẢNG ---
    for(int i = 0; i < TOTAL_PAIRS; i++)
    {
       string sym = G_Pairs[i].symbol;
-      string short_name = StringSubstr(sym, 0, 6);
-      if(short_name == "") short_name = "ERROR";
+      ulong expected_magic = EA_MAGIC_NUMBER * 1000 + i;
 
-      int    count = 0;
-      double pnl   = 0.0;
-
-      for(int k = PositionsTotal()-1; k >= 0; --k)
+      // Scan open positions
+      int pair_orders = 0;
+      double pair_pnl = 0.0;
+      for(int k = PositionsTotal() - 1; k >= 0; --k)
       {
          ulong t = PositionGetTicket(k);
          if(t > 0 && PositionSelectByTicket(t))
          {
-            if(PositionGetString(POSITION_SYMBOL) == sym && (ulong)PositionGetInteger(POSITION_MAGIC) != 0)
+            if(PositionGetString(POSITION_SYMBOL) == sym)
             {
-               count++;
-               pnl += ProfitOf(t);
+               ulong pos_magic = (ulong)PositionGetInteger(POSITION_MAGIC);
+               if(pos_magic == expected_magic || pos_magic == G_Pairs[i].active_chain_id || (pos_magic == 0 && G_Pairs[i].active_chain_id != 0))
+               {
+                  pair_orders++;
+                  pair_pnl += ProfitOf(t);
+               }
             }
          }
       }
 
-      double debt = G_Pairs[i].ct_realized_bleed_loss + G_Pairs[i].ft_realized_bleed_loss + G_Pairs[i].dual_realized_bleed_loss;
-      double risk = G_Pairs[i].risk_percent;
-
-      // Color Logic
-      color row_color = C_TEXT; 
-      if(risk <= 0.001)                     row_color = R_OFF;
-      else if(count > 0 && pnl >= 0)        row_color = R_PROFIT;
-      else if(count > 0 && pnl < 0)         row_color = R_LOSS;
-      else if(count == 0 && debt > 0)       row_color = R_DEBT;
-      else if(count == 0 && debt == 0)      row_color = R_SLEEP;
-
-      // Chuẩn bị Text
-      string s_pair = StringFormat("%-6s", short_name);
-      string s_trend = "-", s_bias = "-", s_score = "-", s_prog = "-", s_stat = "-", s_wait = "-", s_entry = "-";
-
-      if(InpUseReversalEngine)
+      bool pair_has_chain = (pair_orders > 0);
+      if(pair_has_chain)
       {
-         ReversalDisplayData data;
-         if(BuildReversalDisplayData(i, data))
+         total_active_chains++;
+         if(primary_active_pair < 0)
          {
-            s_trend = data.htfTrend;
-            s_bias  = data.reversalBias;
-            s_score = StringFormat("%.0f%%", data.reversalScore);
-            s_prog  = StringFormat("%d/%d", data.progressCompleted, data.progressTotal);
-            s_stat  = data.state;
-            
-            // Block reason overrides wait state if blocked
-            if(data.blockReason != "NONE") s_wait = "BLK: " + data.blockReason;
-            else s_wait = data.waitingFor;
-            
-            s_entry = data.masterEntry;
+            primary_active_pair = i;
+         }
+         else if(StringFind(sym, _Symbol) >= 0 || StringFind(_Symbol, G_Pairs[i].base_name) >= 0)
+         {
+            primary_active_pair = i;
          }
       }
 
+      // Build data presentation
+      ReversalDisplayData data;
+      BuildReversalDisplayData(i, data);
+
       string r = IntegerToString(i);
+      string sym_short = G_Pairs[i].base_name;
 
-      // Cập nhật từng ô dữ liệu
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Pair", OBJPROP_TEXT, s_pair);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Pair", OBJPROP_COLOR, row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Trend", OBJPROP_TEXT, s_trend);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Trend", OBJPROP_COLOR, row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Bias",  OBJPROP_TEXT, s_bias);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Bias",  OBJPROP_COLOR, (s_bias == "CONFLICT") ? C_WARN : row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Score", OBJPROP_TEXT, s_score);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Score", OBJPROP_COLOR, row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Prog", OBJPROP_TEXT, s_prog);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Prog", OBJPROP_COLOR, row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Stat",  OBJPROP_TEXT, s_stat);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Stat",  OBJPROP_COLOR, row_color);
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Wait",   OBJPROP_TEXT, s_wait);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Wait",   OBJPROP_COLOR, (s_wait == "NONE") ? C_VALUE : (StringFind(s_wait, "BLK:") >= 0 ? C_WARN : row_color));
-      
-      ObjectSetString(0, INFO_PREFIX + "R"+r+"_Entry",   OBJPROP_TEXT, s_entry);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Entry",   OBJPROP_COLOR, (s_entry == "BUY READY" || s_entry == "SELL READY") ? C_VALUE : (s_entry == "BLOCKED" ? C_WARN : row_color));
+      string s_pair  = StringFormat("%-6s", sym_short);
+      string s_mode  = StringFormat("%-4s", data.displayMode);
+      string s_dir   = StringFormat("%-4s", data.displayDir);
+      string s_score = StringFormat("%7s", data.displayScoreStr);
+      string s_state = StringFormat("%-14s", StringSubstr(data.displayState, 0, 14));
+      string s_next  = StringFormat("%-14s", StringSubstr(data.displayNextGate, 0, 14));
 
-      // Cập nhật màu dấu phân cách
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep1", OBJPROP_COLOR, row_color); 
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep2", OBJPROP_COLOR, row_color);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep3", OBJPROP_COLOR, row_color);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep4", OBJPROP_COLOR, row_color);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep5", OBJPROP_COLOR, row_color);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep6", OBJPROP_COLOR, row_color);
-      ObjectSetInteger(0, INFO_PREFIX + "R"+r+"_Sep7", OBJPROP_COLOR, row_color);
+      string s_chain = "--";
+      string s_pnl   = "--";
+      if(pair_has_chain)
+      {
+         ulong cid = (G_Pairs[i].active_chain_id > 0) ? G_Pairs[i].active_chain_id : expected_magic;
+         s_chain = StringFormat("#%I64u", cid);
+         s_pnl = StringFormat("%s$%.2f", (pair_pnl >= 0 ? "+" : ""), pair_pnl);
+      }
+
+      // Row colors
+      color clr_pair = C_TEXT;
+      color clr_mode = C_SUB;
+      color clr_dir  = (data.displayDir == "BUY" ? C_VALUE : (data.displayDir == "SELL" ? C_WARN : C_SUB));
+      color clr_score = (data.displayScore >= 100.0 ? C_VALUE : (data.displayScore >= 70.0 ? C_LIMIT : C_SUB));
+      color clr_state = (data.displayState == "READY" ? C_VALUE : (data.displayState == "BLOCKED" ? C_WARN : C_TEXT));
+      color clr_next  = (data.displayNextGate == "ENTRY" ? C_VALUE : (data.displayState == "BLOCKED" ? C_WARN : C_SUB));
+      color clr_chain = (pair_has_chain ? C_SECTION : C_SUB);
+      color clr_pnl   = (pair_has_chain ? (pair_pnl >= 0 ? R_PROFIT : R_LOSS) : C_SUB);
+
+      SetLabelText(INFO_PREFIX + "R"+r+"_Pair",  s_pair,  clr_pair);
+      SetLabelText(INFO_PREFIX + "R"+r+"_Mode",  s_mode,  clr_mode);
+      SetLabelText(INFO_PREFIX + "R"+r+"_Dir",   s_dir,   clr_dir);
+      SetLabelText(INFO_PREFIX + "R"+r+"_Score", s_score, clr_score);
+      SetLabelText(INFO_PREFIX + "R"+r+"_State", s_state, clr_state);
+      SetLabelText(INFO_PREFIX + "R"+r+"_Next",  s_next,  clr_next);
+      SetLabelText(INFO_PREFIX + "R"+r+"_Chain", s_chain, clr_chain);
+      SetLabelText(INFO_PREFIX + "R"+r+"_Pnl",   s_pnl,   clr_pnl);
+
+      // Candidate tracking for Section D (Entry Analysis)
+      if(!pair_has_chain)
+      {
+         // Priority 1: Score >= 100
+         if(data.displayScore >= 100.0 && (focus_pair < 0 || highest_score < 100.0))
+         {
+            focus_pair = i;
+            highest_score = data.displayScore;
+         }
+         // Priority 2: Highest score > 0
+         else if(highest_score < 100.0 && data.displayScore > highest_score && data.displayScore > 0.0)
+         {
+            focus_pair = i;
+            highest_score = data.displayScore;
+         }
+         // Priority 3: Highest progress
+         else if(highest_score <= 0.0 && data.progressCompleted > highest_progress && data.progressCompleted > 0)
+         {
+            focus_pair = i;
+            highest_progress = data.progressCompleted;
+         }
+      }
    }
+
+   SetLabelText(INFO_PREFIX + "Sys_Chain_Val", IntegerToString(total_active_chains), (total_active_chains > 0 ? C_VALUE : C_SUB));
+
+   // 3. SECTION C — ACTIVE CHAIN PANEL
+   if(total_active_chains == 0 || primary_active_pair < 0)
+   {
+      SetLabelText(INFO_PREFIX + "SecC_Title", "=== ACTIVE CHAIN ===", C_SECTION);
+      SetLabelText(INFO_PREFIX + "Chain_L1", "No active chain", C_SUB);
+      SetLabelText(INFO_PREFIX + "Chain_L2", " ", C_SUB);
+      SetLabelText(INFO_PREFIX + "Chain_L3", " ", C_SUB);
+   }
+   else
+   {
+      int ac = primary_active_pair;
+      string base = G_Pairs[ac].base_name;
+      SetLabelText(INFO_PREFIX + "SecC_Title", StringFormat("=== ACTIVE CHAIN — %s ===", base), C_SECTION);
+
+      string strat = G_Pairs[ac].active_chain_strategy;
+      if(strat == "") strat = "CT";
+
+      int dir_val = G_TradeProfile[ac].direction;
+      if(dir_val == 0) dir_val = G_Pairs[ac].setup_direction;
+      string dir_str = (dir_val == 1 ? "BUY" : (dir_val == -1 ? "SELL" : "--"));
+
+      ulong cid = (G_Pairs[ac].active_chain_id > 0) ? G_Pairs[ac].active_chain_id : (EA_MAGIC_NUMBER * 1000 + ac);
+
+      int orders = 0;
+      for(int k = PositionsTotal() - 1; k >= 0; --k)
+      {
+         ulong t = PositionGetTicket(k);
+         if(t > 0 && PositionSelectByTicket(t))
+         {
+            if(PositionGetString(POSITION_SYMBOL) == G_Pairs[ac].symbol && (ulong)PositionGetInteger(POSITION_MAGIC) == cid)
+               orders++;
+         }
+      }
+
+      int dca_count = G_Pairs[ac].chain_dca_count;
+      int dca_step  = G_Pairs[ac].chain_step_pips;
+      if(dca_step <= 0) dca_step = InpDCA_MinStepPips;
+
+      double debt = 0.0;
+      int rec_lvl = 0;
+      if(strat == "FT")
+      {
+         debt = G_Pairs[ac].ft_realized_bleed_loss;
+         rec_lvl = G_Pairs[ac].ft_recovery_level;
+      }
+      else if(strat == "DUAL")
+      {
+         debt = G_Pairs[ac].dual_realized_bleed_loss;
+         rec_lvl = G_Pairs[ac].dual_recovery_level;
+      }
+      else
+      {
+         debt = G_Pairs[ac].ct_realized_bleed_loss;
+         rec_lvl = G_Pairs[ac].ct_recovery_level;
+      }
+
+      bool is_runner = (InpEnableDynamicTP && G_TradeProfile[ac].runner_active);
+      string exit_mode_str = is_runner ? "RUNNER" : "NORMAL";
+      if(InpEnableDynamicTP && G_TradeProfile[ac].compression_active)
+      {
+         exit_mode_str += " (Compression ACTIVE)";
+      }
+
+      string l1 = StringFormat("Strategy : %-4s   | Direction : %-4s   | Chain ID : #%I64u", strat, dir_str, cid);
+      string l2 = StringFormat("Orders   : %-2d     | DCA       : %-2d (%-2dp) | Debt     : $%.2f (L%d)", orders, dca_count, dca_step, debt, rec_lvl);
+      string l3 = StringFormat("Exit Mode: %s", exit_mode_str);
+
+      SetLabelText(INFO_PREFIX + "Chain_L1", l1, C_TEXT);
+      SetLabelText(INFO_PREFIX + "Chain_L2", l2, (debt > 0.01 ? C_LIMIT : C_TEXT));
+      SetLabelText(INFO_PREFIX + "Chain_L3", l3, (is_runner ? C_VALUE : C_TEXT));
+   }
+
+   // 4. SECTION D — ENTRY / DEBUG DETAIL
+   if(focus_pair < 0)
+   {
+      for(int i = 0; i < TOTAL_PAIRS; i++)
+      {
+         if(StringFind(G_Pairs[i].symbol, _Symbol) >= 0 || StringFind(_Symbol, G_Pairs[i].base_name) >= 0)
+         {
+            focus_pair = i;
+            break;
+         }
+      }
+      if(focus_pair < 0) focus_pair = 0;
+   }
+
+   ReversalDisplayData fData;
+   BuildReversalDisplayData(focus_pair, fData);
+
+   string f_base = G_Pairs[focus_pair].base_name;
+   SetLabelText(INFO_PREFIX + "SecD_Title", StringFormat("=== ENTRY ANALYSIS — %s ===", f_base), C_SECTION);
+
+   string e1 = StringFormat("Strategy : %-4s   | Direction : %-4s   | Score : %-7s | Mode : %s",
+                            fData.displayMode, fData.displayDir, fData.displayScoreStr, fData.entryMode);
+   string e2 = StringFormat("State    : %-10s | Readiness : %-10s | Next Gate : %s",
+                            fData.displayState, fData.displayReadinessStr, fData.displayNextGate);
+   string e3 = StringFormat("Block Reason : %s", fData.displayBlockReason);
+   string e4 = StringFormat("Score Breakdown: %s", (fData.displayBreakdown != "" ? fData.displayBreakdown : "N/A"));
+
+   color clr_e1 = (fData.displayScore >= 100.0 ? C_VALUE : C_TEXT);
+   color clr_e2 = (fData.displayState == "READY" ? C_VALUE : (fData.displayState == "BLOCKED" ? C_WARN : C_TEXT));
+   color clr_e3 = (fData.displayBlockReason != "NONE" && fData.displayBlockReason != "ACTIVE CHAIN" ? C_WARN : C_VALUE);
+   color clr_e4 = C_SUB;
+
+   SetLabelText(INFO_PREFIX + "Entry_L1", e1, clr_e1);
+   SetLabelText(INFO_PREFIX + "Entry_L2", e2, clr_e2);
+   SetLabelText(INFO_PREFIX + "Entry_L3", e3, clr_e3);
+   SetLabelText(INFO_PREFIX + "Entry_L4", e4, clr_e4);
 
    ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
-//| XÓA GIAO DIỆN                                                    |
+//| DELETE DASHBOARD DISPLAY                                         |
 //+------------------------------------------------------------------+
 void DeleteDisplay()
 {
@@ -407,11 +522,11 @@ void DeleteDisplay()
 }
 
 //+------------------------------------------------------------------+
-//| VẼ LABEL (TEXT) - ALWAYS ON TOP                                  |
+//| CREATE LABEL (TEXT) - ALWAYS ON TOP                              |
 //+------------------------------------------------------------------+
-void CreateLabel(string name, string text, int x, int y, int corner, int font_size, color clr)
+void CreateLabel(string name, string text, int x, int y, int corner, int font_size, color clr, bool bold = false)
 {
-   if(ObjectFind(0, name) != 0) ObjectDelete(0, name);
+   if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
 
    ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
@@ -422,15 +537,17 @@ void CreateLabel(string name, string text, int x, int y, int corner, int font_si
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, font_size);
    ObjectSetString(0, name, OBJPROP_FONT, FONT_NAME);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
-   ObjectSetInteger(0, name, OBJPROP_BACK, false); // Nằm trên nến và nền
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
 }
 
 //+------------------------------------------------------------------+
-//| VẼ BACKGROUND (PANEL) - ALWAYS ON TOP                            |
+//| CREATE BACKGROUND (PANEL) - ALWAYS ON TOP                        |
 //+------------------------------------------------------------------+
 void CreatePanel(string name, int x, int y, int w, int h, int corner, color bg_clr)
 {
-   if(ObjectFind(0, name) != 0) ObjectDelete(0, name);
+   if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
 
    ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
@@ -440,9 +557,22 @@ void CreatePanel(string name, int x, int y, int w, int h, int corner, color bg_c
    ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg_clr);
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER); 
-   ObjectSetInteger(0, name, OBJPROP_BACK, false); // Đè lên nến
+   ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, C_SEP);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    ObjectSetInteger(0, name, OBJPROP_SELECTED, false);
+}
+
+//+------------------------------------------------------------------+
+//| SET LABEL TEXT AND COLOR (UPDATE WITHOUT RECREATING)             |
+//+------------------------------------------------------------------+
+void SetLabelText(string name, string text, color clr)
+{
+   if(ObjectFind(0, name) >= 0)
+   {
+      ObjectSetString(0, name, OBJPROP_TEXT, text);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   }
 }
 //+------------------------------------------------------------------+
