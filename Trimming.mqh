@@ -81,8 +81,7 @@ void ApplySmartTrimming(int idx)
       if(!SelectPosByTicket(target_t)) break;
 
       // B. Lấy thông tin trước khi cắt
-      double current_vol    = PositionGetDouble(POSITION_VOLUME);
-      double current_profit = ProfitOf(target_t); 
+      double current_vol    = PositionGetDouble(POSITION_VOLUME); 
 
       // C. Tính khối lượng cần cắt (Normalize theo Symbol cụ thể)
       double trim_vol = NormalizeLot(sym, current_vol * (InpTrimPercentage / 100.0));
@@ -93,11 +92,7 @@ void ApplySmartTrimming(int idx)
          trim_vol = current_vol;
       }
 
-      // D. Tính toán lỗ thực tế (Realized Loss)
-      double ratio = trim_vol / current_vol;
-      double realized_loss_now = current_profit * ratio;
-
-      // E. Thực hiện hành động CẮT
+      // D. Thực hiện hành động CẮT
       bool res = false;
       if(trim_vol >= current_vol)
       {
@@ -110,41 +105,9 @@ void ApplySmartTrimming(int idx)
          PrintFormat("[%s] >>> TRIM PARTIAL: Cắt %.2f lot của lệnh %d.", sym, trim_vol, target_t);
       }
 
-      // F. Ghi sổ nợ & Lưu trữ (Persistence vào đúng struct của cặp)
+      // F. Operational management (Debt is handled exclusively by central Chain/History resolution)
       if(res)
       {
-         // Nếu PnL < 0, cộng lỗ vào Debt theo strategy của chain này
-         if(realized_loss_now < 0)
-         {
-            double loss_positive = -realized_loss_now;
-            string strat = G_Pairs[idx].active_chain_strategy;
-            double current_debt = 0.0;
-
-            if(strat == "FT")
-            {
-               G_Pairs[idx].ft_realized_bleed_loss += loss_positive;
-               current_debt = G_Pairs[idx].ft_realized_bleed_loss;
-               GlobalVariableSet("Yoogi_FT_Debt_" + sym, current_debt);
-            }
-            else if(strat == "DUAL")
-            {
-               G_Pairs[idx].dual_realized_bleed_loss += loss_positive;
-               current_debt = G_Pairs[idx].dual_realized_bleed_loss;
-               GlobalVariableSet("Yoogi_DUAL_Debt_" + sym, current_debt);
-            }
-            else // Default or "CT"
-            {
-               G_Pairs[idx].ct_realized_bleed_loss += loss_positive;
-               current_debt = G_Pairs[idx].ct_realized_bleed_loss;
-               GlobalVariableSet("Yoogi_CT_Debt_" + sym, current_debt);
-            }
-
-            PrintFormat("[%s] > Ghi nợ (%s): +$%.2f. Tổng nợ %s cặp này: $%.2f", sym, strat, loss_positive, strat, current_debt);
-
-            // LƯU NGAY VÀO Ổ CỨNG (Dùng tên biến persistent)
-            GlobalVariableSet(GetVarName_Step(sym, chain_id),  (double)G_Pairs[idx].chain_position_count);
-         }
-
          Sleep(200);
       }
       else

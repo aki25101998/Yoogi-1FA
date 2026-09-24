@@ -312,8 +312,7 @@ void PopulateUnifiedDisplayFields(int idx, ReversalDisplayData &data)
             if(PositionGetString(POSITION_SYMBOL) == G_Pairs[idx].symbol)
             {
                 ulong magic = (ulong)PositionGetInteger(POSITION_MAGIC);
-                ulong expected = EA_MAGIC_NUMBER * 1000 + idx;
-                if(magic == expected || magic == G_Pairs[idx].active_chain_id || (magic == 0 && G_Pairs[idx].active_chain_id != 0))
+                if(IsPairChainMagic(idx, magic) || (magic == 0 && G_Pairs[idx].active_chain_id != 0))
                 {
                     count++;
                     pnl += ProfitOf(t);

@@ -100,6 +100,7 @@ void SaveChainState_Multi(int idx)
    if(id == 0) return;
 
    // Chain Specific State
+   GlobalVariableSet("Yoogi_ActiveChainID_" + sym, (double)id);
    GlobalVariableSet(GetVarName_Step(sym, id),     (double)G_Pairs[idx].chain_position_count);
    GlobalVariableSet(GetVarName_StartSeq(sym, id), (double)G_Pairs[idx].chain_start_dca_seq);
    GlobalVariableSet(GetVarName_EndSeq(sym, id),   (double)G_Pairs[idx].chain_end_dca_seq);
@@ -150,6 +151,14 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    else G_Pairs[idx].dual_dca_sequence = 0;
 
    // Load Chain Specific State
+   if(chain_id == 0)
+   {
+      if(GlobalVariableCheck("Yoogi_ActiveChainID_" + sym))
+         chain_id = (ulong)GlobalVariableGet("Yoogi_ActiveChainID_" + sym);
+   }
+   G_Pairs[idx].active_chain_id = chain_id;
+   if(chain_id == 0) return;
+
    string n_step     = GetVarName_Step(sym, chain_id);
    string n_start    = GetVarName_StartSeq(sym, chain_id);
    string n_end      = GetVarName_EndSeq(sym, chain_id);
@@ -208,6 +217,7 @@ void ClearChainState_Multi(int idx)
       GlobalVariableDel("Yoogi_DCAStep_" + sym + "_" + IntegerToString(id));
       GlobalVariableDel(GetVarName_LockedBal(sym, id));
       GlobalVariableDel("Yoogi_Strat_" + sym + "_" + IntegerToString(id));
+      GlobalVariableDel("Yoogi_ActiveChainID_" + sym);
       ClearTradeProfilePersistence(idx, id);
    }
 
@@ -221,6 +231,177 @@ void ClearChainState_Multi(int idx)
    G_Pairs[idx].active_chain_strategy = "";
 }
 
+// ==================================================================
+// AUTHORITATIVE RESOLUTION OF CLOSED CHAIN FROM ACCOUNT HISTORY
+// ==================================================================
+bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
+{
+   if(chain_id == 0) return false;
+   string sym = G_Pairs[idx].symbol;
+   
+   // Idempotency: verify this chain has not already been resolved
+   string resolved_gv = "Yoogi_Resolved_" + sym + "_" + IntegerToString(chain_id);
+   if(GlobalVariableCheck(resolved_gv)) return false;
+
+   datetime from_date = TimeCurrent() - 90 * 24 * 60 * 60;
+   if(!HistorySelect(from_date, TimeCurrent() + 86400)) return false;
+
+   int deals = HistoryDealsTotal();
+   double realized_pnl = 0.0;
+   int close_deals_found = 0;
+   ulong max_ticket_found = 0;
+
+   for(int d = 0; d < deals; d++)
+   {
+      ulong ticket = HistoryDealGetTicket(d);
+      if(ticket > 0)
+      {
+         if(HistoryDealGetString(ticket, DEAL_SYMBOL) == sym && 
+            (ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) == chain_id)
+         {
+            long deal_entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+            if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_INOUT || deal_entry == DEAL_ENTRY_OUT_BY)
+            {
+               realized_pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT) + 
+                               HistoryDealGetDouble(ticket, DEAL_COMMISSION) + 
+                               HistoryDealGetDouble(ticket, DEAL_SWAP);
+               close_deals_found++;
+            }
+            if(ticket > max_ticket_found) max_ticket_found = ticket;
+         }
+      }
+   }
+
+   if(close_deals_found == 0) return false;
+
+   string strat = G_Pairs[idx].active_chain_strategy;
+   if(strat == "") strat = "CT"; // Fallback
+   
+   double debt_before     = GetStrategyDebt(idx, strat);
+   int rec_lvl            = GetStrategyRecLvl(idx, strat);
+   int current_dca_seq    = GetStrategyDCASeq(idx, strat);
+
+   int dca_from = G_Pairs[idx].chain_start_dca_seq;
+   int dca_to   = G_Pairs[idx].chain_end_dca_seq;
+   if(dca_to <= 0) dca_to = current_dca_seq;
+   if(dca_from <= 0) dca_from = MathMax(1, dca_to - G_Pairs[idx].chain_position_count + 1);
+
+   // Update Debt, Recovery State & DCA Sequence based on Reason and Realized P&L
+   if(reason == "MAX_DCA")
+   {
+      if(realized_pnl < 0.0)
+      {
+         double net_loss = MathAbs(realized_pnl);
+         double debt_after = debt_before + net_loss;
+         rec_lvl++;
+         
+         SetStrategyDebt(idx, strat, debt_after);
+         SetStrategyRecLvl(idx, strat, rec_lvl);
+         // Global DCA sequence stays at dca_to (does NOT reset)
+         
+         PrintFormat("[CHAIN-LOSS]\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nMODE=RECOVERY",
+                     chain_id, dca_from, dca_to, realized_pnl, debt_before, net_loss, debt_after);
+      }
+      else
+      {
+         // MAX_DCA with profit (not TP): do NOT create new Debt, do NOT reset DCA sequence,
+         // do NOT declare Recovery Complete, keep existing Recovery/sequence intact.
+         string mode_str = (debt_before > 0.001) ? "RECOVERY" : "NORMAL";
+         PrintFormat("[CHAIN-CLOSE-PROFIT]\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f\nMODE=%s",
+                     chain_id, realized_pnl, debt_before, debt_before, mode_str);
+      }
+   }
+   else if(reason == "TP" || reason == "RUNNER")
+   {
+      if(debt_before <= 0.001)
+      {
+         // Normal TP: no debt, reset sequence to 0 (ready for next chain starting at DCA 1)
+         SetStrategyDCASeq(idx, strat, 0);
+         SetStrategyRecLvl(idx, strat, 0);
+         SetStrategyDebt(idx, strat, 0.0);
+         
+         PrintFormat("[NORMAL-TP]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_RESULT=%.2f\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
+                     sym, strat, realized_pnl);
+      }
+      else
+      {
+         // Recovery TP: settle debt with realized profit
+         if(realized_pnl > 0.0)
+         {
+            double debt_after = MathMax(0.0, debt_before - realized_pnl);
+            
+            PrintFormat("[RECOVERY-PROFIT]\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f",
+                        realized_pnl, debt_before, debt_after);
+
+            if(debt_after <= 0.00001)
+            {
+               // Full Recovery Complete!
+               SetStrategyDebt(idx, strat, 0.0);
+               SetStrategyRecLvl(idx, strat, 0);
+               SetStrategyDCASeq(idx, strat, 0);
+               
+               PrintFormat("[RECOVERY-COMPLETE]\nDEBT=0\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL");
+            }
+            else
+            {
+               // Partial Recovery: still in Recovery Mode, DCA sequence continues!
+               SetStrategyDebt(idx, strat, debt_after);
+               
+               PrintFormat("[RECOVERY-CONTINUE]\nDEBT=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
+                           debt_after, current_dca_seq);
+            }
+         }
+         else
+         {
+            // TP/RUNNER closed with loss (e.g. extreme slippage)
+            double net_loss = MathAbs(realized_pnl);
+            double debt_after = debt_before + net_loss;
+            rec_lvl++;
+            SetStrategyDebt(idx, strat, debt_after);
+            SetStrategyRecLvl(idx, strat, rec_lvl);
+            
+            PrintFormat("[CHAIN-LOSS]\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nMODE=RECOVERY",
+                        chain_id, dca_from, dca_to, realized_pnl, debt_before, net_loss, debt_after);
+         }
+      }
+   }
+   else
+   {
+      // Other closure reason (e.g. broker close / manual close)
+      if(realized_pnl < 0.0)
+      {
+         double net_loss = MathAbs(realized_pnl);
+         double debt_after = debt_before + net_loss;
+         rec_lvl++;
+         SetStrategyDebt(idx, strat, debt_after);
+         SetStrategyRecLvl(idx, strat, rec_lvl);
+         PrintFormat("[CHAIN-LOSS]\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nMODE=RECOVERY",
+                     chain_id, dca_from, dca_to, realized_pnl, debt_before, net_loss, debt_after);
+      }
+      else
+      {
+         // Other closure with positive profit: cannot fake recovery completion
+         string mode_str = (debt_before > 0.001) ? "RECOVERY" : "NORMAL";
+         PrintFormat("[CHAIN-CLOSE-PROFIT]\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f\nMODE=%s",
+                     chain_id, realized_pnl, debt_before, debt_before, mode_str);
+      }
+   }
+
+   // Mark this chain ID as resolved
+   GlobalVariableSet(resolved_gv, 1.0);
+   if(max_ticket_found > 0)
+   {
+      GlobalVariableSet("Yoogi_LastDeal_" + sym, (double)max_ticket_found);
+   }
+
+   // Reset chain state & persist
+   ResetTradeProfile(idx);
+   ClearChainState_Multi(idx);
+   SavePersistentState(idx);
+   
+   return true;
+}
+
 void CloseAndResolveChain(int idx, string reason)
 {
    string sym = G_Pairs[idx].symbol;
@@ -228,21 +409,7 @@ void CloseAndResolveChain(int idx, string reason)
    
    if(id == 0) return;
 
-   // 1. Calculate PnL of this chain
-   double pnl = 0.0;
-   for (int i = PositionsTotal() - 1; i >= 0; --i)
-   {
-      ulong t = PositionGetTicket(i);
-      if (t > 0 && PositionSelectByTicket(t))
-      {
-         if(PositionGetString(POSITION_SYMBOL) == sym && (ulong)PositionGetInteger(POSITION_MAGIC) == id)
-         {
-            pnl += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) + PositionGetDouble(POSITION_COMMISSION);
-         }
-      }
-   }
-
-   // 2. Close all positions
+   // 1. Request closing of all positions belonging to this chain
    for (int i = PositionsTotal() - 1; i >= 0; --i)
    {
       ulong t = PositionGetTicket(i);
@@ -254,108 +421,53 @@ void CloseAndResolveChain(int idx, string reason)
          }
       }
    }
-   
-   string strat = G_Pairs[idx].active_chain_strategy;
-   if(strat == "") strat = "CT";
-   
-   double debt_before     = GetStrategyDebt(idx, strat);
-   int rec_lvl            = GetStrategyRecLvl(idx, strat);
-   int current_dca_seq    = GetStrategyDCASeq(idx, strat);
 
-   int dca_from = G_Pairs[idx].chain_start_dca_seq;
-   int dca_to   = G_Pairs[idx].chain_end_dca_seq;
-   if(dca_to <= 0) dca_to = current_dca_seq;
-   if(dca_from <= 0) dca_from = MathMax(1, dca_to - G_Pairs[idx].chain_position_count + 1);
-
-   // 3. Update Debt, Recovery State & DCA Sequence
-   if (reason == "MAX_DCA")
+   // 2. Wait until positions are closed
+   int wait_ms = 0;
+   while(CountOrdersInChain(sym, id) > 0 && wait_ms < 3000)
    {
-       if(pnl < 0.0)
-       {
-           double net_loss = MathAbs(pnl);
-           double debt_after = debt_before + net_loss;
-           rec_lvl++;
-           
-           SetStrategyDebt(idx, strat, debt_after);
-           SetStrategyRecLvl(idx, strat, rec_lvl);
-           // Global DCA sequence stays at dca_to (does NOT reset)
-           
-           PrintFormat("[CHAIN-LOSS]\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nMODE=RECOVERY",
-                       id, dca_from, dca_to, pnl, debt_before, net_loss, debt_after);
-       }
-       else
-       {
-           // MAX_DCA with profit (not TP): reduce debt, but keep recovery mode until valid TP per Section 15
-           double debt_after = MathMax(0.0, debt_before - pnl);
-           SetStrategyDebt(idx, strat, debt_after);
-           PrintFormat("[CHAIN-CLOSE-PROFIT]\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f\nMODE=RECOVERY",
-                       id, pnl, debt_before, debt_after);
-       }
-   }
-   else if (reason == "TP" || reason == "RUNNER")
-   {
-       if (debt_before <= 0.001)
-       {
-           // Normal TP: no debt, reset sequence to 0 (ready for next chain starting at DCA 1)
-           SetStrategyDCASeq(idx, strat, 0);
-           SetStrategyRecLvl(idx, strat, 0);
-           SetStrategyDebt(idx, strat, 0.0);
-           
-           PrintFormat("[NORMAL-TP]\nSYMBOL=%s\nSTRAT=%s\nCHAIN_RESULT=%.2f\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
-                       sym, strat, pnl);
-       }
-       else
-       {
-           // Recovery TP
-           double debt_after = MathMax(0.0, debt_before - pnl);
-           
-           PrintFormat("[RECOVERY-PROFIT]\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f",
-                       pnl, debt_before, debt_after);
-
-           if (debt_after <= 0.00001)
-           {
-               // Recovery Complete!
-               debt_after = 0.0;
-               SetStrategyDebt(idx, strat, 0.0);
-               SetStrategyRecLvl(idx, strat, 0);
-               SetStrategyDCASeq(idx, strat, 0);
-               
-               PrintFormat("[RECOVERY-COMPLETE]\nDEBT=0\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL");
-           }
-           else
-           {
-               // Partial Recovery: still in Recovery Mode, DCA sequence continues!
-               SetStrategyDebt(idx, strat, debt_after);
-               
-               PrintFormat("[RECOVERY-CONTINUE]\nDEBT=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
-                           debt_after, current_dca_seq);
-           }
-       }
-   }
-   else
-   {
-       // Other closure reason (e.g. manual / emergency)
-       if (pnl < 0.0)
-       {
-           double net_loss = MathAbs(pnl);
-           double debt_after = debt_before + net_loss;
-           SetStrategyDebt(idx, strat, debt_after);
-           PrintFormat("[CHAIN-LOSS]\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nMODE=RECOVERY",
-                       id, dca_from, dca_to, pnl, debt_before, net_loss, debt_after);
-       }
-       else
-       {
-           double debt_after = MathMax(0.0, debt_before - pnl);
-           SetStrategyDebt(idx, strat, debt_after);
-           PrintFormat("[RECOVERY-PROFIT]\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f",
-                       pnl, debt_before, debt_after);
-       }
+      Sleep(50);
+      wait_ms += 50;
    }
 
-   // 4. Save persistent state & clear chain state
-   ResetTradeProfile(idx);
-   ClearChainState_Multi(idx);
-   SavePersistentState(idx);
+   if(CountOrdersInChain(sym, id) > 0)
+   {
+      PrintFormat("[%s] WARNING: Chain %I64u still has %d open positions after close request. Deferring resolution.",
+                  sym, id, CountOrdersInChain(sym, id));
+      return;
+   }
+
+   // 3. Wait briefly for history deals to be available in terminal cache
+   int hist_wait_ms = 0;
+   bool deals_ready = false;
+   while(hist_wait_ms < 2000)
+   {
+      datetime from_date = TimeCurrent() - 90 * 24 * 60 * 60;
+      if(HistorySelect(from_date, TimeCurrent() + 86400))
+      {
+         int deals = HistoryDealsTotal();
+         for(int d = deals - 1; d >= 0; d--)
+         {
+            ulong ticket = HistoryDealGetTicket(d);
+            if(ticket > 0 && HistoryDealGetString(ticket, DEAL_SYMBOL) == sym && 
+               (ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) == id)
+            {
+               long deal_entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
+               if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_INOUT || deal_entry == DEAL_ENTRY_OUT_BY)
+               {
+                  deals_ready = true;
+                  break;
+               }
+            }
+         }
+      }
+      if(deals_ready) break;
+      Sleep(50);
+      hist_wait_ms += 50;
+   }
+
+   // 4. Resolve the closed chain from account history as the authoritative source
+   ResolveClosedChainFromHistory(idx, id, reason);
 }
 
 // ==================================================================
@@ -371,7 +483,7 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
    if(!IsTradable(sym)) return;
 
-   ulong new_chain_id = EA_MAGIC_NUMBER * 1000 + idx;
+   ulong new_chain_id = GenerateUniqueChainID(idx);
    trade.SetExpertMagicNumber(new_chain_id);
 
    // --- DYNAMICAL STRATEGY STATE SELECTION ---
@@ -649,96 +761,7 @@ int CheckDXYConvergence_Dual(int idx)
    }
 }
 
-// ==================================================================
-// HELPER: EXACTLY-ONCE DCA OFF / BROKER CLOSE RESOLUTION
-// ==================================================================
-bool ResolveClosedChainFromHistory(int idx, ulong chain_id)
-{
-   if(chain_id == 0) return false;
-   string sym = G_Pairs[idx].symbol;
-   
-   string gv_name = "Yoogi_LastDeal_" + sym;
-   ulong last_processed_ticket = 0;
-   if(GlobalVariableCheck(gv_name))
-   {
-       last_processed_ticket = (ulong)GlobalVariableGet(gv_name);
-   }
 
-   datetime from_date = TimeCurrent() - 30 * 24 * 60 * 60;
-   if(!HistorySelect(from_date, TimeCurrent() + 86400)) return false;
-
-   int deals = HistoryDealsTotal();
-   double realized_pnl = 0.0;
-   int close_deals_found = 0;
-   ulong max_ticket_found = last_processed_ticket;
-
-   for(int d = 0; d < deals; d++)
-   {
-      ulong ticket = HistoryDealGetTicket(d);
-      if(ticket > 0 && ticket > last_processed_ticket)
-      {
-         if(HistoryDealGetString(ticket, DEAL_SYMBOL) == sym && 
-            HistoryDealGetInteger(ticket, DEAL_MAGIC) == chain_id)
-         {
-            long deal_entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
-            if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_INOUT || deal_entry == DEAL_ENTRY_OUT_BY)
-            {
-               realized_pnl += HistoryDealGetDouble(ticket, DEAL_PROFIT) + 
-                               HistoryDealGetDouble(ticket, DEAL_COMMISSION) + 
-                               HistoryDealGetDouble(ticket, DEAL_SWAP);
-               close_deals_found++;
-            }
-            if(ticket > max_ticket_found) max_ticket_found = ticket;
-         }
-      }
-   }
-
-   if(close_deals_found == 0) return false;
-
-   string strat = G_Pairs[idx].active_chain_strategy;
-   if(strat == "") strat = "CT"; // Fallback
-   
-   double debt_before_print = GetStrategyDebt(idx, strat);
-   int rec_lvl = GetStrategyRecLvl(idx, strat);
-   int current_dca_seq = GetStrategyDCASeq(idx, strat);
-   
-   if(realized_pnl < 0.0)
-   {
-       double net_loss = MathAbs(realized_pnl);
-       double debt_after = debt_before_print + net_loss;
-       rec_lvl++;
-       SetStrategyDebt(idx, strat, debt_after);
-       SetStrategyRecLvl(idx, strat, rec_lvl);
-       // Global DCA sequence continues (does NOT reset)
-       PrintFormat("[CHAIN-LOSS-HISTORY]\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nMODE=RECOVERY",
-                   chain_id, realized_pnl, debt_before_print, net_loss, debt_after);
-   }
-   else
-   {
-       double debt_after = MathMax(0.0, debt_before_print - realized_pnl);
-       PrintFormat("[RECOVERY-PROFIT]\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f",
-                   realized_pnl, debt_before_print, debt_after);
-
-       if(debt_after <= 0.00001)
-       {
-           SetStrategyDebt(idx, strat, 0.0);
-           SetStrategyRecLvl(idx, strat, 0);
-           SetStrategyDCASeq(idx, strat, 0);
-           PrintFormat("[RECOVERY-COMPLETE]\nDEBT=0\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL");
-       }
-       else
-       {
-           SetStrategyDebt(idx, strat, debt_after);
-           PrintFormat("[RECOVERY-CONTINUE]\nDEBT=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
-                       debt_after, current_dca_seq);
-       }
-   }
-   
-   GlobalVariableSet(gv_name, (double)max_ticket_found);
-   SavePersistentState(idx);
-   
-   return true;
-}
 
 // ==================================================================
 // HAM QUET VA DIEU PHOI (MAIN LOOP - MTF DUAL SIGNAL)
@@ -822,10 +845,11 @@ void ManagePairs()
             if(PositionGetString(POSITION_SYMBOL) == sym)
             {
                ulong pos_magic = (ulong)PositionGetInteger(POSITION_MAGIC);
-               if(pos_magic == expected_chain_id || pos_magic == 0)
+               if(IsPairChainMagic(i, pos_magic) || (pos_magic == 0 && G_Pairs[i].active_chain_id != 0))
                {
                    count++;
                    pnl += ProfitOf(t);
+                   if(found_chain_id == 0 && pos_magic > 0) found_chain_id = pos_magic;
                    
                    long t_time = (long)PositionGetInteger(POSITION_TIME);
                    if(t_time < oldest_time)
@@ -846,8 +870,12 @@ void ManagePairs()
 
          if(G_Pairs[i].active_chain_id == 0)
          {
-            G_Pairs[i].active_chain_id = expected_chain_id;
-            LoadChainState_Multi(i, expected_chain_id);
+            ulong act_id = found_chain_id;
+            if(act_id == 0 && GlobalVariableCheck("Yoogi_ActiveChainID_" + sym))
+               act_id = (ulong)GlobalVariableGet("Yoogi_ActiveChainID_" + sym);
+            if(act_id == 0) act_id = (ulong)(EA_MAGIC_NUMBER * 1000 + i);
+            G_Pairs[i].active_chain_id = act_id;
+            LoadChainState_Multi(i, act_id);
          }
          else if(InpEnableDynamicTP && !G_TradeProfile[i].is_valid)
          {
@@ -909,15 +937,8 @@ void ManagePairs()
             double base_tp_usd = CalculateAutoTP(sym, working_balance);
 
             string strat = G_Pairs[i].active_chain_strategy;
-            double current_debt = 0.0;
-            if(strat == "CT")
-               current_debt = G_Pairs[i].ct_realized_bleed_loss;
-            else if(strat == "FT")
-               current_debt = G_Pairs[i].ft_realized_bleed_loss;
-            else if(strat == "DUAL")
-               current_debt = G_Pairs[i].dual_realized_bleed_loss;
-            else
-               current_debt = G_Pairs[i].ct_realized_bleed_loss; // Safe fallback
+            if(strat == "") strat = "CT";
+            double current_debt = GetStrategyDebt(i, strat);
 
             double total_target = base_tp_usd + current_debt;
 
@@ -936,10 +957,7 @@ void ManagePairs()
       {
          if(G_Pairs[i].active_chain_id != 0)
          {
-             if(ResolveClosedChainFromHistory(i, G_Pairs[i].active_chain_id))
-             {
-                 ClearChainState_Multi(i);
-             }
+             ResolveClosedChainFromHistory(i, G_Pairs[i].active_chain_id, "BROKER_CLOSE");
          }
 
          // === DUAL ENTRY ENGINE — SIGNAL MANAGER ===

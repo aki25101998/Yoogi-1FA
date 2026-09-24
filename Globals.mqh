@@ -667,7 +667,10 @@ void InitGlobals()
       G_Pairs[i].chain_start_dca_seq = 0;
       G_Pairs[i].chain_end_dca_seq = 0;
       G_Pairs[i].chain_step_pips = 0;
-      G_Pairs[i].active_chain_id = 0;
+      if(GlobalVariableCheck("Yoogi_ActiveChainID_" + G_Pairs[i].symbol))
+         G_Pairs[i].active_chain_id = (ulong)GlobalVariableGet("Yoogi_ActiveChainID_" + G_Pairs[i].symbol);
+      else
+         G_Pairs[i].active_chain_id = 0;
 
       // Reset Trend-Following Context
       G_TF[i].h1_trend_direction = 0;
@@ -1037,5 +1040,36 @@ double ProfitOf(ulong ticket)
 {
    if (!SelectPosByTicket(ticket)) return 0.0;
    return PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+}
+
+// Generate unique, strictly monotonic chain ID for each new chain
+ulong GenerateUniqueChainID(int idx)
+{
+   string sym = G_Pairs[idx].symbol;
+   datetime now = TimeCurrent();
+   ulong base_id = (ulong)EA_MAGIC_NUMBER * 100000000000ULL + (ulong)now * 10ULL + (ulong)idx;
+   
+   ulong last_id = 0;
+   string gv_last = "Yoogi_LastChainID_" + sym;
+   if(GlobalVariableCheck(gv_last))
+      last_id = (ulong)GlobalVariableGet(gv_last);
+      
+   if(base_id <= last_id)
+   {
+      base_id = last_id + 10ULL;
+   }
+   
+   GlobalVariableSet(gv_last, (double)base_id);
+   return base_id;
+}
+
+// Check if a magic number belongs to pair idx's chain
+bool IsPairChainMagic(int idx, ulong magic)
+{
+   if(magic == 0) return false;
+   if(G_Pairs[idx].active_chain_id != 0 && magic == G_Pairs[idx].active_chain_id) return true;
+   if(magic == (ulong)(EA_MAGIC_NUMBER * 1000 + idx)) return true;
+   if(magic / 100000000000ULL == (ulong)EA_MAGIC_NUMBER && (magic % 10ULL) == (ulong)idx) return true;
+   return false;
 }
 //+------------------------------------------------------------------+

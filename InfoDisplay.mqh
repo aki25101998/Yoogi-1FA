@@ -308,7 +308,7 @@ void UpdateDisplay()
             if(PositionGetString(POSITION_SYMBOL) == sym)
             {
                ulong pos_magic = (ulong)PositionGetInteger(POSITION_MAGIC);
-               if(pos_magic == expected_magic || pos_magic == G_Pairs[i].active_chain_id || (pos_magic == 0 && G_Pairs[i].active_chain_id != 0))
+               if(IsPairChainMagic(i, pos_magic) || (pos_magic == 0 && G_Pairs[i].active_chain_id != 0))
                {
                   pair_orders++;
                   pair_pnl += ProfitOf(t);
