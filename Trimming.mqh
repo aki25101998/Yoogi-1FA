@@ -142,7 +142,7 @@ void ApplySmartTrimming(int idx)
             PrintFormat("[%s] > Ghi nợ (%s): +$%.2f. Tổng nợ %s cặp này: $%.2f", sym, strat, loss_positive, strat, current_debt);
 
             // LƯU NGAY VÀO Ổ CỨNG (Dùng tên biến persistent)
-            GlobalVariableSet(GetVarName_Step(sym, chain_id),  (double)G_Pairs[idx].chain_dca_count);
+            GlobalVariableSet(GetVarName_Step(sym, chain_id),  (double)G_Pairs[idx].chain_position_count);
          }
 
          Sleep(200);

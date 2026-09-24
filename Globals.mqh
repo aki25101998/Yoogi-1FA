@@ -30,7 +30,7 @@ const double InpHeSoLot           = 1.3;
 const int    InpKhoangMoPip       = 30;
 const int    InpMasterTPPips      = 60;
 
-const bool   InpUseSmartTrim      = true;
+const bool   InpUseSmartTrim      = false; // Tạm thời disable trimming của Yoogi Bleed cũ theo spec Section 26
 const int    InpTrimTriggerOrders = 3;
 const double InpTrimPercentage    = 100.0;
 
@@ -221,12 +221,14 @@ struct PairContext
    int      ft_dca_sequence;
    int      dual_dca_sequence;
    
+   // --- Active Chain Context (Reset mỗi chain) ---
    string   active_chain_strategy; // "CT", "FT", or "DUAL"
-
-   double   locked_balance;      // Balance dùng để tính lot (nếu cần)
-   int      chain_dca_count;     // Đếm số lệnh DCA trong chuỗi hiện tại
-   int      chain_step_pips;     // Dynamic Step (pips) cố định cho toàn bộ chuỗi
-   ulong    active_chain_id;     // ID chuỗi đang chạy
+   double   locked_balance;        // Balance dùng để tính lot (nếu cần)
+   int      chain_position_count;  // Số position hiện tại trong active chain (1..InpMaxDCAPerChain)
+   int      chain_start_dca_seq;   // Global DCA sequence của position đầu tiên trong active chain
+   int      chain_end_dca_seq;     // Global DCA sequence của position mới nhất trong active chain
+   int      chain_step_pips;       // Dynamic Step (pips) cố định cho toàn bộ chuỗi
+   ulong    active_chain_id;       // ID chuỗi đang chạy (0 nếu không có chuỗi)
 };
 
 PairContext G_Pairs[TOTAL_PAIRS];
@@ -661,7 +663,9 @@ void InitGlobals()
       G_Pairs[i].active_chain_strategy = "";
 
       G_Pairs[i].locked_balance = 0.0;
-      G_Pairs[i].chain_dca_count = 0;
+      G_Pairs[i].chain_position_count = 0;
+      G_Pairs[i].chain_start_dca_seq = 0;
+      G_Pairs[i].chain_end_dca_seq = 0;
       G_Pairs[i].chain_step_pips = 0;
       G_Pairs[i].active_chain_id = 0;
 
@@ -909,9 +913,105 @@ double CalculateAutoLot(int idx, double balance)
    return NormalizeLot(sym, raw_lot);
 }
 
+// Logic tính Lot theo Global DCA Sequence (DCA 1 = BaseLot, DCA N = Previous DCA Lot * InpHeSoLot)
+double CalculateDCALot(int idx, int dca_seq, double balance)
+{
+   string sym = G_Pairs[idx].symbol;
+   double base_lot = CalculateAutoLot(idx, balance);
+   if(base_lot <= 0.0) return 0.0;
+   if(dca_seq <= 1) return base_lot;
+   
+   double cur_lot = base_lot;
+   for(int s = 2; s <= dca_seq; s++)
+   {
+      cur_lot = NormalizeLot(sym, cur_lot * InpHeSoLot);
+   }
+   return cur_lot;
+}
+
+// Strategy State Accessors (Tách biệt hoàn toàn Debt, DCA Sequence, Recovery Level per strategy)
+double GetStrategyDebt(int idx, string strat)
+{
+   if(strat == "FT") return G_Pairs[idx].ft_realized_bleed_loss;
+   if(strat == "DUAL") return G_Pairs[idx].dual_realized_bleed_loss;
+   return G_Pairs[idx].ct_realized_bleed_loss;
+}
+
+void SetStrategyDebt(int idx, string strat, double debt)
+{
+   if(debt < 0.00001) debt = 0.0;
+   if(strat == "FT") {
+      G_Pairs[idx].ft_realized_bleed_loss = debt;
+      GlobalVariableSet("Yoogi_FT_Debt_" + G_Pairs[idx].symbol, debt);
+   }
+   else if(strat == "DUAL") {
+      G_Pairs[idx].dual_realized_bleed_loss = debt;
+      GlobalVariableSet("Yoogi_DUAL_Debt_" + G_Pairs[idx].symbol, debt);
+   }
+   else {
+      G_Pairs[idx].ct_realized_bleed_loss = debt;
+      GlobalVariableSet("Yoogi_CT_Debt_" + G_Pairs[idx].symbol, debt);
+   }
+}
+
+int GetStrategyDCASeq(int idx, string strat)
+{
+   if(strat == "FT") return G_Pairs[idx].ft_dca_sequence;
+   if(strat == "DUAL") return G_Pairs[idx].dual_dca_sequence;
+   return G_Pairs[idx].ct_dca_sequence;
+}
+
+void SetStrategyDCASeq(int idx, string strat, int seq)
+{
+   if(seq < 0) seq = 0;
+   if(strat == "FT") {
+      G_Pairs[idx].ft_dca_sequence = seq;
+      GlobalVariableSet("Yoogi_FT_DCASeq_" + G_Pairs[idx].symbol, (double)seq);
+   }
+   else if(strat == "DUAL") {
+      G_Pairs[idx].dual_dca_sequence = seq;
+      GlobalVariableSet("Yoogi_DUAL_DCASeq_" + G_Pairs[idx].symbol, (double)seq);
+   }
+   else {
+      G_Pairs[idx].ct_dca_sequence = seq;
+      GlobalVariableSet("Yoogi_CT_DCASeq_" + G_Pairs[idx].symbol, (double)seq);
+   }
+}
+
+int GetStrategyRecLvl(int idx, string strat)
+{
+   if(strat == "FT") return G_Pairs[idx].ft_recovery_level;
+   if(strat == "DUAL") return G_Pairs[idx].dual_recovery_level;
+   return G_Pairs[idx].ct_recovery_level;
+}
+
+void SetStrategyRecLvl(int idx, string strat, int lvl)
+{
+   if(lvl < 0) lvl = 0;
+   if(strat == "FT") {
+      G_Pairs[idx].ft_recovery_level = lvl;
+      GlobalVariableSet("Yoogi_FT_RecLvl_" + G_Pairs[idx].symbol, (double)lvl);
+   }
+   else if(strat == "DUAL") {
+      G_Pairs[idx].dual_recovery_level = lvl;
+      GlobalVariableSet("Yoogi_DUAL_RecLvl_" + G_Pairs[idx].symbol, (double)lvl);
+   }
+   else {
+      G_Pairs[idx].ct_recovery_level = lvl;
+      GlobalVariableSet("Yoogi_CT_RecLvl_" + G_Pairs[idx].symbol, (double)lvl);
+   }
+}
+
+bool IsStrategyInRecovery(int idx, string strat)
+{
+   return (GetStrategyDebt(idx, strat) > 0.001);
+}
+
 // Persistence names
-string GetVarName_Step(string sym, ulong chain_id)  { return "Yoogi_Step_" + sym + "_" + IntegerToString(chain_id); }
+string GetVarName_Step(string sym, ulong chain_id)      { return "Yoogi_Step_" + sym + "_" + IntegerToString(chain_id); }
 string GetVarName_LockedBal(string sym, ulong chain_id) { return "Yoogi_Bal_" + sym + "_" + IntegerToString(chain_id); }
+string GetVarName_StartSeq(string sym, ulong chain_id)  { return "Yoogi_StartSeq_" + sym + "_" + IntegerToString(chain_id); }
+string GetVarName_EndSeq(string sym, ulong chain_id)    { return "Yoogi_EndSeq_" + sym + "_" + IntegerToString(chain_id); }
 
 // Position Helpers
 bool SelectPosByTicket(ulong ticket)

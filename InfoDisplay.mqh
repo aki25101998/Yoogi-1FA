@@ -433,27 +433,13 @@ void UpdateDisplay()
          }
       }
 
-      int dca_count = G_Pairs[ac].chain_dca_count;
+      int pos_count = G_Pairs[ac].chain_position_count;
       int dca_step  = G_Pairs[ac].chain_step_pips;
       if(dca_step <= 0) dca_step = InpDCA_MinStepPips;
 
-      double debt = 0.0;
-      int rec_lvl = 0;
-      if(strat == "FT")
-      {
-         debt = G_Pairs[ac].ft_realized_bleed_loss;
-         rec_lvl = G_Pairs[ac].ft_recovery_level;
-      }
-      else if(strat == "DUAL")
-      {
-         debt = G_Pairs[ac].dual_realized_bleed_loss;
-         rec_lvl = G_Pairs[ac].dual_recovery_level;
-      }
-      else
-      {
-         debt = G_Pairs[ac].ct_realized_bleed_loss;
-         rec_lvl = G_Pairs[ac].ct_recovery_level;
-      }
+      double debt = GetStrategyDebt(ac, strat);
+      int rec_lvl = GetStrategyRecLvl(ac, strat);
+      int dca_seq = GetStrategyDCASeq(ac, strat);
 
       bool is_runner = (InpEnableDynamicTP && G_TradeProfile[ac].runner_active);
       string exit_mode_str = is_runner ? "RUNNER" : "NORMAL";
@@ -463,8 +449,8 @@ void UpdateDisplay()
       }
 
       string l1 = StringFormat("Strategy : %-4s   | Direction : %-4s   | Chain ID : #%I64u", strat, dir_str, cid);
-      string l2 = StringFormat("Orders   : %-2d     | DCA       : %-2d (%-2dp) | Debt     : $%.2f (L%d)", orders, dca_count, dca_step, debt, rec_lvl);
-      string l3 = StringFormat("Exit Mode: %s", exit_mode_str);
+      string l2 = StringFormat("Orders   : %-2d     | Chain Pos : %d/%d (DCA %d) | Debt : $%.2f", orders, pos_count, InpMaxDCAPerChain, dca_seq, debt);
+      string l3 = StringFormat("Exit Mode: %s      | Mode : %s", exit_mode_str, (debt > 0.001 ? "RECOVERY" : "NORMAL"));
 
       SetLabelText(INFO_PREFIX + "Chain_L1", l1, C_TEXT);
       SetLabelText(INFO_PREFIX + "Chain_L2", l2, (debt > 0.01 ? C_LIMIT : C_TEXT));
