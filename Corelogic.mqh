@@ -513,15 +513,15 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
       int next_dca_seq = 0;
       
       if(strat == "CT") {
-         current_rec_lvl = G_Pairs[idx].ct_recovery_level + 1;
+         current_rec_lvl = G_Pairs[idx].ct_recovery_level;
          next_dca_seq = G_Pairs[idx].ct_dca_sequence + 1;
       }
       else if(strat == "FT") {
-         current_rec_lvl = G_Pairs[idx].ft_recovery_level + 1;
+         current_rec_lvl = G_Pairs[idx].ft_recovery_level;
          next_dca_seq = G_Pairs[idx].ft_dca_sequence + 1;
       }
       else if(strat == "DUAL") {
-         current_rec_lvl = G_Pairs[idx].dual_recovery_level + 1;
+         current_rec_lvl = G_Pairs[idx].dual_recovery_level;
          next_dca_seq = G_Pairs[idx].dual_dca_sequence + 1;
       }
 
@@ -547,13 +547,10 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
          G_Pairs[idx].chain_dca_count = current_dca;
          
          if(strat == "CT") {
-            G_Pairs[idx].ct_recovery_level = current_rec_lvl;
             G_Pairs[idx].ct_dca_sequence = next_dca_seq;
          } else if(strat == "FT") {
-            G_Pairs[idx].ft_recovery_level = current_rec_lvl;
             G_Pairs[idx].ft_dca_sequence = next_dca_seq;
          } else if(strat == "DUAL") {
-            G_Pairs[idx].dual_recovery_level = current_rec_lvl;
             G_Pairs[idx].dual_dca_sequence = next_dca_seq;
          }
          
