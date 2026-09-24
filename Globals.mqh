@@ -910,7 +910,6 @@ double CalculateAutoLot(int idx, double balance)
 }
 
 // Persistence names
-string GetVarName_Bleed(string sym, ulong chain_id) { return "Yoogi_Bleed_" + sym + "_" + IntegerToString(chain_id); }
 string GetVarName_Step(string sym, ulong chain_id)  { return "Yoogi_Step_" + sym + "_" + IntegerToString(chain_id); }
 string GetVarName_LockedBal(string sym, ulong chain_id) { return "Yoogi_Bal_" + sym + "_" + IntegerToString(chain_id); }
 

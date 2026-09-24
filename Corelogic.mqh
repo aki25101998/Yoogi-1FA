@@ -141,17 +141,6 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    if(GlobalVariableCheck("Yoogi_DUAL_DCASeq_" + sym)) G_Pairs[idx].dual_dca_sequence = (int)GlobalVariableGet("Yoogi_DUAL_DCASeq_" + sym);
    else G_Pairs[idx].dual_dca_sequence = 0;
 
-   // Migrate old bleed if it exists
-   string n_bleed = GetVarName_Bleed(sym, chain_id);
-   if(GlobalVariableCheck(n_bleed)) {
-       double old_bleed = GlobalVariableGet(n_bleed);
-       if(old_bleed > G_Pairs[idx].ct_realized_bleed_loss) {
-           G_Pairs[idx].ct_realized_bleed_loss = old_bleed;
-           GlobalVariableSet("Yoogi_CT_Debt_" + sym, old_bleed);
-       }
-       GlobalVariableDel(n_bleed);
-   }
-
    // Load Chain Specific State
    string n_step  = GetVarName_Step(sym, chain_id);
    string n_bal   = GetVarName_LockedBal(sym, chain_id);

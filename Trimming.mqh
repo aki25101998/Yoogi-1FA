@@ -113,7 +113,7 @@ void ApplySmartTrimming(int idx)
       // F. Ghi sổ nợ & Lưu trữ (Persistence vào đúng struct của cặp)
       if(res)
       {
-         // Nếu PnL < 0, cộng lỗ vào realized_bleed_loss theo strategy của chain này
+         // Nếu PnL < 0, cộng lỗ vào Debt theo strategy của chain này
          if(realized_loss_now < 0)
          {
             double loss_positive = -realized_loss_now;
