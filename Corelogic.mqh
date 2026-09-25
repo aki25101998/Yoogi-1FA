@@ -332,7 +332,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
    string resolved_gv = "Yoogi_Resolved_" + sym + "_" + IntegerToString(chain_id);
    if(GlobalVariableCheck(resolved_gv)) return false;
 
-   datetime from_date = TimeCurrent() - 90 * 24 * 60 * 60;
+   datetime from_date = 0; // Look at entire available history to ensure we find IN deals
    if(!HistorySelect(from_date, TimeCurrent() + 86400)) return false;
 
    int deals = HistoryDealsTotal();
@@ -340,13 +340,41 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
    int close_deals_found = 0;
    ulong max_ticket_found = 0;
 
+   // Pass 1: Find all Position IDs belonging to this chain
+   long pos_ids[];
+   int pos_count = 0;
    for(int d = 0; d < deals; d++)
    {
       ulong ticket = HistoryDealGetTicket(d);
-      if(ticket > 0)
+      if(ticket > 0 && HistoryDealGetString(ticket, DEAL_SYMBOL) == sym)
       {
-         if(HistoryDealGetString(ticket, DEAL_SYMBOL) == sym && 
-            (ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) == chain_id)
+         if((ulong)HistoryDealGetInteger(ticket, DEAL_MAGIC) == chain_id && 
+            HistoryDealGetInteger(ticket, DEAL_ENTRY) == DEAL_ENTRY_IN)
+         {
+            long pid = HistoryDealGetInteger(ticket, DEAL_POSITION_ID);
+            bool exists = false;
+            for(int j=0; j<pos_count; j++) { if(pos_ids[j] == pid) { exists = true; break; } }
+            if(!exists)
+            {
+               ArrayResize(pos_ids, pos_count + 1);
+               pos_ids[pos_count] = pid;
+               pos_count++;
+            }
+         }
+      }
+   }
+
+   // Pass 2: Calculate PnL for these Position IDs (even if OUT deal magic is 0 due to manual/broker close)
+   for(int d = 0; d < deals; d++)
+   {
+      ulong ticket = HistoryDealGetTicket(d);
+      if(ticket > 0 && HistoryDealGetString(ticket, DEAL_SYMBOL) == sym)
+      {
+         long pid = HistoryDealGetInteger(ticket, DEAL_POSITION_ID);
+         bool matches_chain = false;
+         for(int j=0; j<pos_count; j++) { if(pos_ids[j] == pid) { matches_chain = true; break; } }
+         
+         if(matches_chain)
          {
             long deal_entry = HistoryDealGetInteger(ticket, DEAL_ENTRY);
             if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_INOUT || deal_entry == DEAL_ENTRY_OUT_BY)
@@ -361,7 +389,10 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       }
    }
 
-   if(close_deals_found == 0) return false;
+   if(close_deals_found == 0)
+   {
+      PrintFormat("[WARNING] Chain %I64u on %s has no closed deals but is empty! Forcing resolve.", chain_id, sym);
+   }
 
    // Check pending close reason if closed by broker / delayed
    string pending_reason_gv = "Yoogi_PendingReason_" + sym + "_" + IntegerToString(chain_id);
@@ -465,10 +496,19 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          // MAX_DCA with profit (not TP)
          if(debt_before > 0.001 && realized_pnl > 0.0)
          {
-            double debt_after = MathMax(0.0, debt_before - realized_pnl);
+            double debt_target = 0.0;
+            if(pos_count == 1) debt_target = debt_before * 0.50;
+            else if(pos_count == 2) debt_target = debt_before * 0.50;
+            else debt_target = debt_before;
+
+            double debt_reduction = MathMin(debt_target, realized_pnl);
+            debt_reduction = MathMin(debt_reduction, debt_before);
+
+            double normal_profit = realized_pnl - debt_reduction;
+            double debt_after = debt_before - debt_reduction;
             
-            PrintFormat("[DEBT-RECOVERY-MAX-DCA]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_USED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
-                        sym, strat, chain_id, realized_pnl, debt_before, MathMin(realized_pnl, debt_before), debt_after, current_dca_seq);
+            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
+                        sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
 
             if(debt_after <= 0.00001)
             {
@@ -476,9 +516,6 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
                SetSystemDebt(idx, 0.0);
                SetSystemRecLvl(idx, 0);
                SetSystemDCASeq(idx, 0);
-               
-               PrintFormat("[RECOVERY-COMPLETE]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT_BEFORE=%.2f\nRECOVERY_PROFIT=%.2f\nDEBT_AFTER=0\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
-                           sym, strat, debt_before, realized_pnl);
             }
             else
             {
@@ -512,10 +549,19 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          // Recovery TP: settle debt with realized profit
          if(realized_pnl > 0.0)
          {
-            double debt_after = MathMax(0.0, debt_before - realized_pnl);
+            double debt_target = 0.0;
+            if(pos_count == 1) debt_target = debt_before * 0.50;
+            else if(pos_count == 2) debt_target = debt_before * 0.50;
+            else debt_target = debt_before;
+
+            double debt_reduction = MathMin(debt_target, realized_pnl);
+            debt_reduction = MathMin(debt_reduction, debt_before);
+
+            double normal_profit = realized_pnl - debt_reduction;
+            double debt_after = debt_before - debt_reduction;
             
-            PrintFormat("[DEBT-RECOVERY]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_USED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
-                        sym, strat, chain_id, realized_pnl, debt_before, MathMin(realized_pnl, debt_before), debt_after, current_dca_seq);
+            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
+                        sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
 
             if(debt_after <= 0.00001)
             {
@@ -523,17 +569,11 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
                SetSystemDebt(idx, 0.0);
                SetSystemRecLvl(idx, 0);
                SetSystemDCASeq(idx, 0);
-               
-               PrintFormat("[RECOVERY-COMPLETE]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT_BEFORE=%.2f\nRECOVERY_PROFIT=%.2f\nDEBT_AFTER=0\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
-                           sym, strat, debt_before, realized_pnl);
             }
             else
             {
-               // Partial Recovery: still in Recovery Mode, DCA sequence continues!
+               // Partial Recovery
                SetSystemDebt(idx, debt_after);
-               
-               PrintFormat("[RECOVERY-CONTINUE]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
-                           sym, strat, debt_after, current_dca_seq);
             }
          }
          else
@@ -566,21 +606,31 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       else if(realized_pnl > 0.0 && debt_before > 0.001)
       {
          // Other closure with positive profit during recovery: settle debt
-         double debt_after = MathMax(0.0, debt_before - realized_pnl);
+         double debt_target = 0.0;
+         if(pos_count == 1) debt_target = debt_before * 0.50;
+         else if(pos_count == 2) debt_target = debt_before * 0.50;
+         else debt_target = debt_before;
+
+         double debt_reduction = MathMin(debt_target, realized_pnl);
+         debt_reduction = MathMin(debt_reduction, debt_before);
+
+         double normal_profit = realized_pnl - debt_reduction;
+         double debt_after = debt_before - debt_reduction;
          
+         PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
+                     sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
+
          if(debt_after <= 0.00001)
          {
+            // Full Recovery Complete!
             SetSystemDebt(idx, 0.0);
             SetSystemRecLvl(idx, 0);
             SetSystemDCASeq(idx, 0);
-            PrintFormat("[RECOVERY-COMPLETE]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT_BEFORE=%.2f\nRECOVERY_PROFIT=%.2f\nDEBT_AFTER=0\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
-                        sym, strat, debt_before, realized_pnl);
          }
          else
          {
+            // Partial Recovery
             SetSystemDebt(idx, debt_after);
-            PrintFormat("[DEBT-RECOVERY]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_USED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
-                        sym, strat, chain_id, realized_pnl, debt_before, MathMin(realized_pnl, debt_before), debt_after, current_dca_seq);
          }
       }
       else

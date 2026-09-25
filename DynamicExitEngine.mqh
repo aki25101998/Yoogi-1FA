@@ -841,20 +841,55 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
          if(basket_lots <= 0.0) basket_lots = 0.01;
       }
 
-      // Base TP Target in USD:
+      // Calculate Normal TP Target in USD (as normal TP calculation)
       double working_balance = (G_Pairs[idx].locked_balance > 0.0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
       if(InpSetBalance > 0.0) working_balance = InpSetBalance;
-      double base_target = CalculateAutoTP(sym, working_balance);
+      double normal_profit_target = CalculateAutoTP(sym, working_balance);
 
       // Profit of Natural TP with current basket
       double natural_profit = CalcProfitForPriceDistance(idx, direction, avg_entry, natural_distance, basket_lots);
-      if(natural_profit > base_target)
-         base_target = natural_profit;
+      if(natural_profit > normal_profit_target)
+         normal_profit_target = natural_profit;
 
-      if(base_target <= 0.0) base_target = 10.0; // safety baseline
+      if(normal_profit_target <= 0.0) normal_profit_target = 10.0; // safety baseline
 
-      // Required Profit = Base TP Target + Current Debt
-      double required_profit = base_target + debt;
+      // Determine Recovery Positions
+      int recovery_position_count = 0;
+      for (int p = PositionsTotal() - 1; p >= 0; p--) {
+         ulong ticket = PositionGetTicket(p);
+         if (ticket > 0 && PositionSelectByTicket(ticket)) {
+            if (PositionGetString(POSITION_SYMBOL) == sym && (ulong)PositionGetInteger(POSITION_MAGIC) == chain_id) {
+               recovery_position_count++;
+            }
+         }
+      }
+      if(recovery_position_count <= 0) recovery_position_count = 1; // Failsafe if not yet visible
+
+      int stage = 0;
+      double debt_repayment_target = 0.0;
+      double applied_normal_profit = 0.0;
+
+      if(recovery_position_count == 1)
+      {
+         stage = 1;
+         debt_repayment_target = debt * 0.50;
+         applied_normal_profit = 0.0;
+      }
+      else if(recovery_position_count == 2)
+      {
+         stage = 2;
+         debt_repayment_target = debt * 0.50;
+         applied_normal_profit = normal_profit_target;
+      }
+      else
+      {
+         stage = 3;
+         debt_repayment_target = debt;
+         applied_normal_profit = normal_profit_target;
+      }
+
+      // Required Profit = Debt Target + Normal Profit
+      double required_profit = debt_repayment_target + applied_normal_profit;
 
       // Convert Required Profit USD -> required price distance
       double req_distance = CalcPriceDistanceForProfit(idx, direction, avg_entry, basket_lots, required_profit);
@@ -890,31 +925,34 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
             last_warned_tp[idx]    = required_tp_pips;
             last_warned_debt[idx]  = debt;
             last_warned_space[idx] = avail_space_pips;
-            PrintFormat("\n[RECOVERY-TP-WARNING]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT=%.2f\nBASE_TARGET=%.2f\nREQUIRED_PROFIT=%.2f\nBASKET_LOTS=%.2f\nREQUIRED_TP=%.1f pips\nAVAILABLE_SPACE=%.1f pips\nSTATUS=REQUIRED_TP_EXCEEDS_AVAILABLE_SPACE",
-                        sym, strat, debt, base_target, required_profit, basket_lots, required_tp_pips, avail_space_pips);
+            PrintFormat("\n[RECOVERY-TP-WARNING]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT=%.2f\nNORMAL_PROFIT_TARGET=%.2f\nREQUIRED_PROFIT=%.2f\nBASKET_LOTS=%.2f\nREQUIRED_TP=%.1f pips\nAVAILABLE_SPACE=%.1f pips\nSTATUS=REQUIRED_TP_EXCEEDS_AVAILABLE_SPACE",
+                        sym, strat, debt, applied_normal_profit, required_profit, basket_lots, required_tp_pips, avail_space_pips);
          }
       }
 
-      // Log [RECOVERY-TP] when initialized or adjusted
+      // Log [RECOVERY TP] when initialized or adjusted
       static double last_logged_tp[TOTAL_PAIRS];
       static double last_logged_debt[TOTAL_PAIRS];
       static double last_logged_lots[TOTAL_PAIRS];
+      static int last_logged_positions[TOTAL_PAIRS];
 
       bool should_log = false;
       if(MathAbs(tp_price - last_logged_tp[idx]) >= G_Pairs[idx].point ||
          MathAbs(debt - last_logged_debt[idx]) >= 0.01 ||
-         MathAbs(basket_lots - last_logged_lots[idx]) >= 0.001)
+         MathAbs(basket_lots - last_logged_lots[idx]) >= 0.001 ||
+         recovery_position_count != last_logged_positions[idx])
       {
          should_log = true;
          last_logged_tp[idx]   = tp_price;
          last_logged_debt[idx] = debt;
          last_logged_lots[idx] = basket_lots;
+         last_logged_positions[idx] = recovery_position_count;
       }
 
       if(should_log)
       {
-         PrintFormat("\n[RECOVERY-TP]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT=%.2f\nBASE_TARGET=%.2f\nREQUIRED_PROFIT=%.2f\nBASKET_LOTS=%.2f\nTP_DISTANCE=%.1f\nTP_PRICE=%.5f",
-                     sym, strat, debt, base_target, required_profit, basket_lots, PriceToPips(idx, final_distance), tp_price);
+         PrintFormat("\n[RECOVERY TP]\nPair=%s\nDebt=%.2f\nRecoveryPositions=%d\nStage=%d\nDebtTarget=%.2f\nNormalProfitTarget=%.2f\nTotalProfitTarget=%.2f",
+                     sym, debt, recovery_position_count, stage, debt_repayment_target, applied_normal_profit, required_profit);
       }
    }
 
