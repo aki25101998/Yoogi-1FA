@@ -679,9 +679,13 @@ void InitGlobals()
       string sys_reclvl_gv = "Yoogi_SystemRecLvl_" + G_Pairs[i].symbol;
       string sys_dcaseq_gv = "Yoogi_SystemDCASeq_" + G_Pairs[i].symbol;
       
-      if(GlobalVariableCheck(sys_debt_gv))
+      bool has_debt   = GlobalVariableCheck(sys_debt_gv);
+      bool has_reclvl = GlobalVariableCheck(sys_reclvl_gv);
+      bool has_dcaseq = GlobalVariableCheck(sys_dcaseq_gv);
+      
+      if(has_debt && has_reclvl && has_dcaseq)
       {
-         // System state already exists - load directly
+         // System state is complete - load directly
          G_Pairs[i].system_debt = GlobalVariableGet(sys_debt_gv);
          G_Pairs[i].system_recovery_level = (int)GlobalVariableGet(sys_reclvl_gv);
          G_Pairs[i].system_dca_sequence = (int)GlobalVariableGet(sys_dcaseq_gv);
@@ -693,7 +697,7 @@ void InitGlobals()
       }
       else
       {
-         // MIGRATION: First run with new system - migrate from legacy per-strategy state
+         // MIGRATION / RECONCILIATION: Safely merge if System State is incomplete or missing
          double total_legacy_debt = G_Pairs[i].ct_realized_bleed_loss 
                                   + G_Pairs[i].ft_realized_bleed_loss 
                                   + G_Pairs[i].dual_realized_bleed_loss;
@@ -706,24 +710,38 @@ void InitGlobals()
                               MathMax(G_Pairs[i].ft_recovery_level,
                                       G_Pairs[i].dual_recovery_level));
          
-         G_Pairs[i].system_debt = total_legacy_debt;
-         G_Pairs[i].system_recovery_level = max_legacy_lvl;
-         G_Pairs[i].system_dca_sequence = max_legacy_seq;
-         G_Pairs[i].system_recovery_active = (total_legacy_debt > 0.001);
+         if(has_debt) G_Pairs[i].system_debt = GlobalVariableGet(sys_debt_gv);
+         else         G_Pairs[i].system_debt = total_legacy_debt;
          
-         // Persist the migrated system state
+         if(has_reclvl) G_Pairs[i].system_recovery_level = (int)GlobalVariableGet(sys_reclvl_gv);
+         else           G_Pairs[i].system_recovery_level = max_legacy_lvl;
+         
+         if(has_dcaseq) G_Pairs[i].system_dca_sequence = (int)GlobalVariableGet(sys_dcaseq_gv);
+         else           G_Pairs[i].system_dca_sequence = max_legacy_seq;
+         
+         G_Pairs[i].system_recovery_active = (G_Pairs[i].system_debt > 0.001);
+         
+         // Persist the migrated/reconciled system state
          GlobalVariableSet(sys_debt_gv, G_Pairs[i].system_debt);
          GlobalVariableSet(sys_reclvl_gv, (double)G_Pairs[i].system_recovery_level);
          GlobalVariableSet(sys_dcaseq_gv, (double)G_Pairs[i].system_dca_sequence);
          
-         if(total_legacy_debt > 0.001 || max_legacy_seq > 0)
+         if(!has_debt && !has_reclvl && !has_dcaseq)
          {
-            PrintFormat("[STATE-MIGRATION]\nSYMBOL=%s\nLEGACY_CT_DEBT=%.2f\nLEGACY_FT_DEBT=%.2f\nLEGACY_DUAL_DEBT=%.2f\nSYSTEM_DEBT=%.2f\nLEGACY_CT_DCA=%d\nLEGACY_FT_DCA=%d\nLEGACY_DUAL_DCA=%d\nSYSTEM_DCA=%d\nACTION=MIGRATED",
-                        G_Pairs[i].symbol,
-                        G_Pairs[i].ct_realized_bleed_loss, G_Pairs[i].ft_realized_bleed_loss, G_Pairs[i].dual_realized_bleed_loss,
-                        total_legacy_debt, 
-                        G_Pairs[i].ct_dca_sequence, G_Pairs[i].ft_dca_sequence, G_Pairs[i].dual_dca_sequence,
-                        max_legacy_seq);
+            if(total_legacy_debt > 0.001 || max_legacy_seq > 0)
+            {
+               PrintFormat("[STATE-MIGRATION]\nSYMBOL=%s\nLEGACY_CT_DEBT=%.2f\nLEGACY_FT_DEBT=%.2f\nLEGACY_DUAL_DEBT=%.2f\nSYSTEM_DEBT=%.2f\nLEGACY_CT_DCA=%d\nLEGACY_FT_DCA=%d\nLEGACY_DUAL_DCA=%d\nSYSTEM_DCA=%d\nACTION=MIGRATED",
+                           G_Pairs[i].symbol,
+                           G_Pairs[i].ct_realized_bleed_loss, G_Pairs[i].ft_realized_bleed_loss, G_Pairs[i].dual_realized_bleed_loss,
+                           total_legacy_debt, 
+                           G_Pairs[i].ct_dca_sequence, G_Pairs[i].ft_dca_sequence, G_Pairs[i].dual_dca_sequence,
+                           max_legacy_seq);
+            }
+         }
+         else
+         {
+            PrintFormat("[STATE-RECONCILE]\nSYMBOL=%s\nSYSTEM_DEBT_EXISTING=%.2f\nLEGACY_DEBT=%.2f\nSYSTEM_DEBT_FINAL=%.2f\nSYSTEM_DCA_FINAL=%d\nACTION=RECONCILED",
+                        G_Pairs[i].symbol, has_debt ? GlobalVariableGet(sys_debt_gv) : 0.0, total_legacy_debt, G_Pairs[i].system_debt, G_Pairs[i].system_dca_sequence);
          }
       }
 

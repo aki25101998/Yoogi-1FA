@@ -157,7 +157,11 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    else G_Pairs[idx].dual_dca_sequence = 0;
 
    // Load SYSTEM-LEVEL Recovery State (AUTHORITATIVE)
-   if(GlobalVariableCheck("Yoogi_SystemDebt_" + sym))
+   bool has_debt   = GlobalVariableCheck("Yoogi_SystemDebt_" + sym);
+   bool has_reclvl = GlobalVariableCheck("Yoogi_SystemRecLvl_" + sym);
+   bool has_dcaseq = GlobalVariableCheck("Yoogi_SystemDCASeq_" + sym);
+
+   if(has_debt && has_reclvl && has_dcaseq)
    {
       G_Pairs[idx].system_debt = GlobalVariableGet("Yoogi_SystemDebt_" + sym);
       G_Pairs[idx].system_recovery_level = (int)GlobalVariableGet("Yoogi_SystemRecLvl_" + sym);
@@ -166,7 +170,7 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    }
    else
    {
-      // MIGRATION: Migrate from legacy per-strategy state if System State doesn't exist
+      // MIGRATION / RECONCILIATION: Safely merge if System State is incomplete or missing
       double total_legacy_debt = G_Pairs[idx].ct_realized_bleed_loss 
                                + G_Pairs[idx].ft_realized_bleed_loss 
                                + G_Pairs[idx].dual_realized_bleed_loss;
@@ -179,21 +183,35 @@ void LoadChainState_Multi(int idx, ulong chain_id)
                            MathMax(G_Pairs[idx].ft_recovery_level,
                                    G_Pairs[idx].dual_recovery_level));
                                    
-      G_Pairs[idx].system_debt = total_legacy_debt;
-      G_Pairs[idx].system_recovery_level = max_legacy_lvl;
-      G_Pairs[idx].system_dca_sequence = max_legacy_seq;
-      G_Pairs[idx].system_recovery_active = (total_legacy_debt > 0.001);
+      if(has_debt) G_Pairs[idx].system_debt = GlobalVariableGet("Yoogi_SystemDebt_" + sym);
+      else         G_Pairs[idx].system_debt = total_legacy_debt;
       
-      // Persist immediately so migration only happens once
+      if(has_reclvl) G_Pairs[idx].system_recovery_level = (int)GlobalVariableGet("Yoogi_SystemRecLvl_" + sym);
+      else           G_Pairs[idx].system_recovery_level = max_legacy_lvl;
+      
+      if(has_dcaseq) G_Pairs[idx].system_dca_sequence = (int)GlobalVariableGet("Yoogi_SystemDCASeq_" + sym);
+      else           G_Pairs[idx].system_dca_sequence = max_legacy_seq;
+      
+      G_Pairs[idx].system_recovery_active = (G_Pairs[idx].system_debt > 0.001);
+      
+      // Persist immediately so migration/reconciliation only happens once
       GlobalVariableSet("Yoogi_SystemDebt_" + sym, G_Pairs[idx].system_debt);
       GlobalVariableSet("Yoogi_SystemRecLvl_" + sym, (double)G_Pairs[idx].system_recovery_level);
       GlobalVariableSet("Yoogi_SystemDCASeq_" + sym, (double)G_Pairs[idx].system_dca_sequence);
       
-      if(total_legacy_debt > 0.001 || max_legacy_seq > 0)
+      if(!has_debt && !has_reclvl && !has_dcaseq)
       {
-         PrintFormat("[STATE-MIGRATION]\nSYMBOL=%s\nLEGACY_CT_DEBT=%.2f\nLEGACY_FT_DEBT=%.2f\nLEGACY_DUAL_DEBT=%.2f\nSYSTEM_DEBT=%.2f\nLEGACY_CT_DCA=%d\nLEGACY_FT_DCA=%d\nLEGACY_DUAL_DCA=%d\nSYSTEM_DCA=%d\nACTION=MIGRATED",
-                     sym, G_Pairs[idx].ct_realized_bleed_loss, G_Pairs[idx].ft_realized_bleed_loss, G_Pairs[idx].dual_realized_bleed_loss, total_legacy_debt, 
-                     G_Pairs[idx].ct_dca_sequence, G_Pairs[idx].ft_dca_sequence, G_Pairs[idx].dual_dca_sequence, max_legacy_seq);
+         if(total_legacy_debt > 0.001 || max_legacy_seq > 0)
+         {
+            PrintFormat("[STATE-MIGRATION]\nSYMBOL=%s\nLEGACY_CT_DEBT=%.2f\nLEGACY_FT_DEBT=%.2f\nLEGACY_DUAL_DEBT=%.2f\nSYSTEM_DEBT=%.2f\nLEGACY_CT_DCA=%d\nLEGACY_FT_DCA=%d\nLEGACY_DUAL_DCA=%d\nSYSTEM_DCA=%d\nACTION=MIGRATED",
+                        sym, G_Pairs[idx].ct_realized_bleed_loss, G_Pairs[idx].ft_realized_bleed_loss, G_Pairs[idx].dual_realized_bleed_loss, total_legacy_debt, 
+                        G_Pairs[idx].ct_dca_sequence, G_Pairs[idx].ft_dca_sequence, G_Pairs[idx].dual_dca_sequence, max_legacy_seq);
+         }
+      }
+      else
+      {
+         PrintFormat("[STATE-RECONCILE]\nSYMBOL=%s\nSYSTEM_DEBT_EXISTING=%.2f\nLEGACY_DEBT=%.2f\nSYSTEM_DEBT_FINAL=%.2f\nSYSTEM_DCA_FINAL=%d\nACTION=RECONCILED",
+                     sym, has_debt ? GlobalVariableGet("Yoogi_SystemDebt_" + sym) : 0.0, total_legacy_debt, G_Pairs[idx].system_debt, G_Pairs[idx].system_dca_sequence);
       }
    }
 
