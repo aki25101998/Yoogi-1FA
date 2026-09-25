@@ -278,7 +278,12 @@ void UpdateDisplay()
       if(data.displayDir == "BUY") clr_type = C_VALUE;
       else if(data.displayDir == "SELL") clr_type = C_WARN;
 
-      color clr_score = (data.displayScore >= 100.0 ? C_VALUE : (data.displayScore >= 70.0 ? C_LIMIT : C_SUB));
+      double target_score = 100.0;
+      if(data.displayMode == "FT") target_score = InpTF_RequiredScore;
+      else if(data.displayMode == "CT") target_score = InpCT_RequiredScore;
+      else if(data.displayMode == "DUAL") target_score = MathMax(InpTF_RequiredScore, InpCT_RequiredScore);
+      
+      color clr_score = (data.displayScore >= target_score ? C_VALUE : (data.displayScore >= target_score * 0.7 ? C_LIMIT : C_SUB));
 
       // Update row labels
       SetLabelText(INFO_PREFIX + "R"+r+"_Pair",  s_pair,   C_TEXT);

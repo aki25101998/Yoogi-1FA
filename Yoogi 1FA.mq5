@@ -85,7 +85,8 @@ int OnInit()
    Print("==================================================");
    PrintFormat("VERSION=%s", TF_ENGINE_VERSION);
    PrintFormat("TF_MOMENTUM_MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
-   Print("ENTRY_REQUIRED_SCORE=100");
+   PrintFormat("CT_REQUIRED_SCORE=%.0f", InpCT_RequiredScore);
+   PrintFormat("TF_REQUIRED_SCORE=%.0f", InpTF_RequiredScore);
    PrintFormat("TF_MAX_EVENT_BARS=%d", TF_MAX_EVENT_BARS);
    
     Print("[DCA] Mode: ENABLED (ALWAYS ON)");
@@ -93,21 +94,13 @@ int OnInit()
     
     // --- DYNAMIC EXIT ENGINE DIAGNOSTIC ---
     Print("");
-    if(InpEnableDynamicTP)
-    {
-        Print("[DYNAMIC-TP] Mode: ENABLED");
-        PrintFormat("[DYNAMIC-TP] MinTP: %d pips", InpDynamicTP_MinPips);
-        PrintFormat("[DYNAMIC-TP] MaxTP: %d pips", InpDynamicTP_MaxPips);
-        PrintFormat("[DYNAMIC-TP] ATR_Multiplier: %.2f", InpDynamicTP_ATRMultiplier);
-        PrintFormat("[DYNAMIC-TP] Compression: %s", InpEnableTPCompression ? "ON" : "OFF");
-        PrintFormat("[DYNAMIC-TP] Runner (FT): %s", InpEnableRunnerMode ? "ON" : "OFF");
-        PrintFormat("[DYNAMIC-TP] Fallback TP: %d pips", InpMasterTPPips);
-    }
-    else
-    {
-        Print("[DYNAMIC-TP] Mode: DISABLED (Fixed TP)");
-        PrintFormat("[DYNAMIC-TP] Fixed TP: %d pips", InpMasterTPPips);
-    }
+    Print("[DYNAMIC-TP] Mode: ENABLED (ALWAYS ON)");
+    PrintFormat("[DYNAMIC-TP] MinTP: %d pips", InpDynamicTP_MinPips);
+    PrintFormat("[DYNAMIC-TP] MaxTP: %d pips", InpDynamicTP_MaxPips);
+    PrintFormat("[DYNAMIC-TP] ATR_Multiplier: %.2f", InpDynamicTP_ATRMultiplier);
+    Print("[DYNAMIC-TP] Compression: ON (ALWAYS)");
+    Print("[DYNAMIC-TP] Runner (FT): ON (ALWAYS)");
+    PrintFormat("[DYNAMIC-TP] Fallback TP: %d pips", InpMasterTPPips);
     
     Print("==================================================\n");
 

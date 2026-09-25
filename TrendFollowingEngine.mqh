@@ -1186,8 +1186,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          double current_total = G_TF[idx].score_h1_trend + G_TF[idx].score_m15_pullback + G_TF[idx].score_sweep + G_TF[idx].score_displacement + G_TF[idx].score_mss + G_TF[idx].score_event_coherence + G_TF[idx].score_momentum + G_TF[idx].score_entry_distance;
          PrintFormat("TOTAL=%.0f", current_total);
          
-         if(current_total == 100.0) {
-             Print("[SCORE_100_REACHED]");
+         if(current_total >= InpTF_RequiredScore) {
+             Print("[SCORE_REQ_REACHED]");
          }
       }
 
@@ -1436,12 +1436,12 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    
    // 7. Score
    double score = CalculateTFScore(idx);
-   if(score != 100.0) { if(first_reject=="") first_reject = (score > 100.0) ? "SCORE_OVER_100_LEAKAGE" : "SCORE_BELOW_100"; pass = false; }
+   if(score < InpTF_RequiredScore) { if(first_reject=="") first_reject = "SCORE_BELOW_REQ"; pass = false; }
    
    // 8. DXY Confirmation
    string dxy_reason = "";
    
-   if(G_Pairs[idx].isUSDPair && score == 100.0)
+   if(G_Pairs[idx].isUSDPair && score >= InpTF_RequiredScore)
    {
       PrintFormat("\n[TF_DXY_GATE]\nPAIR=%s\nCALLING=DXYTrendFollowingEngine", G_Pairs[idx].symbol);
    }
@@ -1824,9 +1824,9 @@ int CheckTrendFollowingSignal(int idx)
    // Check if all evidence is ready
    double score = CalculateTFScore(idx);
    
-   if(score == 100.0)
+   if(score >= InpTF_RequiredScore)
    {
-      Print("\n[SCORE_100_REACHED]");
+      Print("\n[SCORE_REQ_REACHED]");
       PrintFormat("SYMBOL=%s", sym);
       PrintFormat("H1=%.0f", G_TF[idx].score_h1_trend);
       PrintFormat("M15=%.0f", G_TF[idx].score_m15_pullback);
@@ -1838,7 +1838,7 @@ int CheckTrendFollowingSignal(int idx)
       PrintFormat("ENTRY_DISTANCE=%.0f", G_TF[idx].score_entry_distance);
       PrintFormat("TOTAL=%.0f", score);
       // === FINAL GATE ===
-      SetTFState(idx, TF_STATE_ENTRY_READY, "SCORE_100_REACHED");
+      SetTFState(idx, TF_STATE_ENTRY_READY, "SCORE_REQ_REACHED");
       
       string rejectReason = "";
       bool hardPass = ValidateTFHardRequirements(idx, dir, rejectReason);
@@ -1899,7 +1899,7 @@ int CheckTrendFollowingSignal(int idx)
       if(!G_TF[idx].m5_mss) missing += "MSS ";
       if(G_TF[idx].score_momentum < 10.0) missing += "MOM ";
       
-      G_TF[idx].status = "Score " + IntegerToString((int)score) + "/100 | Missing: " + missing;
+      G_TF[idx].status = "Score " + IntegerToString((int)score) + "/" + IntegerToString((int)InpTF_RequiredScore) + " | Missing: " + missing;
    }
    
    return 0;

@@ -972,7 +972,7 @@ bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
    }
    
    // 6. Score >= MinScore
-   if(G_Pairs[idx].reversal_score < ENTRY_REQUIRED_SCORE)
+   if(G_Pairs[idx].reversal_score < InpCT_RequiredScore)
    {
       rejectReason = "SCORE_BELOW_MIN";
       return false;
@@ -1056,7 +1056,7 @@ bool IsEvidenceReady(int idx, int direction)
    
    if(InpReversal_RequireStructureShift && !G_Pairs[idx].conf_mss) return false;
    
-   if(CalculateReversalScore(idx, direction) < ENTRY_REQUIRED_SCORE) return false;
+   if(CalculateReversalScore(idx, direction) < InpCT_RequiredScore) return false;
    return true;
 }
 

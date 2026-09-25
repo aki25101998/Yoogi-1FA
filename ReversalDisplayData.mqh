@@ -411,20 +411,24 @@ void PopulateUnifiedDisplayFields(int idx, ReversalDisplayData &data)
     if(data.displayMode == "FT")
     {
         data.displayScore = G_TF[idx].total_score;
+        data.displayScoreStr = StringFormat("%.0f/%.0f", data.displayScore, InpTF_RequiredScore);
     }
     else if(data.displayMode == "CT")
     {
         data.displayScore = G_Pairs[idx].reversal_score;
+        data.displayScoreStr = StringFormat("%.0f/%.0f", data.displayScore, InpCT_RequiredScore);
     }
     else if(data.displayMode == "DUAL")
     {
         data.displayScore = MathMax(G_Pairs[idx].reversal_score, G_TF[idx].total_score);
+        double req = (G_Pairs[idx].reversal_score > G_TF[idx].total_score) ? InpCT_RequiredScore : InpTF_RequiredScore;
+        data.displayScoreStr = StringFormat("%.0f/%.0f", data.displayScore, req);
     }
     else
     {
         data.displayScore = 0.0;
+        data.displayScoreStr = "0/100";
     }
-    data.displayScoreStr = StringFormat("%.0f/100", data.displayScore);
 
     // 5. Block Reason
     data.displayBlockReason = "NONE";
@@ -543,8 +547,13 @@ void PopulateUnifiedDisplayFields(int idx, ReversalDisplayData &data)
         }
     }
 
+    double req_score_block = 100.0;
+    if(data.displayMode == "FT") req_score_block = InpTF_RequiredScore;
+    else if(data.displayMode == "CT") req_score_block = InpCT_RequiredScore;
+    else if(data.displayMode == "DUAL") req_score_block = (G_Pairs[idx].reversal_score > G_TF[idx].total_score) ? InpCT_RequiredScore : InpTF_RequiredScore;
+
     // Override State if Blocked
-    if(data.displayScore >= 100.0 && data.displayBlockReason != "NONE" && !data.activeChain)
+    if(data.displayScore >= req_score_block && data.displayBlockReason != "NONE" && !data.activeChain)
     {
         data.displayState = "BLOCKED";
         data.displayNextGate = data.displayBlockReason;

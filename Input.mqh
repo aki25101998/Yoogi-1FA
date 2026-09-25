@@ -16,8 +16,8 @@ input group "=== TÙY CHỈNH CHUNG ==="
 input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = dùng ACCOUNT_BALANCE thực tế)
 
 input group "=== ENTRY ENGINE ==="
-input bool InpEnableCounterTrend    = true;   // Counter-Trend Engine (ON/OFF)
-input bool InpEnableTrendFollowing  = true;   // Trend-Following Engine (ON/OFF)
+input double InpCT_RequiredScore         = 100.0;  // Counter-Trend Required Score
+input double InpTF_RequiredScore         = 100.0;  // Trend-Following Required Score
 
 input int  InpMaxDCAPerChain        = 3;      // Max DCA per chain (0 = no DCA)
 input int  InpDCA_MinStepPips       = 30;     // Min Dynamic Step (pips)
@@ -25,12 +25,16 @@ input int  InpDCA_MaxStepPips       = 60;     // Max Dynamic Step (pips)
 input double InpDCA_Step_ATRMultiplier = 1.0; // ATR Multiplier cho Dynamic Step
 
 input group "=== DYNAMIC EXIT ENGINE ==="
-input bool   InpEnableDynamicTP          = true;   // Dynamic TP (false = fixed 60 pip)
 input int    InpDynamicTP_MinPips        = 15;     // Min TP (pips)
-input int    InpDynamicTP_MaxPips        = 90;    // Max TP (pips)
+input int    InpDynamicTP_MaxPips        = 90;     // Max TP (pips)
 input double InpDynamicTP_ATRMultiplier  = 2.0;    // ATR Multiplier for TP
-input bool   InpEnableTPCompression      = true;   // TP Compression (adapt TP mid-trade)
-input bool   InpEnableRunnerMode         = true;   // Runner Mode (FT only, trail profits)
+
+// Cố định các cờ hệ thống luôn bật
+bool InpEnableCounterTrend      = true;
+bool InpEnableTrendFollowing    = true;
+bool InpEnableDynamicTP         = true;
+bool InpEnableTPCompression     = true;
+bool InpEnableRunnerMode        = true;
 
 //--- Tester Withdrawal Settings ---
 input group "--- Tester Withdrawal Settings ---"
