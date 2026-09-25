@@ -391,7 +391,8 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
 
    if(close_deals_found == 0)
    {
-      PrintFormat("[WARNING] Chain %I64u on %s has no closed deals but is empty! Forcing resolve.", chain_id, sym);
+      PrintFormat("[WARNING] Chain %I64u on %s has no closed deals yet. Resolution deferred.", chain_id, sym);
+      return false;
    }
 
    // Check pending close reason if closed by broker / delayed
@@ -705,7 +706,7 @@ void CloseAndResolveChain(int idx, string reason)
    bool deals_ready = false;
    while(hist_wait_ms < 2000)
    {
-      datetime from_date = TimeCurrent() - 90 * 24 * 60 * 60;
+      datetime from_date = 0;
       if(HistorySelect(from_date, TimeCurrent() + 86400))
       {
          int deals = HistoryDealsTotal();
