@@ -16,7 +16,6 @@
 // --- CORNER & ANCHOR (FIXED, NO SHIFTING) ---
 const ENUM_BASE_CORNER DASH_CORNER = CORNER_LEFT_LOWER;
 const int    DASH_X          = 20;   // X Base Offset
-const int    DASH_Y          = 250;  // Y Base Offset (Top anchor in LEFT_LOWER)
 const int    DASH_LINE_H     = 16;   // Standard Line Height
 const int    TABLE_ROW_H     = 16;   // Table Row Height
 const int    FONT_SIZE       = 10;   // Data Font Size
@@ -24,13 +23,22 @@ const int    FONT_TITLE_SIZE = 12;   // Main Title Font Size
 const int    FONT_SEC_SIZE   = 10;   // Section Title Font Size
 const string FONT_NAME       = "Consolas";
 
+// --- DYNAMIC LAYOUT SIZING (ROBUST HEIGHT ENCLOSURE) ---
+const int    H_HDR_DROP      = 22;                             // Header to SecA
+const int    H_SECA_DROP     = 17 + (3 * DASH_LINE_H) + 6;     // SecA title + 3 rows + gap
+const int    H_SECB_HDR_DROP = 17 + TABLE_ROW_H;               // SecB title + Column headers
+const int    H_FOOTER_DROP   = 6 + 15;                         // Gap + Footer separator
+const int    H_BOTTOM_PAD    = 20;                             // Space below footer text to panel bottom
+const int    TOTAL_CONTENT_H = H_HDR_DROP + H_SECA_DROP + H_SECB_HDR_DROP + (TOTAL_PAIRS * TABLE_ROW_H) + H_FOOTER_DROP + H_BOTTOM_PAD;
+
 // --- BACKGROUND PANEL ---
 const bool   USE_BACK        = true;
 const color  C_BACK          = C'15,22,28';  // Deep Slate Charcoal
-const int    BACK_W          = 410;
-const int    BACK_H          = 260;
 const int    BACK_OFF_X      = -10;
 const int    BACK_OFF_Y      = 12;
+const int    DASH_Y          = TOTAL_CONTENT_H + 3;            // Top anchor dynamically calculated to keep bottom margin safe
+const int    BACK_W          = 410;
+const int    BACK_H          = BACK_OFF_Y + TOTAL_CONTENT_H;   // Calculated panel height fully containing all rows and padding
 
 // --- COLOR PALETTE (CONSISTENT VISUAL LANGUAGE) ---
 const color  C_HEADER        = clrGold;
@@ -225,7 +233,7 @@ void UpdateDisplay()
          clr_status = C_LIMIT; // clrOrange
       }
       // Priority B: DCA (more than 1 position)
-      else if(pair_orders > 1 || G_Pairs[i].chain_position_count > 1)
+      else if(pair_orders > 1)
       {
          s_status = "DCA";
          clr_status = clrGold;
