@@ -812,9 +812,9 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
    if(natural_pips <= 0.0) natural_pips = (double)InpMasterTPPips;
    double natural_distance = PipsToPrice(idx, natural_pips);
 
-   // 2. Identify strategy and current debt
+   // 2. Identify strategy and current system debt
    string strat = DetectChainStrategy(idx, chain_id);
-   double debt = GetStrategyDebt(idx, strat);
+   double debt = GetSystemDebt(idx);
 
    double final_distance = natural_distance;
    double tp_price = 0.0;

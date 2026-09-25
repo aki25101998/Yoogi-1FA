@@ -208,7 +208,7 @@ struct PairContext
    bool     isUSDSecond;      // USD nằm sau? (EURUSD)
    int      dxy_map_index;    // Index vào G_DXY[] (-1 nếu không dùng)
 
-   // --- Persistence (Bộ nhớ) ---
+   // --- Persistence (Bộ nhớ) - Legacy per-strategy (backward compat only) ---
    double   ct_realized_bleed_loss;
    double   ft_realized_bleed_loss;
    double   dual_realized_bleed_loss;
@@ -220,6 +220,12 @@ struct PairContext
    int      ct_dca_sequence;
    int      ft_dca_sequence;
    int      dual_dca_sequence;
+   
+   // --- SYSTEM-LEVEL Recovery State (AUTHORITATIVE per symbol) ---
+   double   system_debt;              // Unified debt across all strategies
+   int      system_recovery_level;    // Recovery level counter
+   int      system_dca_sequence;      // Global DCA sequence across strategies
+   bool     system_recovery_active;   // true when system_debt > 0
    
    // --- Active Chain Context (Reset mỗi chain) ---
    string   active_chain_strategy; // "CT", "FT", or "DUAL"
@@ -618,6 +624,7 @@ void InitGlobals()
       G_Pairs[i].htf_trap_signal = 0;
 
       // Load Persistent State (Debt and Recovery Level) to survive restarts
+      // --- Load Legacy per-strategy state (for backward compatibility / migration) ---
       // --- CT ---
       if(GlobalVariableCheck("Yoogi_CT_Debt_" + G_Pairs[i].symbol)) 
          G_Pairs[i].ct_realized_bleed_loss = GlobalVariableGet("Yoogi_CT_Debt_" + G_Pairs[i].symbol);
@@ -665,6 +672,60 @@ void InitGlobals()
          G_Pairs[i].dual_dca_sequence = (int)GlobalVariableGet("Yoogi_DUAL_DCASeq_" + G_Pairs[i].symbol);
       else 
          G_Pairs[i].dual_dca_sequence = 0;
+
+      // --- SYSTEM-LEVEL Recovery State (AUTHORITATIVE) ---
+      // Check if System State already persisted
+      string sys_debt_gv  = "Yoogi_SystemDebt_" + G_Pairs[i].symbol;
+      string sys_reclvl_gv = "Yoogi_SystemRecLvl_" + G_Pairs[i].symbol;
+      string sys_dcaseq_gv = "Yoogi_SystemDCASeq_" + G_Pairs[i].symbol;
+      
+      if(GlobalVariableCheck(sys_debt_gv))
+      {
+         // System state already exists - load directly
+         G_Pairs[i].system_debt = GlobalVariableGet(sys_debt_gv);
+         G_Pairs[i].system_recovery_level = (int)GlobalVariableGet(sys_reclvl_gv);
+         G_Pairs[i].system_dca_sequence = (int)GlobalVariableGet(sys_dcaseq_gv);
+         G_Pairs[i].system_recovery_active = (G_Pairs[i].system_debt > 0.001);
+         
+         PrintFormat("[SYSTEM-STATE-LOAD] %s: Debt=%.2f RecLvl=%d DCASeq=%d Recovery=%s",
+                     G_Pairs[i].symbol, G_Pairs[i].system_debt, G_Pairs[i].system_recovery_level,
+                     G_Pairs[i].system_dca_sequence, G_Pairs[i].system_recovery_active ? "ACTIVE" : "NORMAL");
+      }
+      else
+      {
+         // MIGRATION: First run with new system - migrate from legacy per-strategy state
+         double total_legacy_debt = G_Pairs[i].ct_realized_bleed_loss 
+                                  + G_Pairs[i].ft_realized_bleed_loss 
+                                  + G_Pairs[i].dual_realized_bleed_loss;
+         
+         int max_legacy_seq = MathMax(G_Pairs[i].ct_dca_sequence,
+                              MathMax(G_Pairs[i].ft_dca_sequence,
+                                      G_Pairs[i].dual_dca_sequence));
+         
+         int max_legacy_lvl = MathMax(G_Pairs[i].ct_recovery_level,
+                              MathMax(G_Pairs[i].ft_recovery_level,
+                                      G_Pairs[i].dual_recovery_level));
+         
+         G_Pairs[i].system_debt = total_legacy_debt;
+         G_Pairs[i].system_recovery_level = max_legacy_lvl;
+         G_Pairs[i].system_dca_sequence = max_legacy_seq;
+         G_Pairs[i].system_recovery_active = (total_legacy_debt > 0.001);
+         
+         // Persist the migrated system state
+         GlobalVariableSet(sys_debt_gv, G_Pairs[i].system_debt);
+         GlobalVariableSet(sys_reclvl_gv, (double)G_Pairs[i].system_recovery_level);
+         GlobalVariableSet(sys_dcaseq_gv, (double)G_Pairs[i].system_dca_sequence);
+         
+         if(total_legacy_debt > 0.001 || max_legacy_seq > 0)
+         {
+            PrintFormat("[SYSTEM-STATE-MIGRATION] %s: LegacyDebt(CT=%.2f FT=%.2f DUAL=%.2f)=%.2f | LegacySeq(CT=%d FT=%d DUAL=%d)=%d | LegacyLvl=%d",
+                        G_Pairs[i].symbol,
+                        G_Pairs[i].ct_realized_bleed_loss, G_Pairs[i].ft_realized_bleed_loss, G_Pairs[i].dual_realized_bleed_loss,
+                        total_legacy_debt, 
+                        G_Pairs[i].ct_dca_sequence, G_Pairs[i].ft_dca_sequence, G_Pairs[i].dual_dca_sequence,
+                        max_legacy_seq, max_legacy_lvl);
+         }
+      }
 
       G_Pairs[i].locked_balance = 0.0;
       G_Pairs[i].chain_position_count = 0;
@@ -857,9 +918,7 @@ double GetTotalSystemDebt()
 
    for(int i = 0; i < TOTAL_PAIRS; i++)
    {
-      debt += G_Pairs[i].ct_realized_bleed_loss;
-      debt += G_Pairs[i].ft_realized_bleed_loss;
-      debt += G_Pairs[i].dual_realized_bleed_loss;
+      debt += G_Pairs[i].system_debt;
    }
 
    return debt;
@@ -945,82 +1004,95 @@ double CalculateDCALot(int idx, int dca_seq, double balance)
    return cur_lot;
 }
 
-// Strategy State Accessors (Tách biệt hoàn toàn Debt, DCA Sequence, Recovery Level per strategy)
+// ======================================================================
+// SYSTEM-LEVEL Recovery State Accessors (AUTHORITATIVE for all Recovery logic)
+// ======================================================================
+double GetSystemDebt(int idx)
+{
+   return G_Pairs[idx].system_debt;
+}
+
+void SetSystemDebt(int idx, double debt)
+{
+   if(debt < 0.00001) debt = 0.0;
+   G_Pairs[idx].system_debt = debt;
+   G_Pairs[idx].system_recovery_active = (debt > 0.001);
+   GlobalVariableSet("Yoogi_SystemDebt_" + G_Pairs[idx].symbol, debt);
+}
+
+int GetSystemDCASeq(int idx)
+{
+   return G_Pairs[idx].system_dca_sequence;
+}
+
+void SetSystemDCASeq(int idx, int seq)
+{
+   if(seq < 0) seq = 0;
+   G_Pairs[idx].system_dca_sequence = seq;
+   GlobalVariableSet("Yoogi_SystemDCASeq_" + G_Pairs[idx].symbol, (double)seq);
+}
+
+int GetSystemRecLvl(int idx)
+{
+   return G_Pairs[idx].system_recovery_level;
+}
+
+void SetSystemRecLvl(int idx, int lvl)
+{
+   if(lvl < 0) lvl = 0;
+   G_Pairs[idx].system_recovery_level = lvl;
+   GlobalVariableSet("Yoogi_SystemRecLvl_" + G_Pairs[idx].symbol, (double)lvl);
+}
+
+bool IsSystemInRecovery(int idx)
+{
+   return (G_Pairs[idx].system_debt > 0.001);
+}
+
+// ======================================================================
+// Legacy Strategy State Accessors (BACKWARD COMPATIBILITY ONLY - metadata/stats)
+// These are NO LONGER authoritative for Recovery decisions.
+// ======================================================================
 double GetStrategyDebt(int idx, string strat)
 {
-   if(strat == "FT") return G_Pairs[idx].ft_realized_bleed_loss;
-   if(strat == "DUAL") return G_Pairs[idx].dual_realized_bleed_loss;
-   return G_Pairs[idx].ct_realized_bleed_loss;
+   // REDIRECT: Return system debt (unified across strategies)
+   return G_Pairs[idx].system_debt;
 }
 
 void SetStrategyDebt(int idx, string strat, double debt)
 {
-   if(debt < 0.00001) debt = 0.0;
-   if(strat == "FT") {
-      G_Pairs[idx].ft_realized_bleed_loss = debt;
-      GlobalVariableSet("Yoogi_FT_Debt_" + G_Pairs[idx].symbol, debt);
-   }
-   else if(strat == "DUAL") {
-      G_Pairs[idx].dual_realized_bleed_loss = debt;
-      GlobalVariableSet("Yoogi_DUAL_Debt_" + G_Pairs[idx].symbol, debt);
-   }
-   else {
-      G_Pairs[idx].ct_realized_bleed_loss = debt;
-      GlobalVariableSet("Yoogi_CT_Debt_" + G_Pairs[idx].symbol, debt);
-   }
+   // REDIRECT: Set system debt (unified)
+   SetSystemDebt(idx, debt);
 }
 
 int GetStrategyDCASeq(int idx, string strat)
 {
-   if(strat == "FT") return G_Pairs[idx].ft_dca_sequence;
-   if(strat == "DUAL") return G_Pairs[idx].dual_dca_sequence;
-   return G_Pairs[idx].ct_dca_sequence;
+   // REDIRECT: Return system DCA sequence (unified)
+   return G_Pairs[idx].system_dca_sequence;
 }
 
 void SetStrategyDCASeq(int idx, string strat, int seq)
 {
-   if(seq < 0) seq = 0;
-   if(strat == "FT") {
-      G_Pairs[idx].ft_dca_sequence = seq;
-      GlobalVariableSet("Yoogi_FT_DCASeq_" + G_Pairs[idx].symbol, (double)seq);
-   }
-   else if(strat == "DUAL") {
-      G_Pairs[idx].dual_dca_sequence = seq;
-      GlobalVariableSet("Yoogi_DUAL_DCASeq_" + G_Pairs[idx].symbol, (double)seq);
-   }
-   else {
-      G_Pairs[idx].ct_dca_sequence = seq;
-      GlobalVariableSet("Yoogi_CT_DCASeq_" + G_Pairs[idx].symbol, (double)seq);
-   }
+   // REDIRECT: Set system DCA sequence (unified)
+   SetSystemDCASeq(idx, seq);
 }
 
 int GetStrategyRecLvl(int idx, string strat)
 {
-   if(strat == "FT") return G_Pairs[idx].ft_recovery_level;
-   if(strat == "DUAL") return G_Pairs[idx].dual_recovery_level;
-   return G_Pairs[idx].ct_recovery_level;
+   // REDIRECT: Return system recovery level (unified)
+   return G_Pairs[idx].system_recovery_level;
 }
 
 void SetStrategyRecLvl(int idx, string strat, int lvl)
 {
-   if(lvl < 0) lvl = 0;
-   if(strat == "FT") {
-      G_Pairs[idx].ft_recovery_level = lvl;
-      GlobalVariableSet("Yoogi_FT_RecLvl_" + G_Pairs[idx].symbol, (double)lvl);
-   }
-   else if(strat == "DUAL") {
-      G_Pairs[idx].dual_recovery_level = lvl;
-      GlobalVariableSet("Yoogi_DUAL_RecLvl_" + G_Pairs[idx].symbol, (double)lvl);
-   }
-   else {
-      G_Pairs[idx].ct_recovery_level = lvl;
-      GlobalVariableSet("Yoogi_CT_RecLvl_" + G_Pairs[idx].symbol, (double)lvl);
-   }
+   // REDIRECT: Set system recovery level (unified)
+   SetSystemRecLvl(idx, lvl);
 }
 
 bool IsStrategyInRecovery(int idx, string strat)
 {
-   return (GetStrategyDebt(idx, strat) > 0.001);
+   // REDIRECT: Use system-level recovery check
+   return IsSystemInRecovery(idx);
 }
 
 // Persistence names

@@ -435,9 +435,10 @@ void UpdateDisplay()
       int dca_step  = G_Pairs[ac].chain_step_pips;
       if(dca_step <= 0) dca_step = InpDCA_MinStepPips;
 
-      double debt = GetStrategyDebt(ac, strat);
-      int rec_lvl = GetStrategyRecLvl(ac, strat);
-      int dca_seq = GetStrategyDCASeq(ac, strat);
+      // USE SYSTEM-LEVEL state (AUTHORITATIVE)
+      double debt = GetSystemDebt(ac);
+      int rec_lvl = GetSystemRecLvl(ac);
+      int dca_seq = GetSystemDCASeq(ac);
 
       bool is_runner = (InpEnableDynamicTP && G_TradeProfile[ac].runner_active);
       string exit_mode_str = is_runner ? "RUNNER" : "NORMAL";
@@ -448,7 +449,7 @@ void UpdateDisplay()
 
       string l1 = StringFormat("Strategy : %-4s   | Direction : %-4s   | Chain ID : #%I64u", strat, dir_str, cid);
       string l2 = StringFormat("Orders   : %-2d     | Chain Pos : %d/%d (DCA %d) | Debt : $%.2f", orders, pos_count, InpMaxDCAPerChain, dca_seq, debt);
-      string l3 = StringFormat("Exit Mode: %s      | Mode : %s", exit_mode_str, (debt > 0.001 ? "RECOVERY" : "NORMAL"));
+      string l3 = StringFormat("Exit Mode: %s      | Mode : %s | RecLvl : %d", exit_mode_str, (debt > 0.001 ? "RECOVERY" : "NORMAL"), rec_lvl);
 
       SetLabelText(INFO_PREFIX + "Chain_L1", l1, C_TEXT);
       SetLabelText(INFO_PREFIX + "Chain_L2", l2, (debt > 0.01 ? C_LIMIT : C_TEXT));
