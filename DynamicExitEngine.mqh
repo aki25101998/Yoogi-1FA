@@ -59,10 +59,11 @@ struct TradeProfile
 
 TradeProfile G_TradeProfile[TOTAL_PAIRS];
 
-// Forward declarations for persistence
+// Forward declarations for persistence and calculation
 void SaveTradeProfile(int idx, ulong chain_id);
 void LoadTradeProfile(int idx, ulong chain_id);
 void ClearTradeProfilePersistence(int idx, ulong chain_id);
+double GetBasketTPPrice(int idx, double avg_entry, int direction);
 
 // ==================================================================
 // HELPER: Determine strategy type from entry_mode string
@@ -337,12 +338,6 @@ void InitTradeProfile(int idx, int direction, int strategy_type, double entry_pr
    G_TradeProfile[idx].initial_dynamic_tp = natural_tp;
    G_TradeProfile[idx].current_dynamic_tp = natural_tp;
 
-   // Calculate absolute TP price
-   if(direction == 1)
-      G_TradeProfile[idx].tp_price = entry_price + PipsToPrice(idx, natural_tp);
-   else
-      G_TradeProfile[idx].tp_price = entry_price - PipsToPrice(idx, natural_tp);
-
    // Initialize state
    G_TradeProfile[idx].runner_active = false;
    G_TradeProfile[idx].runner_trail_price = 0.0;
@@ -350,6 +345,9 @@ void InitTradeProfile(int idx, int direction, int strategy_type, double entry_pr
    G_TradeProfile[idx].last_compression_tp = natural_tp;
    G_TradeProfile[idx].last_update_time = TimeCurrent();
    G_TradeProfile[idx].is_valid = true;
+
+   // Calculate absolute TP price (Recovery-aware if debt > 0)
+   G_TradeProfile[idx].tp_price = GetBasketTPPrice(idx, entry_price, direction);
 
    // --- LOG ---
    string sym = G_Pairs[idx].symbol;
@@ -370,7 +368,8 @@ void InitTradeProfile(int idx, int direction, int strategy_type, double entry_pr
    PrintFormat("AvailableSpace=%.1f pips", G_TradeProfile[idx].available_space_pips);
    PrintFormat("Momentum=%s", mom_str);
    PrintFormat("NaturalTP=%.1f pips", natural_tp);
-   PrintFormat("FinalTP=%.1f pips", natural_tp);
+   double final_tp_pips = PriceToPips(idx, MathAbs(G_TradeProfile[idx].tp_price - entry_price));
+   PrintFormat("FinalTP=%.1f pips", final_tp_pips);
    PrintFormat("TP_Price=%.5f", G_TradeProfile[idx].tp_price);
    PrintFormat("MinTP=%d | MaxTP=%d", InpDynamicTP_MinPips, InpDynamicTP_MaxPips);
 
@@ -478,22 +477,14 @@ bool TryTPCompression(int idx)
    // --- Clamp ---
    if(new_tp < InpDynamicTP_MinPips) new_tp = (double)InpDynamicTP_MinPips;
 
-   double old_tp = current_tp;
-   double new_tp_price = 0.0;
-   if(direction == 1)
-      new_tp_price = entry + PipsToPrice(idx, new_tp);
-   else
-      new_tp_price = entry - PipsToPrice(idx, new_tp);
-
-
-
    // --- Apply Compression (Update Internal State) ---
+   double old_tp = current_tp;
    G_TradeProfile[idx].current_dynamic_tp = new_tp;
    G_TradeProfile[idx].compression_active = true;
    G_TradeProfile[idx].last_compression_tp = new_tp;
    G_TradeProfile[idx].last_update_time = TimeCurrent();
    G_TradeProfile[idx].momentum_state = new_mom_state;
-   G_TradeProfile[idx].tp_price = new_tp_price;
+   G_TradeProfile[idx].tp_price = GetBasketTPPrice(idx, entry, direction);
 
    // --- LOG ---
    PrintFormat("\n[DYNAMIC-TP-UPDATE]\nSYMBOL=%s\nStrategy=%s\nMode=BASKET\nOldTP=%.1f\nNewTP=%.1f\nAverageEntry=%.5f\nBasketTP=%.5f\nReason=%s",
@@ -530,7 +521,9 @@ bool CheckRunnerConditions(int idx)
    else
       profit_pips = PriceToPips(idx, entry - current_price);
 
-   double threshold = G_TradeProfile[idx].initial_dynamic_tp * 0.8;
+   double total_target_pips = PriceToPips(idx, MathAbs(G_TradeProfile[idx].tp_price - entry));
+   if(total_target_pips <= 0.0) total_target_pips = G_TradeProfile[idx].initial_dynamic_tp;
+   double threshold = total_target_pips * 0.8;
    if(profit_pips < threshold) return false;
 
    // --- Check momentum still strong ---
@@ -715,18 +708,186 @@ int GetBasketDirection(int idx)
 }
 
 // Get basket TP price from average entry + dynamic TP
+// Helper: Calculate total lots in the basket of the active chain
+double CalcBasketTotalLots(int idx)
+{
+   string sym = G_Pairs[idx].symbol;
+   ulong chain_id = G_Pairs[idx].active_chain_id;
+   if(chain_id == 0) return 0.0;
+
+   double total_lots = 0.0;
+   for(int i = PositionsTotal() - 1; i >= 0; --i)
+   {
+      ulong t = PositionGetTicket(i);
+      if(t > 0 && PositionSelectByTicket(t))
+      {
+         if(PositionGetString(POSITION_SYMBOL) == sym &&
+            (ulong)PositionGetInteger(POSITION_MAGIC) == chain_id)
+         {
+            total_lots += PositionGetDouble(POSITION_VOLUME);
+         }
+      }
+   }
+   return total_lots;
+}
+
+// Helper: Calculate profit in deposit currency (USD) for a given price distance
+double CalcProfitForPriceDistance(int idx, int direction, double open_price, double price_distance, double volume)
+{
+   if(volume <= 0.0 || price_distance <= 0.0) return 0.0;
+   string sym = G_Pairs[idx].symbol;
+   
+   ENUM_ORDER_TYPE otype = (direction == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double close_price = (direction == 1) ? open_price + price_distance : open_price - price_distance;
+   
+   double calc_profit = 0.0;
+   if(OrderCalcProfit(otype, sym, volume, open_price, close_price, calc_profit) && calc_profit > 0.00001)
+   {
+      return calc_profit;
+   }
+   
+   // Analytical fallback based on contract specification
+   double tick_size = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+   if(tick_size <= 0.0) tick_size = SymbolInfoDouble(sym, SYMBOL_POINT);
+   if(tick_size <= 0.0) tick_size = 0.00001;
+   
+   double tick_val = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE_PROFIT);
+   if(tick_val <= 0.0) tick_val = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
+   if(tick_val <= 0.0) tick_val = 1.0;
+   
+   return (price_distance / tick_size) * tick_val * volume;
+}
+
+// Helper: Convert target profit (USD) to required price distance
+double CalcPriceDistanceForProfit(int idx, int direction, double open_price, double volume, double target_profit)
+{
+   if(target_profit <= 0.0 || volume <= 0.0) return 0.0;
+   string sym = G_Pairs[idx].symbol;
+   
+   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+   if(point <= 0.0) point = 0.00001;
+   double test_distance = 100.0 * point;
+   
+   ENUM_ORDER_TYPE otype = (direction == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double test_close = (direction == 1) ? open_price + test_distance : open_price - test_distance;
+   
+   double test_profit = 0.0;
+   if(OrderCalcProfit(otype, sym, volume, open_price, test_close, test_profit) && test_profit > 0.00001)
+   {
+      double profit_per_price_unit = test_profit / test_distance;
+      if(profit_per_price_unit > 0.0)
+         return target_profit / profit_per_price_unit;
+   }
+   
+   // Analytical fallback based on contract specification
+   double tick_size = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+   if(tick_size <= 0.0) tick_size = point;
+   if(tick_size <= 0.0) tick_size = 0.00001;
+   
+   double tick_val = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE_PROFIT);
+   if(tick_val <= 0.0) tick_val = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
+   if(tick_val <= 0.0) tick_val = 1.0;
+   
+   double denom = tick_val * volume;
+   if(denom <= 0.0) return 0.0;
+   
+   return (target_profit * tick_size) / denom;
+}
+
+// Get basket TP price from average entry + dynamic TP (Recovery Debt-aware)
 double GetBasketTPPrice(int idx, double avg_entry, int direction)
 {
    if(!G_TradeProfile[idx].is_valid) return 0.0;
    if(avg_entry <= 0.0) return 0.0;
 
-   double tp_distance = PipsToPrice(idx, G_TradeProfile[idx].current_dynamic_tp);
+   string sym = G_Pairs[idx].symbol;
+   ulong chain_id = G_Pairs[idx].active_chain_id;
 
+   // 1. Natural Dynamic TP distance (in price units)
+   double natural_pips = G_TradeProfile[idx].current_dynamic_tp;
+   if(natural_pips <= 0.0) natural_pips = (double)InpMasterTPPips;
+   double natural_distance = PipsToPrice(idx, natural_pips);
+
+   // 2. Identify strategy and current debt
+   string strat = DetectChainStrategy(idx, chain_id);
+   double debt = GetStrategyDebt(idx, strat);
+
+   double final_distance = natural_distance;
    double tp_price = 0.0;
-   if(direction == 1)
-      tp_price = avg_entry + tp_distance;
-   else if(direction == -1)
-      tp_price = avg_entry - tp_distance;
+
+   // NORMAL MODE: Debt == 0
+   if(debt <= 0.001)
+   {
+      final_distance = natural_distance;
+      if(direction == 1)
+         tp_price = avg_entry + final_distance;
+      else if(direction == -1)
+         tp_price = avg_entry - final_distance;
+   }
+   // RECOVERY MODE: Debt > 0
+   else
+   {
+      double basket_lots = CalcBasketTotalLots(idx);
+      if(basket_lots <= 0.0)
+      {
+         // Failsafe: if basket volume not yet visible in market, estimate from initial trade
+         double bal = (G_Pairs[idx].locked_balance > 0.0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
+         if(InpSetBalance > 0.0) bal = InpSetBalance;
+         basket_lots = CalculateDCALot(idx, MathMax(1, G_Pairs[idx].chain_start_dca_seq), bal);
+         if(basket_lots <= 0.0) basket_lots = 0.01;
+      }
+
+      // Base TP Target in USD:
+      double working_balance = (G_Pairs[idx].locked_balance > 0.0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
+      if(InpSetBalance > 0.0) working_balance = InpSetBalance;
+      double base_target = CalculateAutoTP(sym, working_balance);
+
+      // Profit of Natural TP with current basket
+      double natural_profit = CalcProfitForPriceDistance(idx, direction, avg_entry, natural_distance, basket_lots);
+      if(natural_profit > base_target)
+         base_target = natural_profit;
+
+      if(base_target <= 0.0) base_target = 10.0; // safety baseline
+
+      // Required Profit = Base TP Target + Current Debt
+      double required_profit = base_target + debt;
+
+      // Convert Required Profit USD -> required price distance
+      double req_distance = CalcPriceDistanceForProfit(idx, direction, avg_entry, basket_lots, required_profit);
+
+      // Recovery TP distance must be AT LEAST natural TP distance
+      if(req_distance < natural_distance)
+         req_distance = natural_distance;
+
+      final_distance = req_distance;
+
+      if(direction == 1)
+         tp_price = avg_entry + final_distance;
+      else if(direction == -1)
+         tp_price = avg_entry - final_distance;
+
+      // Log [RECOVERY-TP] when initialized or adjusted
+      static double last_logged_tp[TOTAL_PAIRS];
+      static double last_logged_debt[TOTAL_PAIRS];
+      static double last_logged_lots[TOTAL_PAIRS];
+
+      bool should_log = false;
+      if(MathAbs(tp_price - last_logged_tp[idx]) >= G_Pairs[idx].point ||
+         MathAbs(debt - last_logged_debt[idx]) >= 0.01 ||
+         MathAbs(basket_lots - last_logged_lots[idx]) >= 0.001)
+      {
+         should_log = true;
+         last_logged_tp[idx]   = tp_price;
+         last_logged_debt[idx] = debt;
+         last_logged_lots[idx] = basket_lots;
+      }
+
+      if(should_log)
+      {
+         PrintFormat("\n[RECOVERY-TP]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT=%.2f\nBASE_TARGET=%.2f\nREQUIRED_PROFIT=%.2f\nBASKET_LOTS=%.2f\nTP_DISTANCE=%.1f\nTP_PRICE=%.5f",
+                     sym, strat, debt, base_target, required_profit, basket_lots, PriceToPips(idx, final_distance), tp_price);
+      }
+   }
 
    // --- Failsafe: TP must be on correct side ---
    if(direction == 1 && tp_price <= avg_entry)
@@ -799,7 +960,7 @@ void LoadTradeProfile(int idx, ulong chain_id)
       int dir = GetBasketDirection(idx);
       if(dir != 0)
       {
-         string strat = G_Pairs[idx].active_chain_strategy;
+         string strat = DetectChainStrategy(idx, chain_id);
          int st = GetStrategyType(strat);
          double avg_entry = CalcBasketAverageEntry(idx);
          double natural_tp = CalculateNaturalTP(idx, dir, st);
@@ -847,11 +1008,7 @@ void UpdateDynamicExit(int idx)
 
       // Recalculate absolute TP price from average entry
       int dir = G_TradeProfile[idx].direction;
-      double tp_dist = PipsToPrice(idx, G_TradeProfile[idx].current_dynamic_tp);
-      if(dir == 1)
-         G_TradeProfile[idx].tp_price = avg + tp_dist;
-      else
-         G_TradeProfile[idx].tp_price = avg - tp_dist;
+      G_TradeProfile[idx].tp_price = GetBasketTPPrice(idx, avg, dir);
    }
 
    // --- Runner Mode (FT only) ---

@@ -413,14 +413,12 @@ void UpdateDisplay()
       string base = G_Pairs[ac].base_name;
       SetLabelText(INFO_PREFIX + "SecC_Title", StringFormat("=== ACTIVE CHAIN — %s ===", base), C_SECTION);
 
-      string strat = G_Pairs[ac].active_chain_strategy;
-      if(strat == "") strat = "CT";
+      ulong cid = (G_Pairs[ac].active_chain_id > 0) ? G_Pairs[ac].active_chain_id : (EA_MAGIC_NUMBER * 1000 + ac);
+      string strat = DetectChainStrategy(ac, cid);
 
       int dir_val = G_TradeProfile[ac].direction;
       if(dir_val == 0) dir_val = G_Pairs[ac].setup_direction;
       string dir_str = (dir_val == 1 ? "BUY" : (dir_val == -1 ? "SELL" : "--"));
-
-      ulong cid = (G_Pairs[ac].active_chain_id > 0) ? G_Pairs[ac].active_chain_id : (EA_MAGIC_NUMBER * 1000 + ac);
 
       int orders = 0;
       for(int k = PositionsTotal() - 1; k >= 0; --k)

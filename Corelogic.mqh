@@ -177,15 +177,7 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    if(GlobalVariableCheck(n_dca_step)) G_Pairs[idx].chain_step_pips = (int)GlobalVariableGet(n_dca_step);
    else                                G_Pairs[idx].chain_step_pips = InpDCA_MinStepPips;
 
-   string n_strat = "Yoogi_Strat_" + sym + "_" + IntegerToString(chain_id);
-   if(GlobalVariableCheck(n_strat)) {
-       int sv = (int)GlobalVariableGet(n_strat);
-       if(sv == 2) G_Pairs[idx].active_chain_strategy = "FT";
-       else if(sv == 3) G_Pairs[idx].active_chain_strategy = "DUAL";
-       else G_Pairs[idx].active_chain_strategy = "CT";
-   } else {
-       G_Pairs[idx].active_chain_strategy = "CT"; // Fallback
-   }
+   G_Pairs[idx].active_chain_strategy = DetectChainStrategy(idx, chain_id);
 
    if(GlobalVariableCheck(n_bal))   G_Pairs[idx].locked_balance = GlobalVariableGet(n_bal);
    else                             G_Pairs[idx].locked_balance = 0.0;
@@ -195,6 +187,38 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    {
       int pos_found = CountOrdersInChain(sym, chain_id);
       if(pos_found > 0) G_Pairs[idx].chain_position_count = pos_found;
+   }
+
+   // Failsafe: reconstruct DCA sequence numbers from actual market orders if missing
+   if(G_Pairs[idx].chain_end_dca_seq <= 0)
+   {
+      int min_seq = 999999, max_seq = 0;
+      for(int k = PositionsTotal() - 1; k >= 0; --k)
+      {
+         ulong t = PositionGetTicket(k);
+         if(t > 0 && PositionSelectByTicket(t))
+         {
+            if(PositionGetString(POSITION_SYMBOL) == sym &&
+               (ulong)PositionGetInteger(POSITION_MAGIC) == chain_id)
+            {
+               int s = ExtractDCASeqFromComment(PositionGetString(POSITION_COMMENT));
+               if(s > 0)
+               {
+                  if(s < min_seq) min_seq = s;
+                  if(s > max_seq) max_seq = s;
+               }
+            }
+         }
+      }
+      if(max_seq > 0)
+      {
+         G_Pairs[idx].chain_start_dca_seq = min_seq;
+         G_Pairs[idx].chain_end_dca_seq   = max_seq;
+         if(GetStrategyDCASeq(idx, G_Pairs[idx].active_chain_strategy) < max_seq)
+         {
+            SetStrategyDCASeq(idx, G_Pairs[idx].active_chain_strategy, max_seq);
+         }
+      }
    }
 
    if(InpEnableDynamicTP)
@@ -274,8 +298,41 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
 
    if(close_deals_found == 0) return false;
 
-   string strat = G_Pairs[idx].active_chain_strategy;
-   if(strat == "") strat = "CT"; // Fallback
+   // Check pending close reason if closed by broker / delayed
+   string pending_reason_gv = "Yoogi_PendingReason_" + sym + "_" + IntegerToString(chain_id);
+   if(GlobalVariableCheck(pending_reason_gv))
+   {
+      double pr_val = GlobalVariableGet(pending_reason_gv);
+      if(pr_val == 1.0) reason = "MAX_DCA";
+      else if(pr_val == 2.0) reason = "TP";
+      else if(pr_val == 3.0) reason = "RUNNER";
+      GlobalVariableDel(pending_reason_gv);
+   }
+   else if(reason == "BROKER_CLOSE")
+   {
+      // Inspect deal reasons in history: if closed by TP, reason is TP
+      for(int d = 0; d < deals; d++)
+      {
+         ulong dticket = HistoryDealGetTicket(d);
+         if(dticket > 0 && HistoryDealGetString(dticket, DEAL_SYMBOL) == sym && 
+            (ulong)HistoryDealGetInteger(dticket, DEAL_MAGIC) == chain_id)
+         {
+            long deal_entry = HistoryDealGetInteger(dticket, DEAL_ENTRY);
+            if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_INOUT || deal_entry == DEAL_ENTRY_OUT_BY)
+            {
+               long deal_reason = HistoryDealGetInteger(dticket, DEAL_REASON);
+               if(deal_reason == DEAL_REASON_TP)
+               {
+                  reason = "TP";
+                  break;
+               }
+            }
+         }
+      }
+   }
+
+   string strat = DetectChainStrategy(idx, chain_id);
+   G_Pairs[idx].active_chain_strategy = strat;
    
    double debt_before     = GetStrategyDebt(idx, strat);
    int rec_lvl            = GetStrategyRecLvl(idx, strat);
@@ -283,7 +340,35 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
 
    int dca_from = G_Pairs[idx].chain_start_dca_seq;
    int dca_to   = G_Pairs[idx].chain_end_dca_seq;
-   if(dca_to <= 0) dca_to = current_dca_seq;
+   if(dca_to <= 0)
+   {
+      // Recover sequence bounds from history deals if active context missing
+      int min_seq = 999999, max_seq = 0;
+      for(int d = 0; d < deals; d++)
+      {
+         ulong dticket = HistoryDealGetTicket(d);
+         if(dticket > 0 && HistoryDealGetString(dticket, DEAL_SYMBOL) == sym && 
+            (ulong)HistoryDealGetInteger(dticket, DEAL_MAGIC) == chain_id)
+         {
+            int s = ExtractDCASeqFromComment(HistoryDealGetString(dticket, DEAL_COMMENT));
+            if(s > 0)
+            {
+               if(s < min_seq) min_seq = s;
+               if(s > max_seq) max_seq = s;
+            }
+         }
+      }
+      if(max_seq > 0)
+      {
+         dca_from = min_seq;
+         dca_to   = max_seq;
+      }
+      else
+      {
+         dca_to = current_dca_seq;
+         dca_from = MathMax(1, dca_to - G_Pairs[idx].chain_position_count + 1);
+      }
+   }
    if(dca_from <= 0) dca_from = MathMax(1, dca_to - G_Pairs[idx].chain_position_count + 1);
 
    // Update Debt, Recovery State & DCA Sequence based on Reason and Realized P&L
@@ -409,6 +494,14 @@ void CloseAndResolveChain(int idx, string reason)
    
    if(id == 0) return;
 
+   // Save pending close reason to ensure attribution survives deferral/restart
+   string pending_reason_gv = "Yoogi_PendingReason_" + sym + "_" + IntegerToString(id);
+   double pr_val = 0.0;
+   if(reason == "MAX_DCA") pr_val = 1.0;
+   else if(reason == "TP") pr_val = 2.0;
+   else if(reason == "RUNNER") pr_val = 3.0;
+   GlobalVariableSet(pending_reason_gv, pr_val);
+
    // 1. Request closing of all positions belonging to this chain
    for (int i = PositionsTotal() - 1; i >= 0; --i)
    {
@@ -488,6 +581,12 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
    // --- DYNAMICAL STRATEGY STATE SELECTION ---
    G_Pairs[idx].active_chain_strategy = entry_mode;
+   G_Pairs[idx].active_chain_id = new_chain_id;
+
+   // Immediately persist strategy and active chain ID
+   int strat_val = (entry_mode == "FT") ? 2 : ((entry_mode == "DUAL") ? 3 : 1);
+   GlobalVariableSet("Yoogi_Strat_" + sym + "_" + IntegerToString(new_chain_id), (double)strat_val);
+   GlobalVariableSet("Yoogi_ActiveChainID_" + sym, (double)new_chain_id);
    
    double current_debt = GetStrategyDebt(idx, entry_mode);
    bool is_recovery    = (current_debt > 0.001);
@@ -868,18 +967,20 @@ void ManagePairs()
       {
          activeChainsCount++;
 
-         if(G_Pairs[i].active_chain_id == 0)
+         ulong act_id = G_Pairs[i].active_chain_id;
+         if(act_id == 0 && found_chain_id != 0) act_id = found_chain_id;
+         if(act_id == 0 && GlobalVariableCheck("Yoogi_ActiveChainID_" + sym))
+            act_id = (ulong)GlobalVariableGet("Yoogi_ActiveChainID_" + sym);
+         if(act_id == 0) act_id = (ulong)(EA_MAGIC_NUMBER * 1000 + i);
+         G_Pairs[i].active_chain_id = act_id;
+
+         if(G_Pairs[i].chain_position_count == 0 || G_Pairs[i].active_chain_strategy == "")
          {
-            ulong act_id = found_chain_id;
-            if(act_id == 0 && GlobalVariableCheck("Yoogi_ActiveChainID_" + sym))
-               act_id = (ulong)GlobalVariableGet("Yoogi_ActiveChainID_" + sym);
-            if(act_id == 0) act_id = (ulong)(EA_MAGIC_NUMBER * 1000 + i);
-            G_Pairs[i].active_chain_id = act_id;
             LoadChainState_Multi(i, act_id);
          }
          else if(InpEnableDynamicTP && !G_TradeProfile[i].is_valid)
          {
-            LoadTradeProfile(i, G_Pairs[i].active_chain_id);
+            LoadTradeProfile(i, act_id);
          }
 
          // --- DYNAMIC EXIT ENGINE ---

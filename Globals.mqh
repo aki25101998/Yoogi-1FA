@@ -509,6 +509,12 @@ string AutoDetectDXY()
 }
 
 // ==================================================================
+// FORWARD DECLARATIONS
+// ==================================================================
+string DetectChainStrategy(int idx, ulong chain_id);
+int    ExtractDCASeqFromComment(string comment);
+
+// ==================================================================
 // KHỞI TẠO GLOBAL
 // ==================================================================
 void InitGlobals()
@@ -660,8 +666,6 @@ void InitGlobals()
       else 
          G_Pairs[i].dual_dca_sequence = 0;
 
-      G_Pairs[i].active_chain_strategy = "";
-
       G_Pairs[i].locked_balance = 0.0;
       G_Pairs[i].chain_position_count = 0;
       G_Pairs[i].chain_start_dca_seq = 0;
@@ -671,6 +675,15 @@ void InitGlobals()
          G_Pairs[i].active_chain_id = (ulong)GlobalVariableGet("Yoogi_ActiveChainID_" + G_Pairs[i].symbol);
       else
          G_Pairs[i].active_chain_id = 0;
+
+      if(G_Pairs[i].active_chain_id > 0)
+      {
+         G_Pairs[i].active_chain_strategy = DetectChainStrategy(i, G_Pairs[i].active_chain_id);
+      }
+      else
+      {
+         G_Pairs[i].active_chain_strategy = "";
+      }
 
       // Reset Trend-Following Context
       G_TF[i].h1_trend_direction = 0;
@@ -1071,5 +1084,112 @@ bool IsPairChainMagic(int idx, ulong magic)
    if(magic == (ulong)(EA_MAGIC_NUMBER * 1000 + idx)) return true;
    if(magic / 100000000000ULL == (ulong)EA_MAGIC_NUMBER && (magic % 10ULL) == (ulong)idx) return true;
    return false;
+}
+
+// Extract DCA sequence number from order/deal comment e.g. "CT | DCA 3" -> 3
+int ExtractDCASeqFromComment(string comment)
+{
+   int pos = StringFind(comment, "DCA ");
+   if(pos >= 0)
+   {
+      string num_str = StringSubstr(comment, pos + 4);
+      return (int)StringToInteger(num_str);
+   }
+   return 0;
+}
+
+// Authoritative multi-source strategy detector (CT, FT, DUAL)
+// Guarantees strategy persistence across restarts and history resolution
+string DetectChainStrategy(int idx, ulong chain_id)
+{
+   if(idx < 0 || idx >= TOTAL_PAIRS) return "CT";
+   string sym = G_Pairs[idx].symbol;
+
+   // 1. If currently stored and valid in active pair context
+   if(G_Pairs[idx].active_chain_strategy == "CT" || 
+      G_Pairs[idx].active_chain_strategy == "FT" || 
+      G_Pairs[idx].active_chain_strategy == "DUAL")
+   {
+      return G_Pairs[idx].active_chain_strategy;
+   }
+
+   // 2. Check dedicated persistent strategy variable for this chain ID
+   if(chain_id > 0)
+   {
+      string n_strat = "Yoogi_Strat_" + sym + "_" + IntegerToString(chain_id);
+      if(GlobalVariableCheck(n_strat))
+      {
+         int sv = (int)GlobalVariableGet(n_strat);
+         if(sv == 2) return "FT";
+         if(sv == 3) return "DUAL";
+         if(sv == 1) return "CT";
+      }
+
+      // 3. Check Dynamic TP persistent strategy
+      string n_dyn = "Yoogi_DynTP_Strat_" + sym + "_" + IntegerToString(chain_id);
+      if(GlobalVariableCheck(n_dyn))
+      {
+         int dsv = (int)GlobalVariableGet(n_dyn);
+         if(dsv == 2) return "FT";
+         if(dsv == 3) return "DUAL";
+         if(dsv == 1) return "CT";
+      }
+
+      // 4. Scan open positions on market matching this symbol and chain ID
+      for(int i = PositionsTotal() - 1; i >= 0; --i)
+      {
+         ulong t = PositionGetTicket(i);
+         if(t > 0 && PositionSelectByTicket(t))
+         {
+            if(PositionGetString(POSITION_SYMBOL) == sym &&
+               (ulong)PositionGetInteger(POSITION_MAGIC) == chain_id)
+            {
+               string cmt = PositionGetString(POSITION_COMMENT);
+               if(StringFind(cmt, "FT") == 0) return "FT";
+               if(StringFind(cmt, "DUAL") == 0) return "DUAL";
+               if(StringFind(cmt, "CT") == 0) return "CT";
+            }
+         }
+      }
+
+      // 5. Scan account history deals for this chain ID
+      datetime from_date = TimeCurrent() - 90 * 24 * 60 * 60;
+      if(HistorySelect(from_date, TimeCurrent() + 86400))
+      {
+         int deals = HistoryDealsTotal();
+         for(int d = deals - 1; d >= 0; --d)
+         {
+            ulong dticket = HistoryDealGetTicket(d);
+            if(dticket > 0)
+            {
+               if(HistoryDealGetString(dticket, DEAL_SYMBOL) == sym &&
+                  (ulong)HistoryDealGetInteger(dticket, DEAL_MAGIC) == chain_id)
+               {
+                  string dcmt = HistoryDealGetString(dticket, DEAL_COMMENT);
+                  if(StringFind(dcmt, "FT") == 0) return "FT";
+                  if(StringFind(dcmt, "DUAL") == 0) return "DUAL";
+                  if(StringFind(dcmt, "CT") == 0) return "CT";
+               }
+            }
+         }
+      }
+   }
+
+   // 6. Check which strategy is currently in recovery on this pair
+   // If only one strategy has debt on this pair, attribute to that strategy
+   bool ct_in_rec   = (G_Pairs[idx].ct_realized_bleed_loss > 0.001);
+   bool ft_in_rec   = (G_Pairs[idx].ft_realized_bleed_loss > 0.001);
+   bool dual_in_rec = (G_Pairs[idx].dual_realized_bleed_loss > 0.001);
+
+   int rec_count = (ct_in_rec ? 1 : 0) + (ft_in_rec ? 1 : 0) + (dual_in_rec ? 1 : 0);
+   if(rec_count == 1)
+   {
+      if(ft_in_rec) return "FT";
+      if(dual_in_rec) return "DUAL";
+      if(ct_in_rec) return "CT";
+   }
+
+   // 7. Ultimate fallback only if completely undetectable
+   return "CT";
 }
 //+------------------------------------------------------------------+
