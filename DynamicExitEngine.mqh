@@ -734,11 +734,13 @@ double CalcBasketTotalLots(int idx)
 // Helper: Calculate profit in deposit currency (USD) for a given price distance
 double CalcProfitForPriceDistance(int idx, int direction, double open_price, double price_distance, double volume)
 {
-   if(volume <= 0.0 || price_distance <= 0.0) return 0.0;
+   if(idx < 0 || idx >= TOTAL_PAIRS) return 0.0;
+   if(volume <= 0.0 || price_distance <= 0.0 || open_price <= 0.0) return 0.0;
    string sym = G_Pairs[idx].symbol;
    
    ENUM_ORDER_TYPE otype = (direction == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    double close_price = (direction == 1) ? open_price + price_distance : open_price - price_distance;
+   if(close_price <= 0.0) close_price = (direction == 1) ? open_price + price_distance : open_price * 0.5;
    
    double calc_profit = 0.0;
    if(OrderCalcProfit(otype, sym, volume, open_price, close_price, calc_profit) && calc_profit > 0.00001)
@@ -761,15 +763,20 @@ double CalcProfitForPriceDistance(int idx, int direction, double open_price, dou
 // Helper: Convert target profit (USD) to required price distance
 double CalcPriceDistanceForProfit(int idx, int direction, double open_price, double volume, double target_profit)
 {
-   if(target_profit <= 0.0 || volume <= 0.0) return 0.0;
+   if(idx < 0 || idx >= TOTAL_PAIRS) return 0.0;
+   if(target_profit <= 0.0 || volume <= 0.0 || open_price <= 0.0) return 0.0;
    string sym = G_Pairs[idx].symbol;
    
-   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
-   if(point <= 0.0) point = 0.00001;
-   double test_distance = 100.0 * point;
+   double tick_size = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+   if(tick_size <= 0.0) tick_size = SymbolInfoDouble(sym, SYMBOL_POINT);
+   if(tick_size <= 0.0) tick_size = 0.00001;
+   
+   // Normalize test distance to multiple of tick size
+   double test_distance = 100.0 * tick_size;
    
    ENUM_ORDER_TYPE otype = (direction == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    double test_close = (direction == 1) ? open_price + test_distance : open_price - test_distance;
+   if(test_close <= 0.0) test_close = (direction == 1) ? open_price + test_distance : open_price * 0.5;
    
    double test_profit = 0.0;
    if(OrderCalcProfit(otype, sym, volume, open_price, test_close, test_profit) && test_profit > 0.00001)
@@ -780,16 +787,12 @@ double CalcPriceDistanceForProfit(int idx, int direction, double open_price, dou
    }
    
    // Analytical fallback based on contract specification
-   double tick_size = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
-   if(tick_size <= 0.0) tick_size = point;
-   if(tick_size <= 0.0) tick_size = 0.00001;
-   
    double tick_val = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE_PROFIT);
    if(tick_val <= 0.0) tick_val = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
    if(tick_val <= 0.0) tick_val = 1.0;
    
    double denom = tick_val * volume;
-   if(denom <= 0.0) return 0.0;
+   if(denom <= 0.0 || tick_size <= 0.0) return 0.0;
    
    return (target_profit * tick_size) / denom;
 }
@@ -797,8 +800,9 @@ double CalcPriceDistanceForProfit(int idx, int direction, double open_price, dou
 // Get basket TP price from average entry + dynamic TP (Recovery Debt-aware)
 double GetBasketTPPrice(int idx, double avg_entry, int direction)
 {
+   if(idx < 0 || idx >= TOTAL_PAIRS) return 0.0;
    if(!G_TradeProfile[idx].is_valid) return 0.0;
-   if(avg_entry <= 0.0) return 0.0;
+   if(avg_entry <= 0.0 || (direction != 1 && direction != -1)) return 0.0;
 
    string sym = G_Pairs[idx].symbol;
    ulong chain_id = G_Pairs[idx].active_chain_id;
@@ -865,6 +869,31 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
          tp_price = avg_entry + final_distance;
       else if(direction == -1)
          tp_price = avg_entry - final_distance;
+
+      // Available Space warning: If required TP distance exceeds available space,
+      // log clear warning. Accounting and required profit are NEVER truncated.
+      double required_tp_pips = PriceToPips(idx, final_distance);
+      double avail_space_pips = G_TradeProfile[idx].available_space_pips;
+      if(avail_space_pips <= 0.0)
+         avail_space_pips = CalcAvailableSpace(idx);
+
+      if(avail_space_pips > 0.0 && required_tp_pips > avail_space_pips)
+      {
+         static double last_warned_tp[TOTAL_PAIRS];
+         static double last_warned_debt[TOTAL_PAIRS];
+         static double last_warned_space[TOTAL_PAIRS];
+
+         if(MathAbs(required_tp_pips - last_warned_tp[idx]) >= 1.0 ||
+            MathAbs(debt - last_warned_debt[idx]) >= 0.01 ||
+            MathAbs(avail_space_pips - last_warned_space[idx]) >= 1.0)
+         {
+            last_warned_tp[idx]    = required_tp_pips;
+            last_warned_debt[idx]  = debt;
+            last_warned_space[idx] = avail_space_pips;
+            PrintFormat("\n[RECOVERY-TP-WARNING]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT=%.2f\nBASE_TARGET=%.2f\nREQUIRED_PROFIT=%.2f\nBASKET_LOTS=%.2f\nREQUIRED_TP=%.1f pips\nAVAILABLE_SPACE=%.1f pips\nSTATUS=REQUIRED_TP_EXCEEDS_AVAILABLE_SPACE",
+                        sym, strat, debt, base_target, required_profit, basket_lots, required_tp_pips, avail_space_pips);
+         }
+      }
 
       // Log [RECOVERY-TP] when initialized or adjusted
       static double last_logged_tp[TOTAL_PAIRS];

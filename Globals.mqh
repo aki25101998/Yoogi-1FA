@@ -1105,37 +1105,33 @@ string DetectChainStrategy(int idx, ulong chain_id)
    if(idx < 0 || idx >= TOTAL_PAIRS) return "CT";
    string sym = G_Pairs[idx].symbol;
 
-   // 1. If currently stored and valid in active pair context
-   if(G_Pairs[idx].active_chain_strategy == "CT" || 
-      G_Pairs[idx].active_chain_strategy == "FT" || 
-      G_Pairs[idx].active_chain_strategy == "DUAL")
-   {
-      return G_Pairs[idx].active_chain_strategy;
-   }
-
-   // 2. Check dedicated persistent strategy variable for this chain ID
+   // PRIORITY 1 to 4: Chain-specific data
    if(chain_id > 0)
    {
+      // PRIORITY 1: Chain-specific persistent strategy
+      // Yoogi_Strat_<symbol>_<chain_id> (1 = CT, 2 = FT, 3 = DUAL)
       string n_strat = "Yoogi_Strat_" + sym + "_" + IntegerToString(chain_id);
       if(GlobalVariableCheck(n_strat))
       {
          int sv = (int)GlobalVariableGet(n_strat);
+         if(sv == 1) return "CT";
          if(sv == 2) return "FT";
          if(sv == 3) return "DUAL";
-         if(sv == 1) return "CT";
       }
 
-      // 3. Check Dynamic TP persistent strategy
+      // PRIORITY 2: Chain-specific Dynamic TP strategy
+      // Yoogi_DynTP_Strat_<symbol>_<chain_id> (1 = CT, 2 = FT, 3 = DUAL)
       string n_dyn = "Yoogi_DynTP_Strat_" + sym + "_" + IntegerToString(chain_id);
       if(GlobalVariableCheck(n_dyn))
       {
          int dsv = (int)GlobalVariableGet(n_dyn);
+         if(dsv == 1) return "CT";
          if(dsv == 2) return "FT";
          if(dsv == 3) return "DUAL";
-         if(dsv == 1) return "CT";
       }
 
-      // 4. Scan open positions on market matching this symbol and chain ID
+      // PRIORITY 3: Open positions of this EXACT chain_id
+      // symbol == current symbol AND POSITION_MAGIC == chain_id
       for(int i = PositionsTotal() - 1; i >= 0; --i)
       {
          ulong t = PositionGetTicket(i);
@@ -1152,7 +1148,8 @@ string DetectChainStrategy(int idx, ulong chain_id)
          }
       }
 
-      // 5. Scan account history deals for this chain ID
+      // PRIORITY 4: History deals of this EXACT chain_id
+      // symbol == current symbol AND DEAL_MAGIC == chain_id
       datetime from_date = TimeCurrent() - 90 * 24 * 60 * 60;
       if(HistorySelect(from_date, TimeCurrent() + 86400))
       {
@@ -1175,8 +1172,9 @@ string DetectChainStrategy(int idx, ulong chain_id)
       }
    }
 
-   // 6. Check which strategy is currently in recovery on this pair
-   // If only one strategy has debt on this pair, attribute to that strategy
+   // PRIORITY 5: Recovery state fallback
+   // Only if completely unable to determine from chain-specific data:
+   // If exactly one strategy has Debt > 0 on this pair, attribute to that strategy
    bool ct_in_rec   = (G_Pairs[idx].ct_realized_bleed_loss > 0.001);
    bool ft_in_rec   = (G_Pairs[idx].ft_realized_bleed_loss > 0.001);
    bool dual_in_rec = (G_Pairs[idx].dual_realized_bleed_loss > 0.001);
@@ -1184,12 +1182,21 @@ string DetectChainStrategy(int idx, ulong chain_id)
    int rec_count = (ct_in_rec ? 1 : 0) + (ft_in_rec ? 1 : 0) + (dual_in_rec ? 1 : 0);
    if(rec_count == 1)
    {
-      if(ft_in_rec) return "FT";
+      if(ft_in_rec)   return "FT";
       if(dual_in_rec) return "DUAL";
-      if(ct_in_rec) return "CT";
+      if(ct_in_rec)   return "CT";
    }
 
-   // 7. Ultimate fallback only if completely undetectable
+   // PRIORITY 6: Active pair context (ONLY as fallback)
+   // TUYET DOI KHONG dat active_chain_strategy truoc chain-specific persistent data
+   if(G_Pairs[idx].active_chain_strategy == "CT" || 
+      G_Pairs[idx].active_chain_strategy == "FT" || 
+      G_Pairs[idx].active_chain_strategy == "DUAL")
+   {
+      return G_Pairs[idx].active_chain_strategy;
+   }
+
+   // PRIORITY 7: Ultimate fallback
    return "CT";
 }
 //+------------------------------------------------------------------+
