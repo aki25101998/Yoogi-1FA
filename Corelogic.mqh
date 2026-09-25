@@ -164,6 +164,38 @@ void LoadChainState_Multi(int idx, ulong chain_id)
       G_Pairs[idx].system_dca_sequence = (int)GlobalVariableGet("Yoogi_SystemDCASeq_" + sym);
       G_Pairs[idx].system_recovery_active = (G_Pairs[idx].system_debt > 0.001);
    }
+   else
+   {
+      // MIGRATION: Migrate from legacy per-strategy state if System State doesn't exist
+      double total_legacy_debt = G_Pairs[idx].ct_realized_bleed_loss 
+                               + G_Pairs[idx].ft_realized_bleed_loss 
+                               + G_Pairs[idx].dual_realized_bleed_loss;
+                               
+      int max_legacy_seq = MathMax(G_Pairs[idx].ct_dca_sequence,
+                           MathMax(G_Pairs[idx].ft_dca_sequence,
+                                   G_Pairs[idx].dual_dca_sequence));
+                                   
+      int max_legacy_lvl = MathMax(G_Pairs[idx].ct_recovery_level,
+                           MathMax(G_Pairs[idx].ft_recovery_level,
+                                   G_Pairs[idx].dual_recovery_level));
+                                   
+      G_Pairs[idx].system_debt = total_legacy_debt;
+      G_Pairs[idx].system_recovery_level = max_legacy_lvl;
+      G_Pairs[idx].system_dca_sequence = max_legacy_seq;
+      G_Pairs[idx].system_recovery_active = (total_legacy_debt > 0.001);
+      
+      // Persist immediately so migration only happens once
+      GlobalVariableSet("Yoogi_SystemDebt_" + sym, G_Pairs[idx].system_debt);
+      GlobalVariableSet("Yoogi_SystemRecLvl_" + sym, (double)G_Pairs[idx].system_recovery_level);
+      GlobalVariableSet("Yoogi_SystemDCASeq_" + sym, (double)G_Pairs[idx].system_dca_sequence);
+      
+      if(total_legacy_debt > 0.001 || max_legacy_seq > 0)
+      {
+         PrintFormat("[STATE-MIGRATION]\nSYMBOL=%s\nLEGACY_CT_DEBT=%.2f\nLEGACY_FT_DEBT=%.2f\nLEGACY_DUAL_DEBT=%.2f\nSYSTEM_DEBT=%.2f\nLEGACY_CT_DCA=%d\nLEGACY_FT_DCA=%d\nLEGACY_DUAL_DCA=%d\nSYSTEM_DCA=%d\nACTION=MIGRATED",
+                     sym, G_Pairs[idx].ct_realized_bleed_loss, G_Pairs[idx].ft_realized_bleed_loss, G_Pairs[idx].dual_realized_bleed_loss, total_legacy_debt, 
+                     G_Pairs[idx].ct_dca_sequence, G_Pairs[idx].ft_dca_sequence, G_Pairs[idx].dual_dca_sequence, max_legacy_seq);
+      }
+   }
 
    // Load Chain Specific State
    if(chain_id == 0)
@@ -412,11 +444,37 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       }
       else
       {
-         // MAX_DCA with profit (not TP): do NOT create new Debt, do NOT reset DCA sequence,
-         // do NOT declare Recovery Complete, keep existing Recovery/sequence intact.
-         string mode_str = (debt_before > 0.001) ? "RECOVERY" : "NORMAL";
-         PrintFormat("[CHAIN-CLOSE-PROFIT]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f\nMODE=%s",
-                     sym, strat, chain_id, realized_pnl, debt_before, debt_before, mode_str);
+         // MAX_DCA with profit (not TP)
+         if(debt_before > 0.001 && realized_pnl > 0.0)
+         {
+            double debt_after = MathMax(0.0, debt_before - realized_pnl);
+            
+            PrintFormat("[DEBT-RECOVERY-MAX-DCA]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_USED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
+                        sym, strat, chain_id, realized_pnl, debt_before, MathMin(realized_pnl, debt_before), debt_after, current_dca_seq);
+
+            if(debt_after <= 0.00001)
+            {
+               // Full Recovery Complete!
+               SetSystemDebt(idx, 0.0);
+               SetSystemRecLvl(idx, 0);
+               SetSystemDCASeq(idx, 0);
+               
+               PrintFormat("[RECOVERY-COMPLETE]\nSYMBOL=%s\nSTRATEGY=%s\nDEBT_BEFORE=%.2f\nRECOVERY_PROFIT=%.2f\nDEBT_AFTER=0\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
+                           sym, strat, debt_before, realized_pnl);
+            }
+            else
+            {
+               // Partial Recovery
+               SetSystemDebt(idx, debt_after);
+            }
+         }
+         else
+         {
+            // Normal profitable chain, no debt or non-positive profit
+            string mode_str = (debt_before > 0.001) ? "RECOVERY" : "NORMAL";
+            PrintFormat("[CHAIN-CLOSE-PROFIT]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_AFTER=%.2f\nMODE=%s",
+                        sym, strat, chain_id, realized_pnl, debt_before, debt_before, mode_str);
+         }
       }
    }
    else if(reason == "TP" || reason == "RUNNER")

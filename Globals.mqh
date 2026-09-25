@@ -718,12 +718,12 @@ void InitGlobals()
          
          if(total_legacy_debt > 0.001 || max_legacy_seq > 0)
          {
-            PrintFormat("[SYSTEM-STATE-MIGRATION] %s: LegacyDebt(CT=%.2f FT=%.2f DUAL=%.2f)=%.2f | LegacySeq(CT=%d FT=%d DUAL=%d)=%d | LegacyLvl=%d",
+            PrintFormat("[STATE-MIGRATION]\nSYMBOL=%s\nLEGACY_CT_DEBT=%.2f\nLEGACY_FT_DEBT=%.2f\nLEGACY_DUAL_DEBT=%.2f\nSYSTEM_DEBT=%.2f\nLEGACY_CT_DCA=%d\nLEGACY_FT_DCA=%d\nLEGACY_DUAL_DCA=%d\nSYSTEM_DCA=%d\nACTION=MIGRATED",
                         G_Pairs[i].symbol,
                         G_Pairs[i].ct_realized_bleed_loss, G_Pairs[i].ft_realized_bleed_loss, G_Pairs[i].dual_realized_bleed_loss,
                         total_legacy_debt, 
                         G_Pairs[i].ct_dca_sequence, G_Pairs[i].ft_dca_sequence, G_Pairs[i].dual_dca_sequence,
-                        max_legacy_seq, max_legacy_lvl);
+                        max_legacy_seq);
          }
       }
 
