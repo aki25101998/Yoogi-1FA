@@ -19,22 +19,7 @@ input group "=== ENTRY ENGINE ==="
 input double InpCT_RequiredScore         = 100.0;  // Counter-Trend Required Score
 input double InpTF_RequiredScore         = 100.0;  // Trend-Following Required Score
 
-input int  InpMaxDCAPerChain        = 3;      // Max DCA per chain (0 = no DCA)
-input int  InpDCA_MinStepPips       = 30;     // Min Dynamic Step (pips)
-input int  InpDCA_MaxStepPips       = 60;     // Max Dynamic Step (pips)
-input double InpDCA_Step_ATRMultiplier = 1.0; // ATR Multiplier cho Dynamic Step
 
-input group "=== DYNAMIC EXIT ENGINE ==="
-input int    InpDynamicTP_MinPips        = 15;     // Min TP (pips)
-input int    InpDynamicTP_MaxPips        = 90;     // Max TP (pips)
-input double InpDynamicTP_ATRMultiplier  = 2.0;    // ATR Multiplier for TP
-
-// Cố định các cờ hệ thống luôn bật
-bool InpEnableCounterTrend      = true;
-bool InpEnableTrendFollowing    = true;
-bool InpEnableDynamicTP         = true;
-bool InpEnableTPCompression     = true;
-bool InpEnableRunnerMode        = true;
 
 //--- Tester Withdrawal Settings ---
 input group "--- Tester Withdrawal Settings ---"

@@ -30,6 +30,21 @@ const double InpHeSoLot           = 1.3;
 const int    InpKhoangMoPip       = 30;
 const int    InpMasterTPPips      = 60;
 
+// DCA & Dynamic TP (Hardcoded)
+const int    InpMaxDCAPerChain        = 3;
+const int    InpDCA_MinStepPips       = 30;
+const int    InpDCA_MaxStepPips       = 60;
+const double InpDCA_Step_ATRMultiplier = 1.0;
+const int    InpDynamicTP_MinPips        = 15;
+const int    InpDynamicTP_MaxPips        = 90;
+const double InpDynamicTP_ATRMultiplier  = 2.0;
+
+// System Flags (Hardcoded)
+const bool InpEnableCounterTrend      = true;
+const bool InpEnableTrendFollowing    = true;
+const bool InpEnableDynamicTP         = true;
+const bool InpEnableTPCompression     = true;
+const bool InpEnableRunnerMode        = true;
 const bool   InpUseSmartTrim      = false; // Tạm thời disable trimming của Yoogi Bleed cũ theo spec Section 26
 const int    InpTrimTriggerOrders = 3;
 const double InpTrimPercentage    = 100.0;
