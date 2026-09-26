@@ -931,6 +931,73 @@ double CalculateReversalScore(int idx, int direction)
 }
 
 // ==================================================================
+// CT ENTRY DISTANCE GATE
+// ==================================================================
+// Prevent chasing price if it has moved too far from MSS break level
+// Modeled after FT's ValidateTFEntryDistance
+bool ValidateCTEntryDistance(int idx, int direction, double &distance_atr, double &max_distance_atr)
+{
+   distance_atr = 0.0;
+   max_distance_atr = CT_MAX_ENTRY_DISTANCE_ATR;
+   
+   // If MSS was not required or break level is unknown, skip this gate
+   if(!InpReversal_RequireStructureShift) return true;
+   if(G_Pairs[idx].mss_break_level <= 0.0) return true;
+   
+   string sym = G_Pairs[idx].symbol;
+   ENUM_TIMEFRAMES ltf = G_Pairs[idx].ltf;
+   
+   double atr = CalculateATR_Generic(sym, ltf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) return false; // Fail-closed
+   
+   double close[];
+   if(CopyClose(sym, ltf, 1, 1, close) < 1) return false; // Fail-closed
+   
+   double distance = 0.0;
+   if(direction == 1) // BUY: price should be above MSS break level but not too far
+   {
+      distance = close[0] - G_Pairs[idx].mss_break_level;
+      if(close[0] < G_Pairs[idx].mss_break_level) return false; // Price fell back below break level
+   }
+   else if(direction == -1) // SELL: price should be below MSS break level but not too far
+   {
+      distance = G_Pairs[idx].mss_break_level - close[0];
+      if(close[0] > G_Pairs[idx].mss_break_level) return false; // Price rose back above break level
+   }
+   
+   distance_atr = distance / atr;
+   if(distance_atr > max_distance_atr) return false; // Too far → don't chase
+   
+   return true;
+}
+
+// ==================================================================
+// CT EVENT COHERENCE CHECK
+// ==================================================================
+// Ensures Sweep → Displacement → MSS evidence was accumulated within
+// a reasonable time window (CT_MAX_EVENT_SPREAD_BARS LTF bars).
+// Uses the age counters: the OLDEST confirmed event's age must not
+// exceed the spread limit, ensuring all 3 events are "fresh together".
+bool CheckCTEventCoherence(int idx)
+{
+   // All 3 confirmation events must be present
+   if(!G_Pairs[idx].conf_sweep) return false;
+   if(!G_Pairs[idx].conf_displacement) return false;
+   if(!G_Pairs[idx].conf_mss) return false;
+   
+   // The max age among the 3 events determines the "spread"
+   // Lower age = more recent. If the oldest is within the window,
+   // all 3 events happened within CT_MAX_EVENT_SPREAD_BARS bars.
+   int max_age = G_Pairs[idx].conf_sweep_age;
+   if(G_Pairs[idx].conf_displacement_age > max_age) max_age = G_Pairs[idx].conf_displacement_age;
+   if(G_Pairs[idx].conf_mss_age > max_age) max_age = G_Pairs[idx].conf_mss_age;
+   
+   if(max_age > CT_MAX_EVENT_SPREAD_BARS) return false;
+   
+   return true;
+}
+
+// ==================================================================
 // HARD REQUIREMENTS VALIDATION
 // ==================================================================
 // Score KHÔNG được thay thế các điều kiện bắt buộc.
@@ -976,6 +1043,26 @@ bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
    {
       rejectReason = "SCORE_BELOW_MIN";
       return false;
+   }
+   
+   // 8. Event Coherence: Sweep→Displacement→MSS must be within CT_MAX_EVENT_SPREAD_BARS
+   if(InpEnableLiquiditySweep && InpEnableDisplacement && InpReversal_RequireStructureShift)
+   {
+      if(!CheckCTEventCoherence(idx))
+      {
+         rejectReason = "CT_EVENT_NOT_COHERENT";
+         return false;
+      }
+   }
+   
+   // 9. Entry Distance: Don't chase if price moved too far from MSS break level
+   {
+      double ct_dist_atr = 0.0, ct_max_dist = 0.0;
+      if(!ValidateCTEntryDistance(idx, direction, ct_dist_atr, ct_max_dist))
+      {
+         rejectReason = "CT_ENTRY_DISTANCE_TOO_FAR";
+         return false;
+      }
    }
    
    // 7. DXY không chống lại setup (nếu áp dụng)
@@ -1104,6 +1191,14 @@ void LogReversalDecision(int idx, int direction, string decision, string reason,
                G_Pairs[idx].score_sweep, G_Pairs[idx].score_displacement,
                G_Pairs[idx].score_mss, G_Pairs[idx].score_momentum,
                G_Pairs[idx].reversal_score);
+   // New gates diagnostic
+   bool coherent = CheckCTEventCoherence(idx);
+   double ct_d_atr = 0.0, ct_max_d = 0.0;
+   bool dist_ok = ValidateCTEntryDistance(idx, direction, ct_d_atr, ct_max_d);
+   int max_evt_age = MathMax(G_Pairs[idx].conf_sweep_age, MathMax(G_Pairs[idx].conf_displacement_age, G_Pairs[idx].conf_mss_age));
+   PrintFormat("  EventCoherence=%s (MaxAge=%d/%d) | EntryDist=%s (%.2f/%.2f ATR)",
+               coherent ? "PASS" : "FAIL", max_evt_age, CT_MAX_EVENT_SPREAD_BARS,
+               dist_ok ? "PASS" : "FAIL", ct_d_atr, ct_max_d);
    PrintFormat("  DXY=%s | Decision=%s | Reason=%s", dxy_str, decision, reason);
 }
 
@@ -1312,6 +1407,13 @@ int CheckCounterTrendSignal(int idx)
          else if(rejectReason == "DXY_NOT_READY")
          {
             G_Pairs[idx].rev_status = "WAIT_DXY";
+         }
+         else if(rejectReason == "CT_ENTRY_DISTANCE_TOO_FAR")
+         {
+            // Price moved too far from MSS break level → reversal opportunity gone
+            LogReversalDecision(idx, dir, "REJECT", rejectReason, score);
+            ResetReversalSetup(idx, rejectReason);
+            return 0;
          }
          else
          {

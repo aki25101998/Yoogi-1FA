@@ -86,6 +86,8 @@ const int    InpSweepMaxAgeBars = 10;
 const int    InpDisplacementMaxAgeBars = 5;
 const int    InpMSSMaxAgeBars = 15;
 const bool   InpReversalDebug = false;
+const double CT_MAX_ENTRY_DISTANCE_ATR = 3.0;  // CT: Don't entry if price moved > 3x LTF ATR from MSS break level
+const int    CT_MAX_EVENT_SPREAD_BARS  = 12;   // CT: Sweep→Displacement→MSS must complete within 12 LTF bars
 
 // ==================================================================
 // STRUCT QUẢN LÝ TRẠNG THÁI TỪNG CẶP
