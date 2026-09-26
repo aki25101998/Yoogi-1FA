@@ -81,6 +81,7 @@ void SavePersistentState(int idx)
    GlobalVariableSet("Yoogi_SystemDebt_" + sym, G_Pairs[idx].system_debt);
    GlobalVariableSet("Yoogi_SystemRecLvl_" + sym, (double)G_Pairs[idx].system_recovery_level);
    GlobalVariableSet("Yoogi_SystemDCASeq_" + sym, (double)G_Pairs[idx].system_dca_sequence);
+   GlobalVariableSet("Yoogi_SystemPartialRec_" + sym, G_Pairs[idx].system_debt_partially_recovered ? 1.0 : 0.0);
    
    // Save legacy per-strategy state (backward compatibility only)
    GlobalVariableSet("Yoogi_CT_Debt_" + sym, G_Pairs[idx].ct_realized_bleed_loss);
@@ -167,6 +168,12 @@ void LoadChainState_Multi(int idx, ulong chain_id)
       G_Pairs[idx].system_recovery_level = (int)GlobalVariableGet("Yoogi_SystemRecLvl_" + sym);
       G_Pairs[idx].system_dca_sequence = (int)GlobalVariableGet("Yoogi_SystemDCASeq_" + sym);
       G_Pairs[idx].system_recovery_active = (G_Pairs[idx].system_debt > 0.001);
+      // Load partial recovery flag
+      string sys_partial_lc = "Yoogi_SystemPartialRec_" + sym;
+      if(GlobalVariableCheck(sys_partial_lc))
+         G_Pairs[idx].system_debt_partially_recovered = ((int)GlobalVariableGet(sys_partial_lc) == 1);
+      else
+         G_Pairs[idx].system_debt_partially_recovered = false;
    }
    else
    {
@@ -193,6 +200,7 @@ void LoadChainState_Multi(int idx, ulong chain_id)
       else           G_Pairs[idx].system_dca_sequence = max_legacy_seq;
       
       G_Pairs[idx].system_recovery_active = (G_Pairs[idx].system_debt > 0.001);
+      G_Pairs[idx].system_debt_partially_recovered = false; // Migration: assume first recovery
       
       // Persist immediately so migration/reconciliation only happens once
       GlobalVariableSet("Yoogi_SystemDebt_" + sym, G_Pairs[idx].system_debt);
@@ -487,6 +495,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          
          SetSystemDebt(idx, debt_after);
          SetSystemRecLvl(idx, rec_lvl);
+         G_Pairs[idx].system_debt_partially_recovered = false; // New loss → reset partial flag
          // Global DCA sequence stays at current_dca_seq (does NOT reset)
          
          PrintFormat("[DEBT-ADD]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
@@ -497,10 +506,14 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          // MAX_DCA with profit (not TP)
          if(debt_before > 0.001 && realized_pnl > 0.0)
          {
+            bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
             double debt_target = 0.0;
-            if(pos_count == 1) debt_target = debt_before * 0.50;
-            else if(pos_count == 2) debt_target = debt_before * 0.50;
-            else debt_target = debt_before;
+            if(partial_done)
+               debt_target = debt_before;  // Already partially recovered → 100%
+            else if(pos_count <= 2)
+               debt_target = debt_before * 0.50;  // First recovery, small chain → 50%
+            else
+               debt_target = debt_before;  // First recovery, 3+ pos → 100%
 
             double debt_reduction = MathMin(debt_target, realized_pnl);
             debt_reduction = MathMin(debt_reduction, debt_before);
@@ -517,11 +530,16 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
                SetSystemDebt(idx, 0.0);
                SetSystemRecLvl(idx, 0);
                SetSystemDCASeq(idx, 0);
+               G_Pairs[idx].system_debt_partially_recovered = false;
             }
             else
             {
                // Partial Recovery
                SetSystemDebt(idx, debt_after);
+               G_Pairs[idx].system_debt_partially_recovered = true;
+               
+               // Tiered Recovery: Khóa Level DCA bằng cách lặp lại chain hiện tại
+               SetSystemDCASeq(idx, MathMax(0, G_Pairs[idx].chain_start_dca_seq - 1));
             }
          }
          else
@@ -550,10 +568,14 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          // Recovery TP: settle debt with realized profit
          if(realized_pnl > 0.0)
          {
+            bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
             double debt_target = 0.0;
-            if(pos_count == 1) debt_target = debt_before * 0.50;
-            else if(pos_count == 2) debt_target = debt_before * 0.50;
-            else debt_target = debt_before;
+            if(partial_done)
+               debt_target = debt_before;  // Already partially recovered → 100%
+            else if(pos_count <= 2)
+               debt_target = debt_before * 0.50;  // First recovery, small chain → 50%
+            else
+               debt_target = debt_before;  // First recovery, 3+ pos → 100%
 
             double debt_reduction = MathMin(debt_target, realized_pnl);
             debt_reduction = MathMin(debt_reduction, debt_before);
@@ -570,11 +592,16 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
                SetSystemDebt(idx, 0.0);
                SetSystemRecLvl(idx, 0);
                SetSystemDCASeq(idx, 0);
+               G_Pairs[idx].system_debt_partially_recovered = false;
             }
             else
             {
                // Partial Recovery
                SetSystemDebt(idx, debt_after);
+               G_Pairs[idx].system_debt_partially_recovered = true;
+               
+               // Tiered Recovery: Khóa Level DCA bằng cách lặp lại chain hiện tại
+               SetSystemDCASeq(idx, MathMax(0, G_Pairs[idx].chain_start_dca_seq - 1));
             }
          }
          else
@@ -585,6 +612,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
             rec_lvl++;
             SetSystemDebt(idx, debt_after);
             SetSystemRecLvl(idx, rec_lvl);
+            G_Pairs[idx].system_debt_partially_recovered = false; // Loss → reset partial flag
             
             PrintFormat("[DEBT-ADD]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
                         sym, strat, chain_id, dca_from, dca_to, realized_pnl, debt_before, net_loss, debt_after, current_dca_seq);
@@ -601,16 +629,21 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          rec_lvl++;
          SetSystemDebt(idx, debt_after);
          SetSystemRecLvl(idx, rec_lvl);
+         G_Pairs[idx].system_debt_partially_recovered = false; // Loss → reset partial flag
          PrintFormat("[DEBT-ADD]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
                      sym, strat, chain_id, dca_from, dca_to, realized_pnl, debt_before, net_loss, debt_after, current_dca_seq);
       }
       else if(realized_pnl > 0.0 && debt_before > 0.001)
       {
          // Other closure with positive profit during recovery: settle debt
+         bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
          double debt_target = 0.0;
-         if(pos_count == 1) debt_target = debt_before * 0.50;
-         else if(pos_count == 2) debt_target = debt_before * 0.50;
-         else debt_target = debt_before;
+         if(partial_done)
+            debt_target = debt_before;  // Already partially recovered → 100%
+         else if(pos_count <= 2)
+            debt_target = debt_before * 0.50;  // First recovery, small chain → 50%
+         else
+            debt_target = debt_before;  // First recovery, 3+ pos → 100%
 
          double debt_reduction = MathMin(debt_target, realized_pnl);
          debt_reduction = MathMin(debt_reduction, debt_before);
@@ -627,11 +660,16 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
             SetSystemDebt(idx, 0.0);
             SetSystemRecLvl(idx, 0);
             SetSystemDCASeq(idx, 0);
+            G_Pairs[idx].system_debt_partially_recovered = false;
          }
          else
          {
             // Partial Recovery
             SetSystemDebt(idx, debt_after);
+            G_Pairs[idx].system_debt_partially_recovered = true;
+            
+            // Tiered Recovery: Khóa Level DCA bằng cách lặp lại chain hiện tại
+            SetSystemDCASeq(idx, MathMax(0, G_Pairs[idx].chain_start_dca_seq - 1));
          }
       }
       else

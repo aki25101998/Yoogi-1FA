@@ -241,6 +241,7 @@ struct PairContext
    int      system_recovery_level;    // Recovery level counter
    int      system_dca_sequence;      // Global DCA sequence across strategies
    bool     system_recovery_active;   // true when system_debt > 0
+   bool     system_debt_partially_recovered; // true after first partial recovery (next chain targets 100%)
    
    // --- Active Chain Context (Reset mỗi chain) ---
    string   active_chain_strategy; // "CT", "FT", or "DUAL"
@@ -706,9 +707,17 @@ void InitGlobals()
          G_Pairs[i].system_dca_sequence = (int)GlobalVariableGet(sys_dcaseq_gv);
          G_Pairs[i].system_recovery_active = (G_Pairs[i].system_debt > 0.001);
          
-         PrintFormat("[SYSTEM-STATE-LOAD] %s: Debt=%.2f RecLvl=%d DCASeq=%d Recovery=%s",
+         // Load partial recovery flag
+         string sys_partial_gv = "Yoogi_SystemPartialRec_" + G_Pairs[i].symbol;
+         if(GlobalVariableCheck(sys_partial_gv))
+            G_Pairs[i].system_debt_partially_recovered = ((int)GlobalVariableGet(sys_partial_gv) == 1);
+         else
+            G_Pairs[i].system_debt_partially_recovered = false;
+         
+         PrintFormat("[SYSTEM-STATE-LOAD] %s: Debt=%.2f RecLvl=%d DCASeq=%d Recovery=%s PartialRec=%s",
                      G_Pairs[i].symbol, G_Pairs[i].system_debt, G_Pairs[i].system_recovery_level,
-                     G_Pairs[i].system_dca_sequence, G_Pairs[i].system_recovery_active ? "ACTIVE" : "NORMAL");
+                     G_Pairs[i].system_dca_sequence, G_Pairs[i].system_recovery_active ? "ACTIVE" : "NORMAL",
+                     G_Pairs[i].system_debt_partially_recovered ? "YES" : "NO");
       }
       else
       {
@@ -735,6 +744,7 @@ void InitGlobals()
          else           G_Pairs[i].system_dca_sequence = max_legacy_seq;
          
          G_Pairs[i].system_recovery_active = (G_Pairs[i].system_debt > 0.001);
+         G_Pairs[i].system_debt_partially_recovered = false; // Migration: assume first recovery
          
          // Persist the migrated/reconciled system state
          GlobalVariableSet(sys_debt_gv, G_Pairs[i].system_debt);

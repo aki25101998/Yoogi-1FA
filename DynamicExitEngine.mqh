@@ -869,20 +869,25 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
       double debt_repayment_target = 0.0;
       double applied_normal_profit = 0.0;
 
-      if(recovery_position_count == 1)
+      bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
+      
+      if(partial_done)
       {
-         stage = 1;
-         debt_repayment_target = debt * 0.50;
-         applied_normal_profit = 0.0;
+         // Debt already partially recovered → target 100% remaining
+         stage = (recovery_position_count == 1) ? 1 : 2;
+         debt_repayment_target = debt;
+         applied_normal_profit = (recovery_position_count == 1) ? 0.0 : normal_profit_target;
       }
-      else if(recovery_position_count == 2)
+      else if(recovery_position_count <= 2)
       {
-         stage = 2;
+         // First recovery, small chain → 50% debt
+         stage = recovery_position_count;
          debt_repayment_target = debt * 0.50;
-         applied_normal_profit = normal_profit_target;
+         applied_normal_profit = (recovery_position_count == 1) ? 0.0 : normal_profit_target;
       }
       else
       {
+         // First recovery, 3+ positions → 100% debt
          stage = 3;
          debt_repayment_target = debt;
          applied_normal_profit = normal_profit_target;
