@@ -321,6 +321,8 @@ double CalcAvailableSpace(int idx, bool log_details=false)
    if(found)
       pips = PriceToPips(idx, best_space);
 
+   double old_pips = G_TradeProfile[idx].available_space_pips;
+
    if(log_details)
    {
       PrintFormat("\n[DYNAMIC-TP]\n%s\n%sAvailableSpace=%.1f pips", m15_log, h1_log, pips);
@@ -328,12 +330,14 @@ double CalcAvailableSpace(int idx, bool log_details=false)
    else 
    {
        // Also log if AvailableSpace significantly changes
-       double old_pips = G_TradeProfile[idx].available_space_pips;
-       if (MathAbs(pips - old_pips) > 5.0 && pips > 0.0)
+       if (MathAbs(pips - old_pips) > 5.0)
        {
            PrintFormat("\n[DYNAMIC-TP] (Update)\n%s\n%sAvailableSpace=%.1f pips", m15_log, h1_log, pips);
        }
    }
+
+   // State synchronization
+   G_TradeProfile[idx].available_space_pips = pips;
 
    if(!found)
       return 0.0;
