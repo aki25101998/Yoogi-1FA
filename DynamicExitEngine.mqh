@@ -181,54 +181,164 @@ double CalcStructureTarget(int idx)
 // ==================================================================
 // TP CANDIDATE 3: AVAILABLE SPACE
 // ==================================================================
+const int    DYNTP_EMA_SLOPE_LOOKBACK = 5;
+const double DYNTP_EMA_SLOPE_MIN_ATR  = 0.10;
+const double DYNTP_EMA_SLOPE_STRONG_ATR = 0.25;
+const double DYNTP_EMA_MIN_DISTANCE_ATR = 0.50;
+const double DYNTP_EMA_WEAK_FACTOR = 0.95;
+
+enum ENUM_EMA_OBSTACLE_STATE
+{
+   EMA_STATE_INVALID,
+   EMA_STATE_FLAT,
+   EMA_STATE_WEAK,
+   EMA_STATE_STRONG
+};
+
+double CalcValidEMA50ObstacleSpace(int idx, ENUM_TIMEFRAMES timeframe, int direction, double entry_price, bool &is_valid, string &log_str)
+{
+   string sym = G_Pairs[idx].symbol;
+   is_valid = false;
+   log_str = "";
+
+   double ema_current = CalculateEMA_Generic(sym, timeframe, 50, 1);
+   double ema_past    = CalculateEMA_Generic(sym, timeframe, 50, 1 + DYNTP_EMA_SLOPE_LOOKBACK);
+   double atr         = CalculateATR_Generic(sym, timeframe, InpReversal_ATR_Period, 1);
+
+   string tf_str = EnumToString(timeframe);
+   if(StringFind(tf_str, "PERIOD_") == 0)
+      tf_str = StringSubstr(tf_str, 7);
+
+   if(ema_current <= 0.0 || ema_past <= 0.0 || atr <= 0.0)
+   {
+      log_str = StringFormat("%s EMA50=ERR\n%s SlopeRatio=ERR\n%s SlopeState=ERR\n%s DistanceATR=ERR\n%s Obstacle=INVALID\n", tf_str, tf_str, tf_str, tf_str, tf_str);
+      return 0.0;
+   }
+
+   double slope_distance = MathAbs(ema_current - ema_past);
+   double slope_ratio    = slope_distance / atr;
+
+   ENUM_EMA_OBSTACLE_STATE state = EMA_STATE_FLAT;
+   string state_str = "FLAT";
+   if(slope_ratio >= DYNTP_EMA_SLOPE_STRONG_ATR)
+   {
+      state = EMA_STATE_STRONG;
+      state_str = "STRONG";
+   }
+   else if(slope_ratio >= DYNTP_EMA_SLOPE_MIN_ATR)
+   {
+      state = EMA_STATE_WEAK;
+      state_str = "WEAK";
+   }
+
+   bool direction_match = false;
+   if(direction == 1 && ema_current > ema_past)
+      direction_match = true;
+   else if(direction == -1 && ema_current < ema_past)
+      direction_match = true;
+
+   if(!direction_match && state != EMA_STATE_FLAT)
+   {
+      state_str = "WRONG_DIR";
+   }
+
+   if(!direction_match || state == EMA_STATE_FLAT)
+   {
+      state = EMA_STATE_INVALID;
+   }
+
+   double distance = MathAbs(ema_current - entry_price);
+   double distance_atr = distance / atr;
+
+   if(distance_atr < DYNTP_EMA_MIN_DISTANCE_ATR)
+   {
+      state = EMA_STATE_INVALID;
+   }
+
+   bool is_ahead = false;
+   if(direction == 1 && ema_current > entry_price)
+      is_ahead = true;
+   else if(direction == -1 && ema_current < entry_price)
+      is_ahead = true;
+
+   if(!is_ahead)
+   {
+      state = EMA_STATE_INVALID;
+   }
+
+   string obstacle_str = (state == EMA_STATE_INVALID) ? "IGNORED" : "VALID";
+   if (state == EMA_STATE_INVALID)
+      is_valid = false;
+   else
+      is_valid = true;
+
+   log_str = StringFormat("%s EMA50=%.5f\n%s SlopeRatio=%.2f ATR\n%s SlopeState=%s\n%s DistanceATR=%.2f\n%s Obstacle=%s\n",
+                          tf_str, ema_current, tf_str, slope_ratio, tf_str, state_str, tf_str, distance_atr, tf_str, obstacle_str);
+
+   if(!is_valid)
+      return 0.0;
+
+   double space = distance;
+   if(state == EMA_STATE_WEAK)
+      space = space * DYNTP_EMA_WEAK_FACTOR;
+
+   return space;
+}
+
 // Distance to nearest major obstacle (EMA50, strong swing level)
-double CalcAvailableSpace(int idx)
+double CalcAvailableSpace(int idx, bool log_details=false)
 {
    string sym = G_Pairs[idx].symbol;
    int direction = G_TradeProfile[idx].direction;
    double entry = G_TradeProfile[idx].entry_price;
    if(entry <= 0.0) return 0.0;
 
-   double ema50 = CalculateEMA_Generic(sym, PERIOD_M15, 50, 1);
-   if(ema50 <= 0.0) return 0.0;
+   bool m15_valid = false;
+   string m15_log = "";
+   double m15_space = CalcValidEMA50ObstacleSpace(idx, PERIOD_M15, direction, entry, m15_valid, m15_log);
 
-   double space = 0.0;
+   bool h1_valid = false;
+   string h1_log = "";
+   double h1_space = CalcValidEMA50ObstacleSpace(idx, PERIOD_H1, direction, entry, h1_valid, h1_log);
 
-   if(direction == 1) // BUY
+   double best_space = 0.0;
+   bool found = false;
+
+   if(m15_valid && m15_space > 0.0)
    {
-      // If EMA50 is above entry = resistance ahead
-      if(ema50 > entry)
-         space = ema50 - entry;
-      else
-         space = 99999.0; // EMA50 below, no immediate resistance from EMA
-   }
-   else if(direction == -1) // SELL
-   {
-      // If EMA50 is below entry = support ahead
-      if(ema50 < entry)
-         space = entry - ema50;
-      else
-         space = 99999.0; // EMA50 above, no immediate support from EMA
+      best_space = m15_space;
+      found = true;
    }
 
-   // Also check H1 EMA50 as a stronger level
-   double ema50_h1 = CalculateEMA_Generic(sym, PERIOD_H1, 50, 1);
-   if(ema50_h1 > 0.0)
+   if(h1_valid && h1_space > 0.0)
    {
-      double h1_space = 99999.0;
-      if(direction == 1 && ema50_h1 > entry)
-         h1_space = ema50_h1 - entry;
-      else if(direction == -1 && ema50_h1 < entry)
-         h1_space = entry - ema50_h1;
-
-      if(h1_space < space)
-         space = h1_space;
+      if(!found || h1_space < best_space)
+         best_space = h1_space;
+      found = true;
    }
 
-   if(space >= 99999.0)
-      return 0.0; // No obstacle found → don't use available space as limiter
+   double pips = 0.0;
+   if(found)
+      pips = PriceToPips(idx, best_space);
 
-   return PriceToPips(idx, space);
+   if(log_details)
+   {
+      PrintFormat("\n[DYNAMIC-TP]\n%s\n%sAvailableSpace=%.1f pips", m15_log, h1_log, pips);
+   }
+   else 
+   {
+       // Also log if AvailableSpace significantly changes
+       double old_pips = G_TradeProfile[idx].available_space_pips;
+       if (MathAbs(pips - old_pips) > 5.0 && pips > 0.0)
+       {
+           PrintFormat("\n[DYNAMIC-TP] (Update)\n%s\n%sAvailableSpace=%.1f pips", m15_log, h1_log, pips);
+       }
+   }
+
+   if(!found)
+      return 0.0;
+
+   return pips;
 }
 
 // ==================================================================
