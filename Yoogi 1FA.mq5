@@ -11,9 +11,9 @@
 #property description "1. Mở Tool > Options > Expert Advisors.\n\n"
 #property description "2. Tích vào ô 'Allow WebRequest for listed URL'.\n\n"
 #property description "3. Thêm địa chỉ: script.google.com\n\n"
-#property description "4. EA chỉ hoạt động khi 10.000$ < Balance < 500.000$\n\n"
+
 #property description "5. Gắn EA vào chart EURUSD để chạy\n\n"
-#property description "6. Min balance 10k, max balance 500k để khởi chạy EA\n\n"
+
 #property description "Vui lòng liên hệ Zalo | Telegram: 0346134678 để được kích hoạt\n\n"
 #property description "Nhấp vào Bom.so/Yoogi ở trên cùng để truy cập trọn bộ công cụ của Yoogi\n\n";
 #property link "Bom.so/Yoogi"

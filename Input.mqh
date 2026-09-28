@@ -14,6 +14,7 @@
 
 input group "=== TÙY CHỈNH CHUNG ==="
 input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = dùng ACCOUNT_BALANCE thực tế)
+input double InpRiskPercent = 0.5; // % Balance dùng để tính Lot (ví dụ: 0.5 = 0.5%)
 
 input group "=== ENTRY ENGINE ==="
 input double InpCT_RequiredScore         = 100.0;  // Counter-Trend Required Score

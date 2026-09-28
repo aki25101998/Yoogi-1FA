@@ -53,7 +53,7 @@ const double InpTrimPercentage    = 100.0;
 // INTERNAL REVERSAL ENGINE CONFIGURATION
 // DO NOT EXPOSE TO USER
 //==================================================
-const bool   InpEnableBalanceLimit = true;
+const bool   InpEnableBalanceLimit = false;
 
 const bool   InpUseDXYReference = true;
 const bool   InpUseReversalEngine = true;
@@ -561,10 +561,10 @@ void InitGlobals()
       else
          G_Pairs[i].pip_value = 1.0 * G_Pairs[i].point;
 
-      // --- CHE DO TU DONG (DUY NHAT): Mac dinh H1/M5, Risk 0.5% cho tat ca ---
+      // --- CHE DO TU DONG (DUY NHAT): Mac dinh H1/M5, Risk InpRiskPercent cho tat ca ---
       G_Pairs[i].htf = PERIOD_H1;
       G_Pairs[i].ltf = PERIOD_M5;
-      G_Pairs[i].risk_percent = 0.5;
+      G_Pairs[i].risk_percent = InpRiskPercent;
       G_Pairs[i].enabled = true;
 
       // Reset LTF State
