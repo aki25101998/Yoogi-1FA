@@ -914,11 +914,11 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
       // --- LOG BẮT BUỘC THEO SPEC ---
       string mode_str = is_recovery ? "RECOVERY" : "NORMAL";
-      PrintFormat("[DCA-OPEN]\nSYMBOL=%s\nSTRATEGY=%s\nDCA_SEQUENCE=%d\nCHAIN_POSITION=%d\nMAX_CHAIN_POSITIONS=%d\nLOT=%.2f\nMODE=%s\nDEBT=%.2f",
-                  sym, entry_mode, next_dca_seq, 1, InpMaxDCAPerChain, initial_lot, mode_str, current_debt);
+      PrintFormat("[DCA-OPEN]\nSYMBOL=%s\nSTRATEGY=%s\nDCA_SEQUENCE=%d\nCHAIN_POSITION=%d\nMAX_CHAIN_POSITIONS=%d\nLOT=%.2f\nRISK=%.2f%%\nMODE=%s\nDEBT=%.2f",
+                  sym, entry_mode, next_dca_seq, 1, InpMaxDCAPerChain, initial_lot, InpRiskPercent, mode_str, current_debt);
 
-      PrintFormat("[%s] >>> OPEN CHAIN [%s]: %.2f lots (Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
-                  sym, entry_mode, initial_lot, current_bal, lot_calculation_bal, new_chain_id);
+      PrintFormat("[%s] >>> OPEN CHAIN [%s]: %.2f lots (Risk: %.2f%%, Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
+                  sym, entry_mode, initial_lot, InpRiskPercent, current_bal, lot_calculation_bal, new_chain_id);
    }
 }
 

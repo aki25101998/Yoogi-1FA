@@ -982,7 +982,9 @@ double NormalizeLot(string sym, double v)
    double vmax = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
    if (step <= 0.0) step = 0.01;
    v = MathMax(vmin, MathMin(v, vmax));
-   return round(v / step) * step;
+   double norm = round(v / step) * step;
+   int digits = (step < 0.1) ? 2 : ((step < 1.0) ? 1 : 0);
+   return NormalizeDouble(norm, digits);
 }
 
 // Tính TP
@@ -1010,10 +1012,11 @@ double CalculateAutoTP(string sym, double balance)
 // [QUAN TRỌNG] Logic tính Lot mới (Hỗ trợ tắt Risk = 0)
 double CalculateAutoLot(int idx, double balance)
 {
-   // 1. Lấy thông tin từ struct đã map
+   // 1. Lấy thông tin từ struct đã map và input trực tiếp
    string sym      = G_Pairs[idx].symbol;
    string base     = G_Pairs[idx].base_name;
-   double risk_pct = G_Pairs[idx].risk_percent;
+   double risk_pct = InpRiskPercent;
+   G_Pairs[idx].risk_percent = InpRiskPercent;
 
    // --- NẾU RISK <= 0, TRẢ VỀ 0 ĐỂ KHÔNG MỞ LỆNH ---
    if(risk_pct <= 0.00001) return 0.0;

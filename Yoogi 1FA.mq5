@@ -85,6 +85,8 @@ int OnInit()
    Print("==================================================");
    PrintFormat("VERSION=%s", TF_ENGINE_VERSION);
    PrintFormat("TF_MOMENTUM_MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
+   PrintFormat("RISK_PERCENT=%.2f%%", InpRiskPercent);
+   PrintFormat("SET_BALANCE=%.2f", InpSetBalance);
    PrintFormat("CT_REQUIRED_SCORE=%.0f", InpCT_RequiredScore);
    PrintFormat("TF_REQUIRED_SCORE=%.0f", InpTF_RequiredScore);
    PrintFormat("TF_MAX_EVENT_BARS=%d", TF_MAX_EVENT_BARS);
