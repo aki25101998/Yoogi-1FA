@@ -275,6 +275,7 @@ const int    TF_MAX_EVENT_BARS         = 5;     // Sweep→Displacement→MSS mu
 const double TF_MAX_ENTRY_DISTANCE_ATR = 2.0;   // Don't chase price beyond 2x M5 ATR
 const int    TF_MAX_SETUP_BARS         = 100;   // Setup timeout in M5 bars
 const int    TF_MOMENTUM_MAX_BARS      = 10;    // Momentum timeout in M5 bars (max window, entry on first PASS)
+const int    TF_MOMENTUM_SIGNAL_MAX_AGE_BARS = 20; // Max M5 bars since indicator signal for freshness
 const int    TF_PULLBACK_MAX_BARS      = 30;    // M15 pullback max age
 const double TF_PULLBACK_MIN_DEPTH_ATR = 0.3;   // Min pullback depth (ATR)
 const double TF_PULLBACK_MAX_DEPTH_ATR = 3.0;   // Max pullback depth before reversal

@@ -750,22 +750,45 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    if(CopyTime(sym, m5, 1, 1, m5_tm) < 1) return; // Use closed candle time
    datetime current_time = m5_tm[0];
    
-   // --- FRESHNESS UPDATE: Time-based bar calculation ---
+   // --- GIAI ĐOẠN A: Event formation freshness ---
+   // TF_MAX_EVENT_BARS only controls Sweep -> Displacement -> MSS during formation.
+   // It MUST NOT apply once state reaches TF_STATE_ENTRY_READY (Giai đoạn B: Momentum confirmation window).
    long period_sec = PeriodSeconds(m5);
-   if(G_TF[idx].m5_sweep && G_TF[idx].m5_sweep_time > 0)
+   if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_DISPLACEMENT)
    {
-      long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
-      if(bars_since_sweep > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT"); return; }
+      if(G_TF[idx].m5_sweep && G_TF[idx].m5_sweep_time > 0)
+      {
+         long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
+         if(bars_since_sweep > TF_MAX_EVENT_BARS)
+         {
+            ResetTFM5Evidence(idx);
+            SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT");
+            return;
+         }
+      }
    }
-   if(G_TF[idx].m5_displacement && G_TF[idx].m5_displacement_time > 0)
+   else if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_MSS)
    {
-      long bars_since_disp = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
-      if(bars_since_disp > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT"); return; }
-   }
-   if(G_TF[idx].m5_mss && G_TF[idx].m5_mss_time > 0)
-   {
-      long bars_since_mss = (current_time - G_TF[idx].m5_mss_time) / period_sec;
-      if(bars_since_mss > TF_MAX_EVENT_BARS) { ResetTFM5Evidence(idx); SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT"); return; }
+      if(G_TF[idx].m5_sweep && G_TF[idx].m5_sweep_time > 0)
+      {
+         long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
+         if(bars_since_sweep > TF_MAX_EVENT_BARS)
+         {
+            ResetTFM5Evidence(idx);
+            SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT");
+            return;
+         }
+      }
+      if(G_TF[idx].m5_displacement && G_TF[idx].m5_displacement_time > 0)
+      {
+         long bars_since_disp = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
+         if(bars_since_disp > TF_MAX_EVENT_BARS)
+         {
+            ResetTFM5Evidence(idx);
+            SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT");
+            return;
+         }
+      }
    }
    
    // --- Find qualified swings on M5 ---
@@ -1059,7 +1082,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             G_TF[idx].status = "MSS CONFIRMED";
             PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f) on time=%s", sym, trend_dir, breakLvl, TimeToString(current_time));
             // Start Momentum Window
-            G_TF[idx].m5_momentum_start_time = current_time;
+            if(G_TF[idx].m5_momentum_start_time == 0)
+               G_TF[idx].m5_momentum_start_time = (G_TF[idx].m5_sweep_time > 0) ? G_TF[idx].m5_sweep_time : current_time;
             G_TF[idx].m5_momentum_bars_elapsed = 0;
             G_TF[idx].m5_momentum_last_closed_time = iTime(sym, PERIOD_M5, 1);
             G_TF[idx].m5_momentum_cci = false;
@@ -1144,14 +1168,37 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       if(G_TF[idx].score_momentum == 10.0) mom_status = "CONFIRMED";
       else if(bars_elapsed == TF_MOMENTUM_MAX_BARS) mom_status = "LAST_CHANCE";
       
+      int cci_status = 0, rf_status = 0;
+      datetime cci_time = 0, rf_time = 0;
+      CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
+      
+      string cci_state_str = (cci_status == 1) ? "BUY" : (cci_status == -1 ? "SELL" : "NONE");
+      string rf_state_str  = (rf_status == 1)  ? "BUY" : (rf_status == -1  ? "SELL" : "NONE");
+      
+      string cci_valid_str = "FAIL";
+      if(G_TF[idx].m5_momentum_cci)
+         cci_valid_str = "PASS";
+      else if(cci_status == trend_dir)
+         cci_valid_str = "CCI_STALE";
+      
+      string rf_valid_str = "FAIL";
+      if(G_TF[idx].m5_momentum_rf)
+         rf_valid_str = "PASS";
+      else if(rf_status == trend_dir)
+         rf_valid_str = "RF_STALE";
+      
       Print("\n[TF_MOMENTUM_DIAGNOSTIC]");
       PrintFormat("SYMBOL=%s", sym);
       PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
       PrintFormat("MSS_TIME=%s", TimeToString(G_TF[idx].m5_mss_time));
       PrintFormat("CLOSED_M5_TIME=%s", TimeToString(closed_m5_time));
       PrintFormat("BAR=%d/%d", bars_elapsed, TF_MOMENTUM_MAX_BARS);
-      PrintFormat("CCI=%s", G_TF[idx].m5_momentum_cci ? "PASS" : "FAIL");
-      PrintFormat("RF=%s", G_TF[idx].m5_momentum_rf ? "PASS" : "FAIL");
+      PrintFormat("CCI_STATE=%s", cci_state_str);
+      PrintFormat("CCI_SIGNAL_TIME=%s", TimeToString(cci_time));
+      PrintFormat("CCI_VALID=%s", cci_valid_str);
+      PrintFormat("RF_STATE=%s", rf_state_str);
+      PrintFormat("RF_SIGNAL_TIME=%s", TimeToString(rf_time));
+      PrintFormat("RF_VALID=%s", rf_valid_str);
       PrintFormat("PRICE_CONTINUATION=%s", G_TF[idx].m5_momentum_pc ? "PASS" : "FAIL");
       // Find protected structure intactness for diagnostic
       bool prot_intact = false;
@@ -1204,25 +1251,64 @@ void EvaluateTFMomentumConfirmation(int idx, int trend_dir, bool &cci_confirmed,
    CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
    
    datetime closed_m5_time = iTime(sym, PERIOD_M5, 1);
+   long period_sec = PeriodSeconds(PERIOD_M5);
    
-   // Reset to false on each new evaluation so it truly reflects the current closed candle
-   cci_confirmed = false;
-   rf_confirmed = false;
-   pc_confirmed = false;
+   // Determine setup lifecycle anchor for freshness
+   datetime anchor_time = G_TF[idx].m5_momentum_start_time;
+   if(anchor_time <= 0)
+   {
+      if(G_TF[idx].m15_pullback_start_time > 0) anchor_time = G_TF[idx].m15_pullback_start_time;
+      else if(G_TF[idx].m5_sweep_time > 0)      anchor_time = G_TF[idx].m5_sweep_time;
+      else                                      anchor_time = G_TF[idx].m5_mss_time;
+   }
    
-   if(cci_status == trend_dir && cci_time >= G_TF[idx].m5_mss_time)
+   // 1. Evaluate CCI Momentum confirmation & freshness
+   bool cci_fresh = false;
+   if(cci_status == trend_dir && cci_time > 0)
+   {
+      long bars_since_cci = (closed_m5_time - cci_time) / period_sec;
+      // Must be within current setup lifecycle (>= anchor_time), closed candle (<= closed_m5_time), and fresh
+      if(cci_time >= anchor_time && cci_time <= closed_m5_time && bars_since_cci >= 0 && bars_since_cci <= TF_MOMENTUM_SIGNAL_MAX_AGE_BARS)
+         cci_fresh = true;
+   }
+   
+   if(cci_fresh)
    {
       cci_confirmed = true;
-      G_TF[idx].m5_momentum_cci_time = closed_m5_time; 
+      if(G_TF[idx].m5_momentum_cci_time == 0)
+         G_TF[idx].m5_momentum_cci_time = closed_m5_time;
    }
-      
-   if(rf_status == trend_dir && rf_time >= G_TF[idx].m5_mss_time)
+   else if(cci_status == -trend_dir)
    {
-      rf_confirmed = true;
-      G_TF[idx].m5_momentum_rf_time = closed_m5_time;
+      // Adverse momentum invalidates previous confirmation
+      cci_confirmed = false;
+      G_TF[idx].m5_momentum_cci_time = 0;
    }
    
-   // Evaluate Price Continuation
+   // 2. Evaluate Range Filter confirmation & freshness
+   bool rf_fresh = false;
+   if(rf_status == trend_dir && rf_time > 0)
+   {
+      long bars_since_rf = (closed_m5_time - rf_time) / period_sec;
+      // Must be within current setup lifecycle (>= anchor_time), closed candle (<= closed_m5_time), and fresh
+      if(rf_time >= anchor_time && rf_time <= closed_m5_time && bars_since_rf >= 0 && bars_since_rf <= TF_MOMENTUM_SIGNAL_MAX_AGE_BARS)
+         rf_fresh = true;
+   }
+   
+   if(rf_fresh)
+   {
+      rf_confirmed = true;
+      if(G_TF[idx].m5_momentum_rf_time == 0)
+         G_TF[idx].m5_momentum_rf_time = closed_m5_time;
+   }
+   else if(rf_status == -trend_dir)
+   {
+      // Adverse momentum invalidates previous confirmation
+      rf_confirmed = false;
+      G_TF[idx].m5_momentum_rf_time = 0;
+   }
+   
+   // 3. Evaluate Price Continuation (closed candle validation)
    double close1 = iClose(sym, PERIOD_M5, 1);
    double close2 = iClose(sym, PERIOD_M5, 2);
    
@@ -1232,17 +1318,33 @@ void EvaluateTFMomentumConfirmation(int idx, int trend_dir, bool &cci_confirmed,
       if(prot_low > 0.0 && close1 >= prot_low) protected_intact = true;
       
       if(close1 > close2 && close1 > G_TF[idx].m5_mss_break_level && protected_intact)
+      {
          pc_confirmed = true;
+         if(G_TF[idx].m5_momentum_pc_time == 0)
+            G_TF[idx].m5_momentum_pc_time = closed_m5_time;
+      }
+      else if(!protected_intact)
+      {
+         pc_confirmed = false;
+         G_TF[idx].m5_momentum_pc_time = 0;
+      }
    }
    else if(trend_dir == -1) {
       double prot_high = (G_TF[idx].m15_protected_high > 0.0) ? G_TF[idx].m15_protected_high : G_TF[idx].h1_protected_structure;
       if(prot_high > 0.0 && close1 <= prot_high) protected_intact = true;
       
       if(close1 < close2 && close1 < G_TF[idx].m5_mss_break_level && protected_intact)
+      {
          pc_confirmed = true;
+         if(G_TF[idx].m5_momentum_pc_time == 0)
+            G_TF[idx].m5_momentum_pc_time = closed_m5_time;
+      }
+      else if(!protected_intact)
+      {
+         pc_confirmed = false;
+         G_TF[idx].m5_momentum_pc_time = 0;
+      }
    }
-   
-   if(pc_confirmed) G_TF[idx].m5_momentum_pc_time = closed_m5_time;
 }
 
 // ==================================================================
@@ -1400,7 +1502,7 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    
    // 1. H1 Trend
    if(G_TF[idx].h1_trend_direction != direction) { if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; pass = false; }
-   if(G_TF[idx].h1_trend_quality < 20.0) { if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; pass = false; }
+   if(G_TF[idx].h1_trend_quality < 15.0) { if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; pass = false; }
    
    // 2. M15 Pullback
    if(!G_TF[idx].m15_pullback_valid) { 
@@ -1738,8 +1840,8 @@ int CheckTrendFollowingSignal(int idx)
    if(G_TF[idx].h1_trend_direction == 0) return 0;
    if(G_TF[idx].setup_state == TF_STATE_NONE) return 0;
    
-   // Block progression if H1 is weakened
-   if(G_TF[idx].h1_trend_quality < 20.0) return 0;
+   // Block progression if H1 is weakened (quality < 15.0)
+   if(G_TF[idx].h1_trend_quality < 15.0) return 0;
    
    int dir = G_TF[idx].h1_trend_direction;
    
@@ -1818,6 +1920,18 @@ int CheckTrendFollowingSignal(int idx)
    {
       SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M15_PULLBACK_READY");
       G_TF[idx].status = "WAIT SWEEP";
+      if(G_TF[idx].m5_momentum_start_time == 0)
+      {
+         datetime m5_tm[];
+         datetime cur_m5 = (CopyTime(sym, PERIOD_M5, 1, 1, m5_tm) >= 1) ? m5_tm[0] : 0;
+         G_TF[idx].m5_momentum_start_time = (G_TF[idx].m15_pullback_start_time > 0) ? G_TF[idx].m15_pullback_start_time : cur_m5;
+      }
+   }
+   else if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_SWEEP && G_TF[idx].m5_momentum_start_time == 0)
+   {
+      datetime m5_tm[];
+      datetime cur_m5 = (CopyTime(sym, PERIOD_M5, 1, 1, m5_tm) >= 1) ? m5_tm[0] : 0;
+      G_TF[idx].m5_momentum_start_time = cur_m5;
    }
    EvaluateM5Trigger(idx, dir);
    
