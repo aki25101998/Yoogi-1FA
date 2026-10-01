@@ -401,6 +401,7 @@ struct TrendFollowingContext
    int    setup_state;            // TF_STATE_*
    int    setup_bar_count;        // Total bars since setup started
    string status;                 // Human-readable status
+   int    tf_setup_id;            // Diagnostic Setup / Lifecycle ID
 
    // Invalidation
    double h1_protected_structure; // Level that invalidates H1 trend
@@ -913,6 +914,7 @@ void InitGlobals()
       G_TF[i].m15_protected_high = 0.0;
       G_TF[i].m15_last_bar_time = 0;
       G_TF[i].m5_last_bar_time_tf = 0;
+      G_TF[i].tf_setup_id = 0;
 
       // --- PHAT HIEN USD & MAP DXY ---
       G_Pairs[i].trapSignal = 0;

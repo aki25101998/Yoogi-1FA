@@ -6,6 +6,7 @@
 #property strict
 
 #include "ReversalDisplayData.mqh"
+#include "TrendFollowingDiagnostics.mqh"
 
 // ==================================================================
 // 1. CONFIGURATION & LAYOUT TOKENS
@@ -293,6 +294,7 @@ void UpdateDisplay()
       SetLabelText(INFO_PREFIX + "R"+r+"_Debt",  s_debt,   clr_debt);
    }
 
+   Comment(TFDiag_GetChartDisplaySummary());
    ChartRedraw();
 }
 
@@ -303,6 +305,7 @@ void DeleteDisplay()
 {
    ObjectsDeleteAll(0, INFO_PREFIX);
    ObjectsDeleteAll(0, BG_PREFIX);
+   Comment("");
    ChartRedraw();
 }
 

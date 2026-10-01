@@ -106,6 +106,9 @@ int OnInit()
     
     Print("==================================================\n");
 
+   // --- TREND FOLLOWING REJECTION FUNNEL INITIALIZATION ---
+   TFDiag_Init();
+
    return(INIT_SUCCEEDED);
 }
 
@@ -116,6 +119,10 @@ void OnDeinit(const int reason)
 {
    // Hủy Timer để giải phóng tài nguyên CPU
    EventKillTimer();
+
+   // In Báo cáo Trend Following Rejection Funnel
+   TFDiag_PrintFunnelSummary();
+   Comment("");
 
    DeleteDisplay();
    DeinitIndicators();

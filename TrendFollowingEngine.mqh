@@ -10,6 +10,8 @@
 
 const string TF_ENGINE_VERSION = "TF_PHASE_3";
 
+#include "TrendFollowingDiagnostics.mqh"
+
 // ==================================================================
 // HELPER: TF State Diagnostic Logging
 // ==================================================================
@@ -78,6 +80,8 @@ void ResetTFSetup(int idx, string reason)
    G_TF[idx].status = "NO SETUP";
    
    G_TF[idx].h1_protected_structure = 0.0;
+   G_TF[idx].tf_setup_id = 0;
+   TFDiag_EndSetup(idx, reason);
 }
 
 // Reset only M5 evidence (keep H1 + M15 state)
@@ -309,6 +313,10 @@ int EvaluateH1TrendRegime(int idx, double &out_protected_struct)
       G_TF[idx].score_h1_trend = 0.0;
       G_TF[idx].h1_classification = "NONE";
    }
+   
+   datetime h1_time_arr[];
+   datetime cur_h1_time = (CopyTime(sym, htf, 0, 1, h1_time_arr) >= 1) ? h1_time_arr[0] : 0;
+   TFDiag_RecordH1(idx, direction, G_TF[idx].h1_trend_quality, cur_h1_time);
    
    return direction;
 }
@@ -618,11 +626,15 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
          G_TF[idx].m15_pullback_depth = depth;
          
          string m15_rej_reason = "";
+         datetime m15_bar_time = iTime(sym, PERIOD_M15, 1);
          if(ValidateTFM15PullbackQuality(idx, trend_dir, m15_rej_reason))
          {
             G_TF[idx].m15_pullback_quality = 20.0;
             G_TF[idx].score_m15_pullback = 20.0;
             G_TF[idx].m15_pullback_valid = true;
+            TFDiag_RecordM15(idx, trend_dir, true, "NONE", m15_bar_time);
+            TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_M15_VALID);
+            TFDiag_LogFunnel(idx, trend_dir, "M15_PULLBACK", "PASS", StringFormat("depth=%.2f ATR", depth));
             return true;
          }
          else
@@ -630,7 +642,15 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
             G_TF[idx].m15_pullback_quality = 0.0;
             G_TF[idx].score_m15_pullback = 0.0;
             G_TF[idx].m15_pullback_valid = false;
+            TFDiag_RecordM15(idx, trend_dir, false, m15_rej_reason, m15_bar_time);
+            TFDiag_LogFunnel(idx, trend_dir, "M15_PULLBACK", "REJECT", m15_rej_reason);
          }
+      }
+      else
+      {
+         datetime m15_bar_time = iTime(sym, PERIOD_M15, 1);
+         TFDiag_RecordM15(idx, trend_dir, false, "M15_IMPULSE_NOT_BULLISH", m15_bar_time);
+         TFDiag_LogFunnel(idx, trend_dir, "M15_PULLBACK", "REJECT", "NO_VALID_BULLISH_IMPULSE");
       }
    }
    else if(trend_dir == -1) // SELL trend → look for pullback UP
@@ -799,11 +819,15 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
          G_TF[idx].m15_pullback_depth = depth;
          
          string m15_rej_reason = "";
+         datetime m15_bar_time = iTime(sym, PERIOD_M15, 1);
          if(ValidateTFM15PullbackQuality(idx, trend_dir, m15_rej_reason))
          {
             G_TF[idx].m15_pullback_quality = 20.0;
             G_TF[idx].score_m15_pullback = 20.0;
             G_TF[idx].m15_pullback_valid = true;
+            TFDiag_RecordM15(idx, trend_dir, true, "NONE", m15_bar_time);
+            TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_M15_VALID);
+            TFDiag_LogFunnel(idx, trend_dir, "M15_PULLBACK", "PASS", StringFormat("depth=%.2f ATR", depth));
             return true;
          }
          else
@@ -811,7 +835,15 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
             G_TF[idx].m15_pullback_quality = 0.0;
             G_TF[idx].score_m15_pullback = 0.0;
             G_TF[idx].m15_pullback_valid = false;
+            TFDiag_RecordM15(idx, trend_dir, false, m15_rej_reason, m15_bar_time);
+            TFDiag_LogFunnel(idx, trend_dir, "M15_PULLBACK", "REJECT", m15_rej_reason);
          }
+      }
+      else
+      {
+         datetime m15_bar_time = iTime(sym, PERIOD_M15, 1);
+         TFDiag_RecordM15(idx, trend_dir, false, "M15_IMPULSE_NOT_BEARISH", m15_bar_time);
+         TFDiag_LogFunnel(idx, trend_dir, "M15_PULLBACK", "REJECT", "NO_VALID_BEARISH_IMPULSE");
       }
    }
    
@@ -920,6 +952,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
          if(bars_since_sweep > TF_MAX_EVENT_BARS)
          {
+            TFDiag_RecordCoherenceTimeout(idx, trend_dir, (int)bars_since_sweep, current_time);
+            TFDiag_LogFunnel(idx, trend_dir, "EVENT_COHERENCE", "REJECT", StringFormat("TIMEOUT: bars_since_sweep=%d > %d", bars_since_sweep, TF_MAX_EVENT_BARS));
             ResetTFM5Evidence(idx);
             SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT");
             return;
@@ -933,6 +967,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
          if(bars_since_sweep > TF_MAX_EVENT_BARS)
          {
+            TFDiag_RecordCoherenceTimeout(idx, trend_dir, (int)bars_since_sweep, current_time);
+            TFDiag_LogFunnel(idx, trend_dir, "EVENT_COHERENCE", "REJECT", StringFormat("TIMEOUT: bars_since_sweep=%d > %d", bars_since_sweep, TF_MAX_EVENT_BARS));
             ResetTFM5Evidence(idx);
             SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT");
             return;
@@ -943,6 +979,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          long bars_since_disp = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
          if(bars_since_disp > TF_MAX_EVENT_BARS)
          {
+            TFDiag_RecordCoherenceTimeout(idx, trend_dir, (int)bars_since_disp, current_time);
+            TFDiag_LogFunnel(idx, trend_dir, "EVENT_COHERENCE", "REJECT", StringFormat("TIMEOUT: bars_since_disp=%d > %d", bars_since_disp, TF_MAX_EVENT_BARS));
             ResetTFM5Evidence(idx);
             SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT");
             return;
@@ -1160,6 +1198,10 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                   sym, (trend_dir == 1 ? "BUY" : "SELL"), sum_raw, sum_qualified, sum_rej_consumed, sum_rej_broken, sum_rej_range, sum_rej_nosweep, sweep_target, (best_candidate_idx != -1 ? "SWEPT_AND_SELECTED" : "NONE"));
       PrintFormat("[M5_SWEEP_CANDIDATES][%s] direction=%d candidates=%d", sym, trend_dir, candidate_count);
       
+      bool sweep_found = (best_candidate_idx != -1);
+      TFDiag_RecordSweep(idx, trend_dir, sweep_found, current_time,
+                         candidate_count, sum_raw, sum_qualified, sum_rej_consumed, sum_rej_broken, sum_rej_range, sum_rej_nosweep);
+      
       if(best_candidate_idx != -1)
       {
          G_TF[idx].m5_sweep = true;
@@ -1169,6 +1211,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          G_TF[idx].score_sweep = 10.0;
          SetTFState(idx, TF_STATE_M5_WAIT_DISPLACEMENT, "M5_SWEEP_CONFIRMED");
          G_TF[idx].status = "WAIT DISPLACEMENT";
+         
+         TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_SWEEP_FOUND);
+         TFDiag_LogFunnel(idx, trend_dir, "M5_SWEEP", "PASS", StringFormat("target=%.5f, candidates=%d", sweep_target, candidate_count));
          
 #ifdef _DEBUG
          if(!G_TF[idx].m15_pullback_valid)
@@ -1192,6 +1237,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       }
       else
       {
+         TFDiag_LogFunnel(idx, trend_dir, "M5_SWEEP", "REJECT", StringFormat("raw=%d, nosweep=%d, broken=%d, consumed=%d, range=%d", sum_raw, sum_rej_nosweep, sum_rej_broken, sum_rej_consumed, sum_rej_range));
          PrintFormat("[M5_NO_VALID_SWEEP][%s] direction=%d", sym, trend_dir);
          return; // Only return if no sweep found, otherwise fall through to evaluate Displacement on the same candle
       }
@@ -1215,6 +1261,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             G_TF[idx].m5_displacement_range_atr = range_atr;
             
             bool disp_pass = (range_atr >= TF_MIN_DISPLACEMENT_ATR);
+            TFDiag_RecordDisplacement(idx, trend_dir, disp_pass, range_atr, TF_MIN_DISPLACEMENT_ATR, current_time);
             
             Print("\n[TF_DISPLACEMENT_QUALITY]");
             PrintFormat("symbol=%s", sym);
@@ -1232,11 +1279,14 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                G_TF[idx].score_displacement = 10.0;
                SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED");
                G_TF[idx].status = "WAIT MSS";
+               TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_DISPLACEMENT_FOUND);
+               TFDiag_LogFunnel(idx, trend_dir, "M5_DISPLACEMENT", "PASS", StringFormat("range_atr=%.2f >= %.2f", range_atr, TF_MIN_DISPLACEMENT_ATR));
                PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d) on time=%s", sym, trend_dir, TimeToString(current_time));
             }
             else
             {
                // Weak displacement -> Reject setup
+               TFDiag_LogFunnel(idx, trend_dir, "M5_DISPLACEMENT", "REJECT", StringFormat("WEAK: range_atr=%.2f < %.2f", range_atr, TF_MIN_DISPLACEMENT_ATR));
                LogTFReset(idx, "M5", "TF_P2_DISPLACEMENT_REJECT");
                ResetTFM5Evidence(idx);
                SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "TF_P2_DISPLACEMENT_REJECT");
@@ -1245,6 +1295,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          }
          else
          {
+            TFDiag_RecordDisplacement(idx, trend_dir, false, 0.0, TF_MIN_DISPLACEMENT_ATR, current_time, "NOT_DETECTED");
             return; // Wait for next candle if displacement not found yet
          }
       }
@@ -1271,6 +1322,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             G_TF[idx].m5_mss_break_distance_atr = break_dist_atr;
             
             bool mss_pass = (break_dist_atr >= TF_MIN_MSS_BREAK_ATR);
+            TFDiag_RecordMSS(idx, trend_dir, mss_pass, break_dist_atr, TF_MIN_MSS_BREAK_ATR, current_time);
             
             Print("\n[TF_MSS_QUALITY]");
             PrintFormat("symbol=%s", sym);
@@ -1287,6 +1339,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                G_TF[idx].score_mss = 10.0;
                SetTFState(idx, TF_STATE_ENTRY_READY, "M5_MSS_CONFIRMED"); // Forward to entry validation
                G_TF[idx].status = "MSS CONFIRMED";
+               TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_MSS_FOUND);
+               TFDiag_LogFunnel(idx, trend_dir, "M5_MSS", "PASS", StringFormat("break_dist_atr=%.2f >= %.2f", break_dist_atr, TF_MIN_MSS_BREAK_ATR));
                PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f) on time=%s", sym, trend_dir, breakLvl, TimeToString(current_time));
                // Start Momentum Window
                if(G_TF[idx].m5_momentum_start_time == 0)
@@ -1300,11 +1354,14 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             }
             else
             {
+               TFDiag_LogFunnel(idx, trend_dir, "M5_MSS", "REJECT", StringFormat("WEAK: break_dist_atr=%.2f < %.2f", break_dist_atr, TF_MIN_MSS_BREAK_ATR));
                // Weak break -> MSS NOT CONFIRMED, continue waiting if within event window
                long period_sec = PeriodSeconds(m5);
                long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
                if(bars_since_sweep > TF_MAX_EVENT_BARS)
                {
+                  TFDiag_RecordCoherenceTimeout(idx, trend_dir, (int)bars_since_sweep, current_time);
+                  TFDiag_LogFunnel(idx, trend_dir, "EVENT_COHERENCE", "REJECT", StringFormat("TIMEOUT: bars_since_sweep=%d > %d", bars_since_sweep, TF_MAX_EVENT_BARS));
                   LogTFReset(idx, "M5", "TF_P2_MSS_REJECT");
                   ResetTFM5Evidence(idx);
                   SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "TF_P2_MSS_REJECT");
@@ -1316,6 +1373,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          }
          else
          {
+            TFDiag_RecordMSS(idx, trend_dir, false, 0.0, TF_MIN_MSS_BREAK_ATR, current_time, "NOT_DETECTED");
             return; // Wait for next candle if MSS not found yet
          }
       }
@@ -1349,6 +1407,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          // If momentum was NOT fully confirmed within the window → TIMEOUT
          if(G_TF[idx].score_momentum < 10.0)
          {
+            TFDiag_RecordMomentumTimeout(idx, trend_dir, bars_elapsed, closed_m5_time);
+            TFDiag_LogFunnel(idx, trend_dir, "MOMENTUM", "REJECT", StringFormat("TIMEOUT: bars=%d > %d, score=%.0f", bars_elapsed, TF_MOMENTUM_MAX_BARS, G_TF[idx].score_momentum));
             Print("\n[TF_MOMENTUM_TIMEOUT]");
             PrintFormat("SYMBOL=%s", sym);
             PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
@@ -1394,6 +1454,19 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       int cci_status = 0, rf_status = 0;
       datetime cci_time = 0, rf_time = 0;
       CheckMomentumStatus(idx, cci_status, rf_status, cci_time, rf_time);
+      
+      TFDiag_RecordMomentumEval(idx, trend_dir, bars_elapsed,
+                               G_TF[idx].m5_momentum_cci, G_TF[idx].m5_momentum_rf, G_TF[idx].m5_momentum_pc,
+                               G_TF[idx].score_momentum, cci_status, rf_status, cci_time, rf_time, closed_m5_time);
+      if(G_TF[idx].score_momentum == 10.0)
+      {
+         TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_MOMENTUM_PASS);
+         TFDiag_LogFunnel(idx, trend_dir, "MOMENTUM", "PASS", "Confirmed (score=10)");
+      }
+      else
+      {
+         TFDiag_LogFunnel(idx, trend_dir, "MOMENTUM", "WAIT", StringFormat("Bar=%d/%d, Score=%.0f", bars_elapsed, TF_MOMENTUM_MAX_BARS, G_TF[idx].score_momentum));
+      }
       
       string cci_state_str = (cci_status == 1) ? "BUY" : (cci_status == -1 ? "SELL" : "NONE");
       string rf_state_str  = (rf_status == 1)  ? "BUY" : (rf_status == -1  ? "SELL" : "NONE");
@@ -1587,23 +1660,39 @@ void EvaluateTFMomentumConfirmation(int idx, int trend_dir, bool &cci_confirmed,
 
 bool CheckTFEventCoherence(int idx)
 {
+   datetime m5_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 1);
    if(!G_TF[idx].m5_sweep || !G_TF[idx].m5_displacement || !G_TF[idx].m5_mss)
+   {
+      TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, 0, TF_MAX_EVENT_BARS, m5_time);
       return false;
+   }
    
    if(G_TF[idx].m5_sweep_time == 0 || G_TF[idx].m5_displacement_time == 0 || G_TF[idx].m5_mss_time == 0)
+   {
+      TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, 0, TF_MAX_EVENT_BARS, m5_time);
       return false;
+   }
       
    // Events can happen on the same candle (==), but must not happen backward in time (>)
-   if(G_TF[idx].m5_sweep_time > G_TF[idx].m5_displacement_time) return false;
-   if(G_TF[idx].m5_displacement_time > G_TF[idx].m5_mss_time) return false;
-   if(G_TF[idx].m15_protected_confirmed_time > G_TF[idx].m5_sweep_time) return false;
+   if(G_TF[idx].m5_sweep_time > G_TF[idx].m5_displacement_time ||
+      G_TF[idx].m5_displacement_time > G_TF[idx].m5_mss_time ||
+      G_TF[idx].m15_protected_confirmed_time > G_TF[idx].m5_sweep_time)
+   {
+      TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, 0, TF_MAX_EVENT_BARS, m5_time);
+      return false;
+   }
    
    // Strict Freshness: entire sequence must complete within TF_MAX_EVENT_BARS
    long period_sec = PeriodSeconds(PERIOD_M5);
    long total_sequence_bars = (G_TF[idx].m5_mss_time - G_TF[idx].m5_sweep_time) / period_sec;
-   if(total_sequence_bars > TF_MAX_EVENT_BARS) return false;
+   if(total_sequence_bars > TF_MAX_EVENT_BARS)
+   {
+      TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, (int)total_sequence_bars, TF_MAX_EVENT_BARS, m5_time);
+      return false;
+   }
    
    G_TF[idx].score_event_coherence = 10.0;
+   TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, true, (int)total_sequence_bars, TF_MAX_EVENT_BARS, m5_time);
    return true;
 }
 
@@ -1915,6 +2004,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    // H1 BASE   -> DXY REQUIRED (hard gate)
    bool h1_strong = (G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_STRONG);
    bool h1_base   = (G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_BASE && G_TF[idx].h1_trend_quality < TF_H1_QUALITY_STRONG);
+   bool dxy_pass  = true;
    
    if(h1_strong)
    {
@@ -1931,7 +2021,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    {
       PrintFormat("\n[TF_DXY_GATE] H1 BASE -> DXY required (symbol=%s)", sym);
       string dxy_reason = "";
-      bool dxy_pass = CheckDXYTrendFollowingConfirmation(idx, direction, dxy_reason);
+      dxy_pass = CheckDXYTrendFollowingConfirmation(idx, direction, dxy_reason);
       if(!dxy_pass)
       {
          if(first_reject == "") first_reject = (StringFind(dxy_reason, "DXY_") == 0) ? dxy_reason : "TF_P2_DXY_REJECT";
@@ -1947,6 +2037,37 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
       if(first_reject == "") first_reject = "TF_P2_SCORE_REJECT";
       PrintFormat("[TF_PHASE2_REJECT] Final Score (score=%.0f < req=%.0f)", score, InpTF_RequiredScore);
       pass = false;
+   }
+   
+   // Record Phase 2 Funnel & Diagnostic Counters
+   bool rej_h1    = (G_TF[idx].h1_trend_direction != direction || G_TF[idx].h1_trend_quality < TF_H1_QUALITY_BASE);
+   bool rej_m15   = (!G_TF[idx].m15_pullback_valid || G_TF[idx].m15_pullback_quality < 20.0);
+   bool rej_prot  = (!prot_ok);
+   bool rej_sweep = (!G_TF[idx].m5_sweep);
+   bool rej_disp  = (!G_TF[idx].m5_displacement || G_TF[idx].m5_displacement_range_atr < TF_MIN_DISPLACEMENT_ATR);
+   bool rej_mss   = (!G_TF[idx].m5_mss || G_TF[idx].m5_mss_break_level <= 0.0 || G_TF[idx].m5_mss_break_distance_atr < TF_MIN_MSS_BREAK_ATR);
+   bool rej_coh   = (!event_coherent);
+   bool rej_mom   = (G_TF[idx].score_momentum < 10.0);
+   bool rej_dist  = (!dist_valid);
+   bool rej_ext   = (!ext_valid);
+   bool rej_dxy   = (h1_base && !dxy_pass);
+   bool rej_score = (score < InpTF_RequiredScore);
+   
+   datetime p2_m5_time = iTime(sym, PERIOD_M5, 1);
+   TFDiag_RecordPhase2(idx, direction, pass, first_reject,
+                       rej_h1, rej_m15, rej_prot, rej_sweep,
+                       rej_disp, rej_mss, rej_coh, rej_mom,
+                       rej_dist, rej_ext, rej_dxy, rej_score,
+                       p2_m5_time);
+                       
+   if(pass)
+   {
+      TFDiag_RecordFunnelStep(idx, direction, TF_FUNNEL_PHASE2_PASS);
+      TFDiag_LogFunnel(idx, direction, "PHASE_2", "PASS");
+   }
+   else
+   {
+      TFDiag_LogFunnel(idx, direction, "PHASE_2", "REJECT", first_reject);
    }
    
    // Gather diagnostic values
@@ -2586,6 +2707,23 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
       pass = false;
    }
    
+   // Record Phase 3 Funnel & Diagnostic Counters
+   datetime p3_dec_time = iTime(sym, PERIOD_M5, 1);
+   TFDiag_RecordPhase3(idx, direction, pass, first_reject,
+                       vol_pass, candle_pass, spread_pass, ext_pass, retrace_pass, retrace_reason,
+                       atr_ratio, c_range, c_body, c_body_ratio, c_close_loc,
+                       spread_pts, spread_atr, rel_ext, adverse_atr, p3_dec_time);
+                       
+   if(pass)
+   {
+      TFDiag_RecordFunnelStep(idx, direction, TF_FUNNEL_PHASE3_PASS);
+      TFDiag_LogFunnel(idx, direction, "PHASE_3", "PASS");
+   }
+   else
+   {
+      TFDiag_LogFunnel(idx, direction, "PHASE_3", "REJECT", first_reject);
+   }
+   
    // Print [TF_PHASE3_DIAGNOSTIC] block
    Print("\n[TF_PHASE3_DIAGNOSTIC]");
    Print("");
@@ -2799,6 +2937,9 @@ int CheckTrendFollowingSignal(int idx)
                   G_TF[idx].setup_state = TF_STATE_H1_TREND;
                   G_TF[idx].setup_bar_count = 0;
                   G_TF[idx].status = "H1 TREND";
+                  G_TF[idx].tf_setup_id = TFDiag_StartSetup(idx, new_dir);
+                  TFDiag_RecordFunnelStep(idx, new_dir, TF_FUNNEL_H1_VALID);
+                  TFDiag_LogFunnel(idx, new_dir, "H1_TREND", "DETECTED", StringFormat("QUALITY=%.0f", G_TF[idx].h1_trend_quality));
                   LogTFDecision(idx, new_dir, "H1_TREND", "Trend detected", 0);
                }
                else if(prev_dir != 0 && prev_dir != new_dir)
@@ -2811,6 +2952,9 @@ int CheckTrendFollowingSignal(int idx)
                   G_TF[idx].setup_state = TF_STATE_H1_TREND;
                   G_TF[idx].setup_bar_count = 0;
                   G_TF[idx].status = "H1 TREND (FLIPPED)";
+                  G_TF[idx].tf_setup_id = TFDiag_StartSetup(idx, new_dir);
+                  TFDiag_RecordFunnelStep(idx, new_dir, TF_FUNNEL_H1_VALID);
+                  TFDiag_LogFunnel(idx, new_dir, "H1_TREND", "FLIPPED", StringFormat("QUALITY=%.0f", G_TF[idx].h1_trend_quality));
                   LogTFDecision(idx, new_dir, "H1_TREND", "Trend flipped", 0);
                }
                else
@@ -2847,6 +2991,11 @@ int CheckTrendFollowingSignal(int idx)
    if(G_TF[idx].h1_trend_quality < 15.0) return 0;
    
    int dir = G_TF[idx].h1_trend_direction;
+   if(G_TF[idx].tf_setup_id == 0)
+   {
+      G_TF[idx].tf_setup_id = TFDiag_StartSetup(idx, dir);
+      TFDiag_RecordFunnelStep(idx, dir, TF_FUNNEL_H1_VALID);
+   }
    
    // === LAYER 2: M15 PULLBACK (On M15 New Bar) ===
    if(IsNewBar_M15_TF(idx))
@@ -2874,6 +3023,8 @@ int CheckTrendFollowingSignal(int idx)
          ResetTFM5Evidence(idx);
          SetTFState(idx, TF_STATE_H1_TREND, "M15_INVALIDATION");
          G_TF[idx].status = "M15 PULLBACK INVALID";
+         TFDiag_RecordM15Invalidation(idx, dir);
+         TFDiag_LogFunnel(idx, dir, "M15_INVALIDATION", "REVERSAL_BROKEN");
          LogTFDecision(idx, dir, "M15_INVALID", "Pullback became reversal", 0);
          return 0;
       }
@@ -2941,8 +3092,14 @@ int CheckTrendFollowingSignal(int idx)
    // Check if all evidence is ready
    double score = CalculateTFScore(idx);
    
+   datetime m5_score_time = iTime(sym, PERIOD_M5, 1);
+   TFDiag_RecordScore(idx, dir, score, InpTF_RequiredScore, m5_score_time);
+   
    if(score >= InpTF_RequiredScore)
    {
+      TFDiag_RecordFunnelStep(idx, dir, TF_FUNNEL_SCORE_PASS);
+      TFDiag_LogFunnel(idx, dir, "SCORE", "PASS", StringFormat("SCORE=%.0f REQ=%.0f", score, InpTF_RequiredScore));
+      
       Print("\n[SCORE_REQ_REACHED]");
       PrintFormat("SYMBOL=%s", sym);
       PrintFormat("H1=%.0f", G_TF[idx].score_h1_trend);
@@ -2981,6 +3138,10 @@ int CheckTrendFollowingSignal(int idx)
             PrintFormat("DXY=%s", (G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_STRONG ? "NOT_REQUIRED (H1 STRONG)" : "PASS (H1 BASE)"));
             PrintFormat("PHASE2=PASS");
             PrintFormat("PHASE3=PASS");
+            
+            TFDiag_RecordFunnelStep(idx, dir, TF_FUNNEL_FINAL_ENTRY);
+            TFDiag_RecordFinalEntry(idx, dir);
+            TFDiag_LogFunnel(idx, dir, "FINAL_ENTRY", "TRIGGER", StringFormat("SCORE=%.0f", score));
             
             int result = dir;
             ResetTFSetup(idx, "Entry Triggered - Reset");
