@@ -362,6 +362,7 @@ struct TrendFollowingContext
    double phase3_spread_atr;            // Spread in ATR units
    double phase3_rel_disp_extension;    // Distance from MSS / displacement range
    double phase3_post_mss_adverse_atr;  // Post-MSS adverse excursion in ATR
+   datetime phase3_entry_candle_time;   // Timestamp of M5 closed candle evaluated for Phase 3 entry
    
    // Real timestamp tracking for chronological validation
    datetime m5_sweep_time;
@@ -876,6 +877,7 @@ void InitGlobals()
       G_TF[i].phase3_spread_atr = 0.0;
       G_TF[i].phase3_rel_disp_extension = 0.0;
       G_TF[i].phase3_post_mss_adverse_atr = 0.0;
+      G_TF[i].phase3_entry_candle_time = 0;
       G_TF[i].m5_sweep_time = 0;
       G_TF[i].m5_displacement_time = 0;
       G_TF[i].m5_mss_time = 0;

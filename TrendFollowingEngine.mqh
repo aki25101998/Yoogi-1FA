@@ -106,6 +106,7 @@ void ResetTFM5Evidence(int idx)
    G_TF[idx].phase3_spread_atr = 0.0;
    G_TF[idx].phase3_rel_disp_extension = 0.0;
    G_TF[idx].phase3_post_mss_adverse_atr = 0.0;
+   G_TF[idx].phase3_entry_candle_time = 0;
    
    G_TF[idx].m5_sweep_time = 0;
    G_TF[idx].m5_displacement_time = 0;
@@ -2082,9 +2083,19 @@ bool ValidateTFPhase3Volatility(int idx, double &out_curr_atr, double &out_base_
       return false; // Fail-closed
    }
    
-   double atr_buf[];
-   // Copy TF_PHASE3_ATR_LOOKBACK closed bars starting at shift 1
-   if(CopyBuffer(atr_handle, 0, 1, TF_PHASE3_ATR_LOOKBACK, atr_buf) < TF_PHASE3_ATR_LOOKBACK)
+   double atr_current[];
+   double atr_baseline[];
+   
+   // Current ATR: closed M5 candle shift 1
+   if(CopyBuffer(atr_handle, 0, 1, 1, atr_current) < 1)
+   {
+      IndicatorRelease(atr_handle);
+      reject_reason = "TF_P3_VOLATILITY_CURRENT_UNAVAILABLE";
+      return false; // Fail-closed
+   }
+   
+   // Baseline ATR: closed M5 candles shift 2 -> shift (LOOKBACK + 1)
+   if(CopyBuffer(atr_handle, 0, 2, TF_PHASE3_ATR_LOOKBACK, atr_baseline) < TF_PHASE3_ATR_LOOKBACK)
    {
       IndicatorRelease(atr_handle);
       reject_reason = "TF_P3_VOLATILITY_DATA_INSUFFICIENT";
@@ -2092,9 +2103,7 @@ bool ValidateTFPhase3Volatility(int idx, double &out_curr_atr, double &out_base_
    }
    IndicatorRelease(atr_handle);
    
-   ArraySetAsSeries(atr_buf, true);
-   out_curr_atr = atr_buf[0]; // shift 1 (most recently closed candle)
-   
+   out_curr_atr = atr_current[0];
    if(out_curr_atr <= 0.0)
    {
       reject_reason = "TF_P3_VOLATILITY_CURRENT_INVALID";
@@ -2104,12 +2113,12 @@ bool ValidateTFPhase3Volatility(int idx, double &out_curr_atr, double &out_base_
    double sum = 0.0;
    for(int i = 0; i < TF_PHASE3_ATR_LOOKBACK; i++)
    {
-      if(atr_buf[i] <= 0.0)
+      if(atr_baseline[i] <= 0.0)
       {
          reject_reason = "TF_P3_VOLATILITY_BASELINE_INVALID";
          return false; // Fail-closed
       }
-      sum += atr_buf[i];
+      sum += atr_baseline[i];
    }
    out_base_atr = sum / TF_PHASE3_ATR_LOOKBACK;
    
@@ -2137,6 +2146,8 @@ bool ValidateTFPhase3Volatility(int idx, double &out_curr_atr, double &out_base_
    
    Print("\n[TF_PHASE3_VOLATILITY]");
    PrintFormat("SYMBOL=%s", sym);
+   PrintFormat("CURRENT_ATR_SHIFT=1");
+   PrintFormat("BASELINE_ATR_SHIFT=2..%d", TF_PHASE3_ATR_LOOKBACK + 1);
    PrintFormat("CURRENT_ATR=%.5f", out_curr_atr);
    PrintFormat("BASELINE_ATR=%.5f", out_base_atr);
    PrintFormat("ATR_RATIO=%.2f", out_ratio);
@@ -2160,6 +2171,23 @@ bool ValidateTFPhase3EntryCandle(int idx, int direction, double &out_range, doub
    reject_reason = "NONE";
    
    string sym = G_Pairs[idx].symbol;
+   datetime dec_time = iTime(sym, PERIOD_M5, 1);
+   if(dec_time <= 0)
+   {
+      reject_reason = "TF_P3_CANDLE_DATA_UNAVAILABLE";
+      return false; // Fail-closed
+   }
+   
+   // Sync / ensure phase3_entry_candle_time is set
+   G_TF[idx].phase3_entry_candle_time = dec_time;
+   
+   // Chronology validation: entry candle cannot precede MSS confirmation candle
+   if(G_TF[idx].m5_mss_time > 0 && dec_time < G_TF[idx].m5_mss_time)
+   {
+      reject_reason = "TF_P3_CANDLE_PRE_MSS";
+      return false; // Fail-closed
+   }
+   
    double high1  = iHigh(sym, PERIOD_M5, 1);
    double low1   = iLow(sym, PERIOD_M5, 1);
    double open1  = iOpen(sym, PERIOD_M5, 1);
@@ -2383,9 +2411,12 @@ bool ValidateTFPhase3DisplacementExtension(int idx, int direction, double &out_d
 // ------------------------------------------------------------------
 // Phase 3.5: Post-MSS Adverse Retracement
 // ------------------------------------------------------------------
-bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adverse_atr, string &reject_reason)
+bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adverse_atr, int &out_mss_shift, datetime &out_scan_start, datetime &out_scan_end, string &reject_reason)
 {
    out_adverse_atr = 0.0;
+   out_mss_shift = 0;
+   out_scan_start = 0;
+   out_scan_end = 0;
    reject_reason = "NONE";
    
    if(G_TF[idx].m5_mss_time <= 0 || G_TF[idx].m5_mss_break_level <= 0.0)
@@ -2395,12 +2426,23 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
    }
    
    string sym = G_Pairs[idx].symbol;
-   int mss_shift = iBarShift(sym, PERIOD_M5, G_TF[idx].m5_mss_time, true);
+   int mss_shift = iBarShift(sym, PERIOD_M5, G_TF[idx].m5_mss_time, false);
    if(mss_shift < 1)
    {
       reject_reason = "MSS_SHIFT_INVALID";
       return false; // Fail-closed
    }
+   
+   // Safety check on MSS age (cannot exceed reasonable boundary)
+   if(mss_shift > TF_MAX_EVENT_BARS + TF_MOMENTUM_MAX_BARS + 5)
+   {
+      reject_reason = "MSS_AGE_EXCEEDED";
+      return false; // Fail-closed
+   }
+   
+   out_mss_shift = mss_shift;
+   out_scan_start = iTime(sym, PERIOD_M5, mss_shift);
+   out_scan_end = iTime(sym, PERIOD_M5, 1);
    
    double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
    if(atr <= 0.0)
@@ -2409,12 +2451,12 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
       return false; // Fail-closed
    }
    
-   // Closed candles from shift 1 (candidate entry) to shift mss_shift
+   // Strictly closed candles: shift 1 (decision candle) through shift mss_shift (MSS candle)
    double adverse_distance = 0.0;
    
    if(direction == 1) // BUY
    {
-      double lowest_low = iLow(sym, PERIOD_M5, 1);
+      double lowest_low = DBL_MAX;
       for(int s = 1; s <= mss_shift; s++)
       {
          double ls = iLow(sym, PERIOD_M5, s);
@@ -2425,10 +2467,12 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
       // If price dropped below the MSS break level
       if(lowest_low < G_TF[idx].m5_mss_break_level)
          adverse_distance = G_TF[idx].m5_mss_break_level - lowest_low;
+      else
+         adverse_distance = 0.0;
    }
    else if(direction == -1) // SELL
    {
-      double highest_high = iHigh(sym, PERIOD_M5, 1);
+      double highest_high = 0.0;
       for(int s = 1; s <= mss_shift; s++)
       {
          double hs = iHigh(sym, PERIOD_M5, s);
@@ -2439,6 +2483,8 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
       // If price rallied above the MSS break level
       if(highest_high > G_TF[idx].m5_mss_break_level)
          adverse_distance = highest_high - G_TF[idx].m5_mss_break_level;
+      else
+         adverse_distance = 0.0;
    }
    else
    {
@@ -2466,6 +2512,9 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
    bool pass = true;
    string first_reject = "";
    string sym = G_Pairs[idx].symbol;
+   
+   datetime dec_time = iTime(sym, PERIOD_M5, 1);
+   G_TF[idx].phase3_entry_candle_time = dec_time;
    
    // 1. Volatility Regime
    double curr_atr = 0.0, base_atr = 0.0, atr_ratio = 0.0;
@@ -2509,8 +2558,10 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
    
    // 5. Post-MSS Adverse Retracement
    double adverse_atr = 0.0;
+   int mss_shift = 0;
+   datetime scan_start = 0, scan_end = 0;
    string retrace_reason = "";
-   bool retrace_pass = ValidateTFPhase3PostMSSRetracement(idx, direction, adverse_atr, retrace_reason);
+   bool retrace_pass = ValidateTFPhase3PostMSSRetracement(idx, direction, adverse_atr, mss_shift, scan_start, scan_end, retrace_reason);
    if(!retrace_pass)
    {
       if(first_reject == "") first_reject = "TF_P3_ADVERSE_RETRACE_REJECT";
@@ -2522,8 +2573,13 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
    Print("");
    PrintFormat("SYMBOL=%s", sym);
    PrintFormat("DIRECTION=%s", (direction == 1 ? "BUY" : (direction == -1 ? "SELL" : "NONE")));
+   PrintFormat("ENTRY_CANDLE_TIME=%s", TimeToString(G_TF[idx].phase3_entry_candle_time));
+   PrintFormat("MSS_TIME=%s", TimeToString(G_TF[idx].m5_mss_time));
+   PrintFormat("MOMENTUM_LAST_CLOSED_TIME=%s", TimeToString(G_TF[idx].m5_momentum_last_closed_time));
    Print("");
    Print("VOLATILITY:");
+   PrintFormat("  CURRENT_ATR_SHIFT=1");
+   PrintFormat("  BASELINE_ATR_RANGE=2..%d", TF_PHASE3_ATR_LOOKBACK + 1);
    PrintFormat("  CURRENT_ATR=%.5f", curr_atr);
    PrintFormat("  BASELINE_ATR=%.5f", base_atr);
    PrintFormat("  ATR_RATIO=%.2f", atr_ratio);
@@ -2548,6 +2604,10 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
    PrintFormat("  RESULT=%s", ext_pass ? "PASS" : "REJECT (" + ext_reason + ")");
    Print("");
    Print("POST_MSS_RETRACE:");
+   PrintFormat("  MSS_SHIFT=%d", mss_shift);
+   PrintFormat("  DECISION_SHIFT=1");
+   PrintFormat("  RETRACE_SCAN_START=%s", TimeToString(scan_start));
+   PrintFormat("  RETRACE_SCAN_END=%s", TimeToString(scan_end));
    PrintFormat("  ADVERSE_ATR=%.2f", adverse_atr);
    PrintFormat("  MAX_ADVERSE_ATR=%.2f", TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR);
    PrintFormat("  RESULT=%s", retrace_pass ? "PASS" : "REJECT (" + retrace_reason + ")");
@@ -2874,6 +2934,9 @@ int CheckTrendFollowingSignal(int idx)
       
       if(hardPass)
       {
+         datetime decision_candle_time = iTime(sym, PERIOD_M5, 1);
+         G_TF[idx].phase3_entry_candle_time = decision_candle_time;
+         
          string p3RejectReason = "";
          bool p3Pass = ValidateTFPhase3EntryContext(idx, dir, p3RejectReason);
          
