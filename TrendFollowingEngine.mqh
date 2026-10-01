@@ -8,7 +8,7 @@
 //+------------------------------------------------------------------+
 #property strict
 
-const string TF_ENGINE_VERSION = "TF_MOMENTUM_10BAR";
+const string TF_ENGINE_VERSION = "TF_PHASE_2";
 
 // ==================================================================
 // HELPER: TF State Diagnostic Logging
@@ -61,6 +61,7 @@ void ResetTFSetup(int idx, string reason)
    
    G_TF[idx].h1_trend_direction = 0;
    G_TF[idx].h1_trend_quality = 0.0;
+   G_TF[idx].h1_classification = "";
    G_TF[idx].h1_ema_aligned = false;
    G_TF[idx].h1_slope_positive = false;
    G_TF[idx].h1_price_above_ema = false;
@@ -70,6 +71,7 @@ void ResetTFSetup(int idx, string reason)
    ResetTFM15Evidence(idx);
    ResetTFM5Evidence(idx);
    
+   G_TF[idx].score_dxy = 0.0;
    G_TF[idx].total_score = 0.0;
    G_TF[idx].setup_state = TF_STATE_NONE;
    G_TF[idx].setup_bar_count = 0;
@@ -87,6 +89,11 @@ void ResetTFM5Evidence(int idx)
    G_TF[idx].m5_momentum_cci = false;
    G_TF[idx].m5_momentum_rf = false;
    G_TF[idx].m5_momentum_pc = false;
+   
+   G_TF[idx].m5_displacement_range_atr = 0.0;
+   G_TF[idx].m5_mss_break_distance_atr = 0.0;
+   G_TF[idx].m5_entry_extension_mss_atr = 0.0;
+   G_TF[idx].m5_entry_extension_prot_atr = 0.0;
    
    G_TF[idx].m5_sweep_time = 0;
    G_TF[idx].m5_displacement_time = 0;
@@ -247,11 +254,19 @@ int EvaluateH1TrendRegime(int idx, double &out_protected_struct)
       G_TF[idx].h1_price_above_ema = buy_price;
       G_TF[idx].h1_structure_valid = buy_structure;
       G_TF[idx].h1_not_sideway = not_sideway;
-      G_TF[idx].h1_trend_quality = buy_structure ? 20.0 : 15.0;
-      G_TF[idx].score_h1_trend = buy_structure ? 20.0 : 15.0;
+      G_TF[idx].h1_trend_quality = buy_structure ? TF_H1_QUALITY_STRONG : TF_H1_QUALITY_BASE;
+      G_TF[idx].score_h1_trend = buy_structure ? TF_H1_QUALITY_STRONG : TF_H1_QUALITY_BASE;
+      G_TF[idx].h1_classification = buy_structure ? "STRONG" : "BASE";
       
       // Set protected structure: if price breaks below recent swing low, trend invalid
       if(slCount >= 1) out_protected_struct = swL[0];
+      
+      Print("\n[TF_H1_QUALITY]");
+      PrintFormat("symbol=%s", sym);
+      PrintFormat("direction=BUY");
+      PrintFormat("quality=%.0f/20", G_TF[idx].h1_trend_quality);
+      PrintFormat("classification=%s", G_TF[idx].h1_classification);
+      PrintFormat("structure_valid=%s", buy_structure ? "true" : "false");
    }
    else if(sell_minimum)
    {
@@ -261,19 +276,142 @@ int EvaluateH1TrendRegime(int idx, double &out_protected_struct)
       G_TF[idx].h1_price_above_ema = sell_price;
       G_TF[idx].h1_structure_valid = sell_structure;
       G_TF[idx].h1_not_sideway = not_sideway;
-      G_TF[idx].h1_trend_quality = sell_structure ? 20.0 : 15.0;
-      G_TF[idx].score_h1_trend = sell_structure ? 20.0 : 15.0;
+      G_TF[idx].h1_trend_quality = sell_structure ? TF_H1_QUALITY_STRONG : TF_H1_QUALITY_BASE;
+      G_TF[idx].score_h1_trend = sell_structure ? TF_H1_QUALITY_STRONG : TF_H1_QUALITY_BASE;
+      G_TF[idx].h1_classification = sell_structure ? "STRONG" : "BASE";
       
       // Set protected structure: if price breaks above recent swing high, trend invalid
       if(shCount >= 1) out_protected_struct = swH[0];
+      
+      Print("\n[TF_H1_QUALITY]");
+      PrintFormat("symbol=%s", sym);
+      PrintFormat("direction=SELL");
+      PrintFormat("quality=%.0f/20", G_TF[idx].h1_trend_quality);
+      PrintFormat("classification=%s", G_TF[idx].h1_classification);
+      PrintFormat("structure_valid=%s", sell_structure ? "true" : "false");
    }
    else
    {
       G_TF[idx].h1_trend_quality = 0.0;
       G_TF[idx].score_h1_trend = 0.0;
+      G_TF[idx].h1_classification = "NONE";
    }
    
    return direction;
+}
+
+// ==================================================================
+// PHASE 2B: M15 PULLBACK QUALITY VALIDATION
+// ==================================================================
+bool ValidateTFM15PullbackQuality(int idx, int trend_dir, string &reject_reason)
+{
+   string sym = G_Pairs[idx].symbol;
+   reject_reason = "NONE";
+   
+   double atr = CalculateATR_Generic(sym, PERIOD_M15, InpReversal_ATR_Period, 1);
+   if(atr <= 0) { reject_reason = "M15_ATR_INVALID"; return false; }
+   
+   double close[];
+   if(CopyClose(sym, PERIOD_M15, 1, 1, close) < 1) { reject_reason = "M15_CLOSE_UNAVAILABLE"; return false; }
+   
+   double ema50 = CalculateEMA_Generic(sym, PERIOD_M15, 50, 1);
+   double ema_dist_atr = (trend_dir == 1) ? ((ema50 - close[0]) / atr) : ((close[0] - ema50) / atr);
+   
+   double prot_struct = (trend_dir == 1) ? G_TF[idx].m15_protected_low : G_TF[idx].m15_protected_high;
+   int impulse_age = G_TF[idx].m15_pullback_bar_count;
+   if(G_TF[idx].m15_impulse_end_time > 0)
+   {
+      datetime cur_m15 = iTime(sym, PERIOD_M15, 1);
+      if(cur_m15 >= G_TF[idx].m15_impulse_end_time)
+         impulse_age = (int)((cur_m15 - G_TF[idx].m15_impulse_end_time) / PeriodSeconds(PERIOD_M15));
+   }
+   
+   double depth_atr = G_TF[idx].m15_pullback_depth;
+   
+   if(trend_dir == 1) // BUY
+   {
+      if(G_TF[idx].h1_trend_direction != 1)
+      {
+         reject_reason = "H1_TREND_NOT_BUY";
+      }
+      else if(G_TF[idx].m15_impulse_high <= G_TF[idx].m15_impulse_low || G_TF[idx].m15_impulse_start_time >= G_TF[idx].m15_impulse_end_time)
+      {
+         reject_reason = "M15_IMPULSE_NOT_BULLISH";
+      }
+      else if(close[0] > G_TF[idx].m15_impulse_high)
+      {
+         reject_reason = "PRICE_ABOVE_IMPULSE_HIGH";
+      }
+      else if(G_TF[idx].m15_protected_low <= 0.0 || close[0] <= G_TF[idx].m15_protected_low)
+      {
+         reject_reason = "PROTECTED_HL_BROKEN";
+      }
+      else if(close[0] <= G_TF[idx].m15_impulse_low)
+      {
+         reject_reason = "ORIGIN_LOW_INVALIDATED";
+      }
+      else if(depth_atr < TF_PULLBACK_MIN_DEPTH_ATR || depth_atr > TF_PULLBACK_MAX_DEPTH_ATR)
+      {
+         reject_reason = "PULLBACK_DEPTH_OUT_OF_BOUNDS";
+      }
+      else if(ema_dist_atr < -0.5)
+      {
+         reject_reason = "EMA_DISTANCE_TOO_FAR";
+      }
+      else if(impulse_age > TF_PULLBACK_MAX_BARS)
+      {
+         reject_reason = "IMPULSE_STALE";
+      }
+   }
+   else if(trend_dir == -1) // SELL
+   {
+      if(G_TF[idx].h1_trend_direction != -1)
+      {
+         reject_reason = "H1_TREND_NOT_SELL";
+      }
+      else if(G_TF[idx].m15_impulse_low >= G_TF[idx].m15_impulse_high || G_TF[idx].m15_impulse_start_time >= G_TF[idx].m15_impulse_end_time)
+      {
+         reject_reason = "M15_IMPULSE_NOT_BEARISH";
+      }
+      else if(close[0] < G_TF[idx].m15_impulse_low)
+      {
+         reject_reason = "PRICE_BELOW_IMPULSE_LOW";
+      }
+      else if(G_TF[idx].m15_protected_high <= 0.0 || close[0] >= G_TF[idx].m15_protected_high)
+      {
+         reject_reason = "PROTECTED_LH_BROKEN";
+      }
+      else if(close[0] >= G_TF[idx].m15_impulse_high)
+      {
+         reject_reason = "ORIGIN_HIGH_INVALIDATED";
+      }
+      else if(depth_atr < TF_PULLBACK_MIN_DEPTH_ATR || depth_atr > TF_PULLBACK_MAX_DEPTH_ATR)
+      {
+         reject_reason = "PULLBACK_DEPTH_OUT_OF_BOUNDS";
+      }
+      else if(ema_dist_atr < -0.5)
+      {
+         reject_reason = "EMA_DISTANCE_TOO_FAR";
+      }
+      else if(impulse_age > TF_PULLBACK_MAX_BARS)
+      {
+         reject_reason = "IMPULSE_STALE";
+      }
+   }
+   
+   bool pass = (reject_reason == "NONE");
+   
+   Print("\n[M15_QUALITY]");
+   PrintFormat("symbol=%s", sym);
+   PrintFormat("direction=%s", (trend_dir == 1 ? "BUY" : "SELL"));
+   PrintFormat("protected_structure=%.5f", prot_struct);
+   PrintFormat("pullback_depth_atr=%.2f", depth_atr);
+   PrintFormat("ema_distance_atr=%.2f", ema_dist_atr);
+   PrintFormat("impulse_age=%d", impulse_age);
+   PrintFormat("quality=%s", pass ? "PASS" : "REJECT");
+   PrintFormat("reason=%s", reject_reason);
+   
+   return pass;
 }
 
 // ==================================================================
@@ -466,15 +604,19 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
          double depth = (G_TF[idx].m15_impulse_high - close[0]) / atr;
          G_TF[idx].m15_pullback_depth = depth;
          
-         bool depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
-         bool price_above_protected = (G_TF[idx].m15_protected_low > 0.0 && close[0] > G_TF[idx].m15_protected_low);
-         
-         if(depth_ok && distance_to_ema >= -0.5 && price_above_protected)
+         string m15_rej_reason = "";
+         if(ValidateTFM15PullbackQuality(idx, trend_dir, m15_rej_reason))
          {
             G_TF[idx].m15_pullback_quality = 20.0;
             G_TF[idx].score_m15_pullback = 20.0;
             G_TF[idx].m15_pullback_valid = true;
             return true;
+         }
+         else
+         {
+            G_TF[idx].m15_pullback_quality = 0.0;
+            G_TF[idx].score_m15_pullback = 0.0;
+            G_TF[idx].m15_pullback_valid = false;
          }
       }
    }
@@ -643,15 +785,19 @@ bool EvaluateM15Pullback(int idx, int trend_dir)
          double depth = (close[0] - G_TF[idx].m15_impulse_low) / atr;
          G_TF[idx].m15_pullback_depth = depth;
          
-         bool depth_ok = (depth >= TF_PULLBACK_MIN_DEPTH_ATR && depth <= TF_PULLBACK_MAX_DEPTH_ATR);
-         bool price_below_protected = (G_TF[idx].m15_protected_high > 0.0 && close[0] < G_TF[idx].m15_protected_high);
-         
-         if(depth_ok && distance_to_ema >= -0.5 && price_below_protected)
+         string m15_rej_reason = "";
+         if(ValidateTFM15PullbackQuality(idx, trend_dir, m15_rej_reason))
          {
             G_TF[idx].m15_pullback_quality = 20.0;
             G_TF[idx].score_m15_pullback = 20.0;
             G_TF[idx].m15_pullback_valid = true;
             return true;
+         }
+         else
+         {
+            G_TF[idx].m15_pullback_quality = 0.0;
+            G_TF[idx].score_m15_pullback = 0.0;
+            G_TF[idx].m15_pullback_valid = false;
          }
       }
    }
@@ -1046,13 +1192,42 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          if(DetectDisplacement(sym, m5, trend_dir))
          {
             double close[]; CopyClose(sym, m5, 1, 1, close);
-            G_TF[idx].m5_displacement = true;
-            G_TF[idx].m5_displacement_time = current_time;
-            G_TF[idx].m5_displacement_price = close[0];
-            G_TF[idx].score_displacement = 10.0;
-            SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED");
-            G_TF[idx].status = "WAIT MSS";
-            PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d) on time=%s", sym, trend_dir, TimeToString(current_time));
+            double high[], low[];
+            CopyHigh(sym, m5, 1, 1, high);
+            CopyLow(sym, m5, 1, 1, low);
+            double atr = CalculateATR_Generic(sym, m5, InpReversal_ATR_Period, 1);
+            
+            double candle_range = (ArraySize(high) > 0 && ArraySize(low) > 0) ? (high[0] - low[0]) : 0.0;
+            double range_atr = (atr > 0.0) ? (candle_range / atr) : 0.0;
+            G_TF[idx].m5_displacement_range_atr = range_atr;
+            
+            bool disp_pass = (range_atr >= TF_MIN_DISPLACEMENT_ATR);
+            
+            Print("\n[TF_DISPLACEMENT_QUALITY]");
+            PrintFormat("symbol=%s", sym);
+            PrintFormat("direction=%s", (trend_dir == 1 ? "BUY" : "SELL"));
+            PrintFormat("range_atr=%.2f", range_atr);
+            PrintFormat("minimum_atr=%.2f", TF_MIN_DISPLACEMENT_ATR);
+            PrintFormat("%s", disp_pass ? "PASS" : "REJECT");
+            
+            if(disp_pass)
+            {
+               G_TF[idx].m5_displacement = true;
+               G_TF[idx].m5_displacement_time = current_time;
+               G_TF[idx].m5_displacement_price = close[0];
+               G_TF[idx].score_displacement = 10.0;
+               SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED");
+               G_TF[idx].status = "WAIT MSS";
+               PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d) on time=%s", sym, trend_dir, TimeToString(current_time));
+            }
+            else
+            {
+               // Weak displacement -> Reject setup
+               LogTFReset(idx, "M5", "TF_P2_DISPLACEMENT_REJECT");
+               ResetTFM5Evidence(idx);
+               SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "TF_P2_DISPLACEMENT_REJECT");
+               return;
+            }
          }
          else
          {
@@ -1074,22 +1249,55 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          string mssReason = "";
          if(DetectStructureShift(idx, sym, m5, trend_dir, breakLvl, mssReason))
          {
-            G_TF[idx].m5_mss = true;
-            G_TF[idx].m5_mss_time = current_time;
-            G_TF[idx].m5_mss_break_level = breakLvl;
-            G_TF[idx].score_mss = 10.0;
-            SetTFState(idx, TF_STATE_ENTRY_READY, "M5_MSS_CONFIRMED"); // Forward to entry validation
-            G_TF[idx].status = "MSS CONFIRMED";
-            PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f) on time=%s", sym, trend_dir, breakLvl, TimeToString(current_time));
-            // Start Momentum Window
-            if(G_TF[idx].m5_momentum_start_time == 0)
-               G_TF[idx].m5_momentum_start_time = (G_TF[idx].m5_sweep_time > 0) ? G_TF[idx].m5_sweep_time : current_time;
-            G_TF[idx].m5_momentum_bars_elapsed = 0;
-            G_TF[idx].m5_momentum_last_closed_time = iTime(sym, PERIOD_M5, 1);
-            G_TF[idx].m5_momentum_cci = false;
-            G_TF[idx].m5_momentum_rf = false;
-            G_TF[idx].m5_momentum_pc = false;
-            G_TF[idx].score_momentum = 0.0;
+            double close[]; CopyClose(sym, m5, 1, 1, close);
+            double atr = CalculateATR_Generic(sym, m5, InpReversal_ATR_Period, 1);
+            
+            double break_dist = (trend_dir == 1) ? (close[0] - breakLvl) : (breakLvl - close[0]);
+            double break_dist_atr = (atr > 0.0) ? (break_dist / atr) : 0.0;
+            G_TF[idx].m5_mss_break_distance_atr = break_dist_atr;
+            
+            bool mss_pass = (break_dist_atr >= TF_MIN_MSS_BREAK_ATR);
+            
+            Print("\n[TF_MSS_QUALITY]");
+            PrintFormat("symbol=%s", sym);
+            PrintFormat("direction=%s", (trend_dir == 1 ? "BUY" : "SELL"));
+            PrintFormat("break_distance_atr=%.2f", break_dist_atr);
+            PrintFormat("minimum_break_atr=%.2f", TF_MIN_MSS_BREAK_ATR);
+            PrintFormat("%s", mss_pass ? "PASS" : "REJECT");
+            
+            if(mss_pass)
+            {
+               G_TF[idx].m5_mss = true;
+               G_TF[idx].m5_mss_time = current_time;
+               G_TF[idx].m5_mss_break_level = breakLvl;
+               G_TF[idx].score_mss = 10.0;
+               SetTFState(idx, TF_STATE_ENTRY_READY, "M5_MSS_CONFIRMED"); // Forward to entry validation
+               G_TF[idx].status = "MSS CONFIRMED";
+               PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f) on time=%s", sym, trend_dir, breakLvl, TimeToString(current_time));
+               // Start Momentum Window
+               if(G_TF[idx].m5_momentum_start_time == 0)
+                  G_TF[idx].m5_momentum_start_time = (G_TF[idx].m5_sweep_time > 0) ? G_TF[idx].m5_sweep_time : current_time;
+               G_TF[idx].m5_momentum_bars_elapsed = 0;
+               G_TF[idx].m5_momentum_last_closed_time = iTime(sym, PERIOD_M5, 1);
+               G_TF[idx].m5_momentum_cci = false;
+               G_TF[idx].m5_momentum_rf = false;
+               G_TF[idx].m5_momentum_pc = false;
+               G_TF[idx].score_momentum = 0.0;
+            }
+            else
+            {
+               // Check if event window expired
+               long period_sec = PeriodSeconds(m5);
+               long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
+               if(bars_since_sweep >= TF_MAX_EVENT_BARS)
+               {
+                  LogTFReset(idx, "M5", "TF_P2_MSS_REJECT");
+                  ResetTFM5Evidence(idx);
+                  SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "TF_P2_MSS_REJECT");
+                  return;
+               }
+               return; // Wait for next candle if still within window
+            }
          }
          else
          {
@@ -1213,8 +1421,23 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       PrintFormat("MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
       PrintFormat("STATUS=%s", mom_status);
       
+      // Phase 2F: Momentum Quality diagnostic log
+      string mom_q_status = "WAIT";
+      if(G_TF[idx].score_momentum == 10.0) mom_q_status = "PASS";
+      else if(bars_elapsed >= TF_MOMENTUM_MAX_BARS) mom_q_status = "REJECT";
+      
+      Print("\n[TF_MOMENTUM_QUALITY]");
+      PrintFormat("symbol=%s", sym);
+      PrintFormat("bars_elapsed=%d", bars_elapsed);
+      PrintFormat("CCI=%s", G_TF[idx].m5_momentum_cci ? "true" : "false");
+      PrintFormat("RF=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
+      PrintFormat("PC=%s", G_TF[idx].m5_momentum_pc ? "true" : "false");
+      PrintFormat("score=%.0f", G_TF[idx].score_momentum);
+      PrintFormat("%s", mom_q_status);
+      
       if(G_TF[idx].score_momentum == 10.0)
       {
+         double current_total = CalculateTFScore(idx);
          Print("\n[TF_SCORE_DIAGNOSTIC]");
          PrintFormat("SYMBOL=%s", sym);
          PrintFormat("H1=%.0f", G_TF[idx].score_h1_trend);
@@ -1224,13 +1447,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          PrintFormat("MSS=%.0f", G_TF[idx].score_mss);
          PrintFormat("COHERENCE=%.0f", G_TF[idx].score_event_coherence);
          PrintFormat("MOMENTUM=%.0f", G_TF[idx].score_momentum);
-         
-         double d_atr=0, max_d=0;
-         bool dist_valid = ValidateTFEntryDistance(idx, G_TF[idx].h1_trend_direction, d_atr, max_d);
-         G_TF[idx].score_entry_distance = dist_valid ? 10.0 : 0.0;
          PrintFormat("ENTRY_DISTANCE=%.0f", G_TF[idx].score_entry_distance);
-         
-         double current_total = G_TF[idx].score_h1_trend + G_TF[idx].score_m15_pullback + G_TF[idx].score_sweep + G_TF[idx].score_displacement + G_TF[idx].score_mss + G_TF[idx].score_event_coherence + G_TF[idx].score_momentum + G_TF[idx].score_entry_distance;
+         if(G_TF[idx].h1_trend_quality < 20.0) PrintFormat("DXY=%.0f", G_TF[idx].score_dxy);
          PrintFormat("TOTAL=%.0f", current_total);
          
          if(current_total >= InpTF_RequiredScore) {
@@ -1412,6 +1630,57 @@ bool ValidateTFEntryDistance(int idx, int direction, double &distance_atr, doubl
 }
 
 // ==================================================================
+// PHASE 2E — ENTRY LOCATION QUALITY (MSS EXTENSION)
+// ==================================================================
+
+bool ValidateTFEntryLocationQuality(int idx, int direction, double &dist_mss_atr, double &dist_prot_atr, double &max_ext_atr)
+{
+   dist_mss_atr = 0.0;
+   dist_prot_atr = 0.0;
+   max_ext_atr = TF_MAX_MSS_ENTRY_EXTENSION_ATR;
+   
+   if(G_TF[idx].m5_mss_break_level <= 0.0) return false;
+   
+   string sym = G_Pairs[idx].symbol;
+   double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
+   if(atr <= 0) return false;
+   
+   double close1 = iClose(sym, PERIOD_M5, 1);
+   if(close1 <= 0) return false;
+   
+   double dist_mss = MathAbs(close1 - G_TF[idx].m5_mss_break_level);
+   dist_mss_atr = dist_mss / atr;
+   G_TF[idx].m5_entry_extension_mss_atr = dist_mss_atr;
+   
+   double prot = 0.0;
+   if(direction == 1)
+      prot = (G_TF[idx].m15_protected_low > 0.0) ? G_TF[idx].m15_protected_low : G_TF[idx].h1_protected_structure;
+   else if(direction == -1)
+      prot = (G_TF[idx].m15_protected_high > 0.0) ? G_TF[idx].m15_protected_high : G_TF[idx].h1_protected_structure;
+      
+   if(prot > 0.0)
+   {
+      double dist_prot = MathAbs(close1 - prot);
+      dist_prot_atr = dist_prot / atr;
+      G_TF[idx].m5_entry_extension_prot_atr = dist_prot_atr;
+   }
+   
+   bool pass = true;
+   if(dist_mss_atr > TF_MAX_MSS_ENTRY_EXTENSION_ATR)
+      pass = false;
+      
+   Print("\n[TF_ENTRY_LOCATION]");
+   PrintFormat("symbol=%s", sym);
+   PrintFormat("direction=%s", (direction == 1 ? "BUY" : (direction == -1 ? "SELL" : "NONE")));
+   PrintFormat("distance_from_mss_atr=%.2f", dist_mss_atr);
+   PrintFormat("distance_from_protected_atr=%.2f", dist_prot_atr);
+   PrintFormat("max_extension_atr=%.2f", max_ext_atr);
+   PrintFormat("%s", pass ? "PASS" : "REJECT");
+   
+   return pass;
+}
+
+// ==================================================================
 // H1 TREND INVALIDATION CHECK
 // ==================================================================
 
@@ -1471,7 +1740,20 @@ double CalculateTFScore(int idx)
 {
    double d_atr=0, max_d=0;
    bool dist_valid = ValidateTFEntryDistance(idx, G_TF[idx].h1_trend_direction, d_atr, max_d);
-   G_TF[idx].score_entry_distance = dist_valid ? 10.0 : 0.0;
+   
+   // H1 BASE (15/20) uses Entry Distance = 5, DXY = 10; H1 STRONG (20/20) uses Entry Distance = 10
+   if(G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_STRONG)
+   {
+      G_TF[idx].score_entry_distance = dist_valid ? 10.0 : 0.0;
+      G_TF[idx].score_dxy = 0.0;
+   }
+   else
+   {
+      G_TF[idx].score_entry_distance = dist_valid ? 5.0 : 0.0;
+      string dxy_reason = "";
+      bool dxy_pass = CheckDXYTrendFollowingConfirmation(idx, G_TF[idx].h1_trend_direction, dxy_reason);
+      G_TF[idx].score_dxy = dxy_pass ? 10.0 : 0.0;
+   }
    
    if(CheckTFEventCoherence(idx)) {
       G_TF[idx].score_event_coherence = 10.0;
@@ -1479,87 +1761,155 @@ double CalculateTFScore(int idx)
       G_TF[idx].score_event_coherence = 0.0;
    }
 
-   G_TF[idx].total_score = G_TF[idx].score_h1_trend
-                         + G_TF[idx].score_m15_pullback
-                         + G_TF[idx].score_sweep
-                         + G_TF[idx].score_displacement
-                         + G_TF[idx].score_mss
-                         + G_TF[idx].score_event_coherence
-                         + G_TF[idx].score_momentum
-                         + G_TF[idx].score_entry_distance;
+   double raw_score = G_TF[idx].score_h1_trend
+                    + G_TF[idx].score_m15_pullback
+                    + G_TF[idx].score_sweep
+                    + G_TF[idx].score_displacement
+                    + G_TF[idx].score_mss
+                    + G_TF[idx].score_event_coherence
+                    + G_TF[idx].score_momentum
+                    + G_TF[idx].score_entry_distance
+                    + G_TF[idx].score_dxy;
    
+   G_TF[idx].total_score = MathMin(100.0, raw_score);
    return G_TF[idx].total_score;
 }
 
 // ==================================================================
-// TF HARD REQUIREMENTS VALIDATION
+// TF PHASE 2 ENTRY QUALITY GATE (CENTRALIZED VALIDATION)
 // ==================================================================
+// Validates all 12 hard conditions from Phase 2 Section 8:
+// 1. H1 quality >= 15
+// 2. M15 quality valid
+// 3. M15 protected structure intact
+// 4. Sweep valid
+// 5. Displacement valid
+// 6. MSS valid
+// 7. Event coherence <= 5 bars
+// 8. Momentum score = 10
+// 9. Entry distance valid
+// 10. Entry extension valid
+// 11. DXY confirmation valid
+// 12. Total score >= InpTF_RequiredScore
 
-bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
+bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
 {
    bool pass = true;
    string first_reject = "";
+   string sym = G_Pairs[idx].symbol;
    
-   // 1. H1 Trend
-   if(G_TF[idx].h1_trend_direction != direction) { if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; pass = false; }
-   if(G_TF[idx].h1_trend_quality < 15.0) { if(first_reject=="") first_reject = "H1_TREND_NOT_STRONG"; pass = false; }
-   
-   // 2. M15 Pullback
-   if(!G_TF[idx].m15_pullback_valid) { 
-      if(first_reject=="") first_reject = (G_TF[idx].m15_impulse_high == 0.0 && G_TF[idx].m15_impulse_low == 0.0) ? "M15_IMPULSE_NOT_FOUND" : "M15_PULLBACK_INVALID";
-      pass = false; 
-   }
-   if(G_TF[idx].m15_pullback_quality < 20.0) { if(first_reject=="") first_reject = "M15_PULLBACK_INVALID"; pass = false; }
-   
-   // 3. M5 Events
-   if(!G_TF[idx].m5_sweep) { if(first_reject=="") first_reject = "M5_SWEEP_NOT_FOUND"; pass = false; }
-   if(!G_TF[idx].m5_displacement) { if(first_reject=="") first_reject = "M5_DISPLACEMENT_NOT_AFTER_SWEEP"; pass = false; }
-   if(!G_TF[idx].m5_mss) { if(first_reject=="") first_reject = "M5_MSS_NOT_AFTER_DISPLACEMENT"; pass = false; }
-   
-   // 4. Event Coherence
-   bool event_coherent = CheckTFEventCoherence(idx);
-   if(!event_coherent) { 
-      if(first_reject=="") first_reject = "EVENT_NOT_COHERENT";
-      pass = false; 
-   }
-   
-   // 5. Entry Distance
-   double d_atr=0, max_d=0;
-   bool dist_valid = ValidateTFEntryDistance(idx, direction, d_atr, max_d);
-   if(G_TF[idx].m5_mss_break_level <= 0.0) { if(first_reject=="") first_reject = "MSS_BREAK_LEVEL_INVALID"; pass = false; }
-   if(!dist_valid) { if(first_reject=="") first_reject = "ENTRY_DISTANCE_TOO_FAR"; pass = false; }
-   
-   // 6. Momentum (score-based: 2/3 with PC required)
-   if(G_TF[idx].score_momentum < 10.0)
+   // 1. H1 Quality >= 15
+   if(G_TF[idx].h1_trend_direction != direction || G_TF[idx].h1_trend_quality < TF_H1_QUALITY_BASE)
    {
-      if(first_reject=="") first_reject = "MOMENTUM_INCOMPLETE";
+      if(first_reject == "") first_reject = "TF_P2_H1_REJECT";
       pass = false;
    }
    
-   // 7. Score
-   double score = CalculateTFScore(idx);
-   if(score < InpTF_RequiredScore) { if(first_reject=="") first_reject = "SCORE_BELOW_REQ"; pass = false; }
+   // 2. M15 Pullback Quality Valid
+   if(!G_TF[idx].m15_pullback_valid || G_TF[idx].m15_pullback_quality < 20.0)
+   {
+      if(first_reject == "") first_reject = "TF_P2_M15_REJECT";
+      pass = false;
+   }
    
-   // 8. DXY Confirmation
+   // 3. M15 Protected Structure Intact (closed M5 candle must not invalidate protected level)
+   double close1 = iClose(sym, PERIOD_M5, 1);
+   if(direction == 1)
+   {
+      double prot = (G_TF[idx].m15_protected_low > 0.0) ? G_TF[idx].m15_protected_low : G_TF[idx].h1_protected_structure;
+      if(prot > 0.0 && close1 < prot)
+      {
+         if(first_reject == "") first_reject = "TF_P2_M15_REJECT";
+         pass = false;
+      }
+   }
+   else if(direction == -1)
+   {
+      double prot = (G_TF[idx].m15_protected_high > 0.0) ? G_TF[idx].m15_protected_high : G_TF[idx].h1_protected_structure;
+      if(prot > 0.0 && close1 > prot)
+      {
+         if(first_reject == "") first_reject = "TF_P2_M15_REJECT";
+         pass = false;
+      }
+   }
+   
+   // 4. Sweep Valid
+   if(!G_TF[idx].m5_sweep)
+   {
+      if(first_reject == "") first_reject = "M5_SWEEP_NOT_FOUND";
+      pass = false;
+   }
+   
+   // 5. Displacement Valid
+   if(!G_TF[idx].m5_displacement || G_TF[idx].m5_displacement_range_atr < TF_MIN_DISPLACEMENT_ATR)
+   {
+      if(first_reject == "") first_reject = "TF_P2_DISPLACEMENT_REJECT";
+      pass = false;
+   }
+   
+   // 6. MSS Valid
+   if(!G_TF[idx].m5_mss || G_TF[idx].m5_mss_break_level <= 0.0 || G_TF[idx].m5_mss_break_distance_atr < TF_MIN_MSS_BREAK_ATR)
+   {
+      if(first_reject == "") first_reject = "TF_P2_MSS_REJECT";
+      pass = false;
+   }
+   
+   // 7. Event Coherence <= 5 bars
+   bool event_coherent = CheckTFEventCoherence(idx);
+   if(!event_coherent)
+   {
+      if(first_reject == "") first_reject = "EVENT_NOT_COHERENT";
+      pass = false;
+   }
+   
+   // 8. Momentum Score = 10
+   if(G_TF[idx].score_momentum < 10.0)
+   {
+      if(first_reject == "") first_reject = "TF_P2_MOMENTUM_REJECT";
+      pass = false;
+   }
+   
+   // 9. Entry Distance Valid (<= 2.0 ATR from MSS level)
+   double d_atr = 0, max_d = 0;
+   bool dist_valid = ValidateTFEntryDistance(idx, direction, d_atr, max_d);
+   if(!dist_valid)
+   {
+      if(first_reject == "") first_reject = "TF_P2_ENTRY_LOCATION_REJECT";
+      pass = false;
+   }
+   
+   // 10. Entry Extension Valid (<= 1.50 ATR from MSS level)
+   double ext_mss = 0, ext_prot = 0, max_ext = 0;
+   bool ext_valid = ValidateTFEntryLocationQuality(idx, direction, ext_mss, ext_prot, max_ext);
+   if(!ext_valid)
+   {
+      if(first_reject == "") first_reject = "TF_P2_ENTRY_LOCATION_REJECT";
+      pass = false;
+   }
+   
+   // 11. DXY Confirmation Valid
    string dxy_reason = "";
-   
-   if(G_Pairs[idx].isUSDPair && score >= InpTF_RequiredScore)
+   if(G_Pairs[idx].isUSDPair && G_TF[idx].total_score >= InpTF_RequiredScore)
    {
       PrintFormat("\n[TF_DXY_GATE]\nPAIR=%s\nCALLING=DXYTrendFollowingEngine", G_Pairs[idx].symbol);
    }
-   
    bool dxy_pass = CheckDXYTrendFollowingConfirmation(idx, direction, dxy_reason);
    if(!dxy_pass)
    {
-      if(first_reject=="") first_reject = dxy_reason;
+      if(first_reject == "") first_reject = (StringFind(dxy_reason, "DXY_") == 0) ? dxy_reason : "TF_P2_DXY_REJECT";
       pass = false;
    }
-
+   
+   // 12. Total Score >= InpTF_RequiredScore
+   double score = CalculateTFScore(idx);
+   if(score < InpTF_RequiredScore)
+   {
+      if(first_reject == "") first_reject = "TF_P2_SCORE_REJECT";
+      pass = false;
+   }
    
    // Gather diagnostic values
-   string sym = G_Pairs[idx].symbol;
    string dir_str = (direction == 1) ? "BUY" : ((direction == -1) ? "SELL" : "NONE");
-   double m5_close = iClose(sym, PERIOD_M5, 1);
    double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
    
    int cci_status = 0, rf_status = 0;
@@ -1577,6 +1927,7 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    Print("H1:");
    PrintFormat("  VALID=%s", (G_TF[idx].h1_trend_direction == direction) ? "true" : "false");
    PrintFormat("  QUALITY=%.0f", G_TF[idx].h1_trend_quality);
+   PrintFormat("  CLASSIFICATION=%s", G_TF[idx].h1_classification);
    PrintFormat("  SCORE=%.0f", G_TF[idx].score_h1_trend);
    Print("");
    Print("M15:");
@@ -1587,7 +1938,9 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    Print("M5:");
    PrintFormat("  SWEEP=%s", G_TF[idx].m5_sweep ? "true" : "false");
    PrintFormat("  DISPLACEMENT=%s", G_TF[idx].m5_displacement ? "true" : "false");
+   PrintFormat("  DISPLACEMENT_ATR=%.2f", G_TF[idx].m5_displacement_range_atr);
    PrintFormat("  MSS=%s", G_TF[idx].m5_mss ? "true" : "false");
+   PrintFormat("  MSS_BREAK_ATR=%.2f", G_TF[idx].m5_mss_break_distance_atr);
    PrintFormat("  EVENT=%s", event_coherent ? "true" : "false");
    Print("");
    int bars_elapsed = G_TF[idx].m5_momentum_bars_elapsed;
@@ -1615,7 +1968,7 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    PrintFormat("PC_CONFIRMED=%s", G_TF[idx].m5_momentum_pc ? "true" : "false");
    if(G_TF[idx].m5_momentum_pc_time > 0) PrintFormat("PC_CONFIRMED_TIME=%s", TimeToString(G_TF[idx].m5_momentum_pc_time));
    Print("");
-   // Momentum Reason diagnostic
+   
    int mom_pass_count = 0;
    if(G_TF[idx].m5_momentum_cci) mom_pass_count++;
    if(G_TF[idx].m5_momentum_rf)  mom_pass_count++;
@@ -1635,7 +1988,7 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    Print("");
    Print("ENTRY_DISTANCE:");
    PrintFormat("  MSS_LEVEL=%.5f", G_TF[idx].m5_mss_break_level);
-   PrintFormat("  CLOSE=%.5f", m5_close);
+   PrintFormat("  CLOSE=%.5f", close1);
    PrintFormat("  ATR=%.5f", atr);
    PrintFormat("  DISTANCE_ATR=%.2f", d_atr);
    PrintFormat("  MAX_DISTANCE_ATR=%.2f", max_d);
@@ -1650,6 +2003,17 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    
    rejectReason = first_reject;
    return pass;
+}
+
+bool ValidateTFPhase2EntryQuality(int idx)
+{
+   string rejectReason = "";
+   return ValidateTFPhase2EntryQuality(idx, G_TF[idx].h1_trend_direction, rejectReason);
+}
+
+bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
+{
+   return ValidateTFPhase2EntryQuality(idx, direction, rejectReason);
 }
 
 void LogTFTimeoutSnapshot(int idx)
@@ -1710,7 +2074,7 @@ void LogTFDecision(int idx, int direction, string decision, string reason, doubl
    PrintFormat("\n[TREND-FOLLOWING][%s]", sym);
    PrintFormat("H1:");
    PrintFormat(" Direction=%s", dir_str);
-   PrintFormat(" Score=%.0f/20", G_TF[idx].score_h1_trend);
+   PrintFormat(" Score=%.0f/20 (%s)", G_TF[idx].score_h1_trend, G_TF[idx].h1_classification);
    PrintFormat(" EMA=%d", G_TF[idx].h1_ema_aligned ? 1 : 0);
    PrintFormat(" Slope=%d", G_TF[idx].h1_slope_positive ? 1 : 0);
    PrintFormat(" Price=%d", G_TF[idx].h1_price_above_ema ? 1 : 0);
@@ -1738,6 +2102,7 @@ void LogTFDecision(int idx, int direction, string decision, string reason, doubl
    PrintFormat(" Coh=%.0f", G_TF[idx].score_event_coherence);
    PrintFormat(" Momentum=%.0f", G_TF[idx].score_momentum);
    PrintFormat(" Distance=%.0f", G_TF[idx].score_entry_distance);
+   if(G_TF[idx].h1_trend_quality < 20.0) PrintFormat(" DXY=%.0f", G_TF[idx].score_dxy);
    PrintFormat(" Total=%.0f/100", G_TF[idx].total_score);
    
    string next = "NONE";
@@ -1950,12 +2315,13 @@ int CheckTrendFollowingSignal(int idx)
       PrintFormat("COHERENCE=%.0f", G_TF[idx].score_event_coherence);
       PrintFormat("MOMENTUM=%.0f", G_TF[idx].score_momentum);
       PrintFormat("ENTRY_DISTANCE=%.0f", G_TF[idx].score_entry_distance);
+      if(G_TF[idx].h1_trend_quality < 20.0) PrintFormat("DXY=%.0f", G_TF[idx].score_dxy);
       PrintFormat("TOTAL=%.0f", score);
       // === FINAL GATE ===
       SetTFState(idx, TF_STATE_ENTRY_READY, "SCORE_REQ_REACHED");
       
       string rejectReason = "";
-      bool hardPass = ValidateTFHardRequirements(idx, dir, rejectReason);
+      bool hardPass = ValidateTFPhase2EntryQuality(idx, dir, rejectReason);
       
       if(hardPass)
       {
@@ -1974,17 +2340,33 @@ int CheckTrendFollowingSignal(int idx)
       }
       else
       {
-         if(StringFind(rejectReason, "DXY_") == 0)
+         if(StringFind(rejectReason, "DXY_") == 0 || rejectReason == "TF_P2_DXY_REJECT")
          {
             G_TF[idx].status = "WAIT: " + rejectReason;
             return 0;
          }
-         else if(rejectReason == "ENTRY_DISTANCE_TOO_FAR")
+         else if(rejectReason == "TF_P2_ENTRY_LOCATION_REJECT" || rejectReason == "ENTRY_DISTANCE_TOO_FAR")
          {
             LogTFDecision(idx, dir, "REJECT", rejectReason, score);
             ResetTFM5Evidence(idx); // Reset M5 only, keep H1+M15
-            SetTFState(idx, TF_STATE_M15_PULLBACK, "ENTRY_DISTANCE_REJECT");
-            G_TF[idx].status = "M5 RE-ACCUMULATING (distance)";
+            SetTFState(idx, TF_STATE_M15_PULLBACK, "ENTRY_LOCATION_REJECT");
+            G_TF[idx].status = "M5 RE-ACCUMULATING (location)";
+            return 0;
+         }
+         else if(rejectReason == "TF_P2_DISPLACEMENT_REJECT")
+         {
+            LogTFDecision(idx, dir, "REJECT", rejectReason, score);
+            ResetTFM5Evidence(idx);
+            SetTFState(idx, TF_STATE_M15_PULLBACK, "DISPLACEMENT_REJECT");
+            G_TF[idx].status = "M5 RE-ACCUMULATING (displacement)";
+            return 0;
+         }
+         else if(rejectReason == "TF_P2_MSS_REJECT")
+         {
+            LogTFDecision(idx, dir, "REJECT", rejectReason, score);
+            ResetTFM5Evidence(idx);
+            SetTFState(idx, TF_STATE_M15_PULLBACK, "MSS_REJECT");
+            G_TF[idx].status = "M5 RE-ACCUMULATING (mss)";
             return 0;
          }
          else if(rejectReason == "EVENT_NOT_COHERENT")
@@ -2006,7 +2388,7 @@ int CheckTrendFollowingSignal(int idx)
    {
       // Log missing components periodically
       string missing = "";
-      if(G_TF[idx].score_h1_trend < 20.0) missing += "H1_TREND ";
+      if(G_TF[idx].score_h1_trend < 15.0) missing += "H1_TREND ";
       if(G_TF[idx].score_m15_pullback < 20.0) missing += "M15_PB ";
       if(!G_TF[idx].m5_sweep) missing += "SWEEP ";
       if(!G_TF[idx].m5_displacement) missing += "DISP ";

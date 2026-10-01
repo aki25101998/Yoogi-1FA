@@ -285,6 +285,13 @@ const bool   TF_REQUIRE_RETEST         = false; // Module ready, default OFF
 const int    TF_DXY_MAX_AGE_BARS_HTF   = 48;    // DXY HTF signal max age (bars)
 const int    TF_DXY_MAX_AGE_BARS_LTF   = 288;   // DXY LTF signal max age (bars)
 
+// --- Trend-Following Phase 2 Quality Constants ---
+const double TF_H1_QUALITY_STRONG            = 20.0;
+const double TF_H1_QUALITY_BASE              = 15.0;
+const double TF_MIN_DISPLACEMENT_ATR         = 0.60;  // Closed M5 displacement candle range >= ATR * 0.60
+const double TF_MIN_MSS_BREAK_ATR            = 0.10;  // Closed M5 MSS break distance >= ATR * 0.10
+const double TF_MAX_MSS_ENTRY_EXTENSION_ATR  = 1.50;  // Closed M5 entry distance from MSS <= ATR * 1.50
+
 // --- Internal Constants for DXY TF Engine Freshness ---
 const int    DXY_TF_H1_MAX_AGE_BARS    = 3;
 const int    DXY_TF_M15_MAX_AGE_BARS   = 4;
@@ -295,6 +302,7 @@ struct TrendFollowingContext
    // H1 Trend Regime
    int    h1_trend_direction;     // 1=BUY, -1=SELL, 0=NONE
    double h1_trend_quality;       // 0-20
+   string h1_classification;      // "STRONG" (20) or "BASE" (15)
    bool   h1_ema_aligned;         // EMA20 > EMA50 (BUY) or EMA20 < EMA50 (SELL)
    bool   h1_slope_positive;      // EMA50 slope > 0 (BUY) or < 0 (SELL)
    bool   h1_price_above_ema;     // Price above EMA50 (BUY) or below (SELL)
@@ -322,6 +330,12 @@ struct TrendFollowingContext
    bool   m5_momentum_cci;
    bool   m5_momentum_rf;
    bool   m5_momentum_pc;
+   
+   // Phase 2 M5 Quality Metrics
+   double m5_displacement_range_atr;    // Closed displacement candle range in ATR
+   double m5_mss_break_distance_atr;    // Closed MSS candle penetration distance in ATR
+   double m5_entry_extension_mss_atr;   // Distance from MSS break level in ATR at entry ready
+   double m5_entry_extension_prot_atr;  // Distance from protected structure in ATR at entry ready
    
    // Real timestamp tracking for chronological validation
    datetime m5_sweep_time;
@@ -353,6 +367,7 @@ struct TrendFollowingContext
    double score_event_coherence;  // max 10
    double score_momentum;         // max 10
    double score_entry_distance;   // max 10
+   double score_dxy;              // max 10
    double total_score;            // must be exactly 100
 
    // State Machine
@@ -795,6 +810,7 @@ void InitGlobals()
       // Reset Trend-Following Context
       G_TF[i].h1_trend_direction = 0;
       G_TF[i].h1_trend_quality = 0.0;
+      G_TF[i].h1_classification = "";
       G_TF[i].h1_ema_aligned = false;
       G_TF[i].h1_slope_positive = false;
       G_TF[i].h1_price_above_ema = false;
@@ -818,6 +834,10 @@ void InitGlobals()
       G_TF[i].m5_momentum_cci = false;
       G_TF[i].m5_momentum_rf = false;
       G_TF[i].m5_momentum_pc = false;
+      G_TF[i].m5_displacement_range_atr = 0.0;
+      G_TF[i].m5_mss_break_distance_atr = 0.0;
+      G_TF[i].m5_entry_extension_mss_atr = 0.0;
+      G_TF[i].m5_entry_extension_prot_atr = 0.0;
       G_TF[i].m5_sweep_time = 0;
       G_TF[i].m5_displacement_time = 0;
       G_TF[i].m5_mss_time = 0;
@@ -843,6 +863,7 @@ void InitGlobals()
       G_TF[i].score_event_coherence = 0.0;
       G_TF[i].score_momentum = 0.0;
       G_TF[i].score_entry_distance = 0.0;
+      G_TF[i].score_dxy = 0.0;
       G_TF[i].total_score = 0.0;
       G_TF[i].setup_state = TF_STATE_NONE;
       G_TF[i].setup_bar_count = 0;
