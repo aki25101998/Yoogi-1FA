@@ -8,7 +8,7 @@
 //+------------------------------------------------------------------+
 #property strict
 
-const string TF_ENGINE_VERSION = "TF_PHASE_2";
+const string TF_ENGINE_VERSION = "TF_PHASE_3";
 
 // ==================================================================
 // HELPER: TF State Diagnostic Logging
@@ -94,6 +94,18 @@ void ResetTFM5Evidence(int idx)
    G_TF[idx].m5_mss_break_distance_atr = 0.0;
    G_TF[idx].m5_entry_extension_mss_atr = 0.0;
    G_TF[idx].m5_entry_extension_prot_atr = 0.0;
+   G_TF[idx].m5_displacement_range = 0.0;
+   G_TF[idx].phase3_current_atr = 0.0;
+   G_TF[idx].phase3_baseline_atr = 0.0;
+   G_TF[idx].phase3_atr_ratio = 0.0;
+   G_TF[idx].phase3_entry_candle_range = 0.0;
+   G_TF[idx].phase3_entry_candle_body = 0.0;
+   G_TF[idx].phase3_entry_candle_body_ratio = 0.0;
+   G_TF[idx].phase3_entry_candle_close_loc = 0.0;
+   G_TF[idx].phase3_spread_points = 0.0;
+   G_TF[idx].phase3_spread_atr = 0.0;
+   G_TF[idx].phase3_rel_disp_extension = 0.0;
+   G_TF[idx].phase3_post_mss_adverse_atr = 0.0;
    
    G_TF[idx].m5_sweep_time = 0;
    G_TF[idx].m5_displacement_time = 0;
@@ -1215,6 +1227,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                G_TF[idx].m5_displacement = true;
                G_TF[idx].m5_displacement_time = current_time;
                G_TF[idx].m5_displacement_price = close[0];
+               G_TF[idx].m5_displacement_range = candle_range;
                G_TF[idx].score_displacement = 10.0;
                SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED");
                G_TF[idx].status = "WAIT MSS";
@@ -2047,6 +2060,511 @@ bool ValidateTFHardRequirements(int idx, int direction, string &rejectReason)
    return ValidateTFPhase2EntryQuality(idx, direction, rejectReason);
 }
 
+// ==================================================================
+// PHASE 3 — ADVANCED EXECUTION & VOLATILITY QUALITY FILTERS
+// ==================================================================
+
+// ------------------------------------------------------------------
+// Phase 3.1: Volatility Regime Filter
+// ------------------------------------------------------------------
+bool ValidateTFPhase3Volatility(int idx, double &out_curr_atr, double &out_base_atr, double &out_ratio, string &reject_reason)
+{
+   out_curr_atr = 0.0;
+   out_base_atr = 0.0;
+   out_ratio = 0.0;
+   reject_reason = "NONE";
+   
+   string sym = G_Pairs[idx].symbol;
+   int atr_handle = iATR(sym, PERIOD_M5, InpReversal_ATR_Period);
+   if(atr_handle == INVALID_HANDLE)
+   {
+      reject_reason = "TF_P3_VOLATILITY_HANDLE_INVALID";
+      return false; // Fail-closed
+   }
+   
+   double atr_buf[];
+   // Copy TF_PHASE3_ATR_LOOKBACK closed bars starting at shift 1
+   if(CopyBuffer(atr_handle, 0, 1, TF_PHASE3_ATR_LOOKBACK, atr_buf) < TF_PHASE3_ATR_LOOKBACK)
+   {
+      IndicatorRelease(atr_handle);
+      reject_reason = "TF_P3_VOLATILITY_DATA_INSUFFICIENT";
+      return false; // Fail-closed
+   }
+   IndicatorRelease(atr_handle);
+   
+   ArraySetAsSeries(atr_buf, true);
+   out_curr_atr = atr_buf[0]; // shift 1 (most recently closed candle)
+   
+   if(out_curr_atr <= 0.0)
+   {
+      reject_reason = "TF_P3_VOLATILITY_CURRENT_INVALID";
+      return false; // Fail-closed
+   }
+   
+   double sum = 0.0;
+   for(int i = 0; i < TF_PHASE3_ATR_LOOKBACK; i++)
+   {
+      if(atr_buf[i] <= 0.0)
+      {
+         reject_reason = "TF_P3_VOLATILITY_BASELINE_INVALID";
+         return false; // Fail-closed
+      }
+      sum += atr_buf[i];
+   }
+   out_base_atr = sum / TF_PHASE3_ATR_LOOKBACK;
+   
+   if(out_base_atr <= 0.0)
+   {
+      reject_reason = "TF_P3_VOLATILITY_BASELINE_ZERO";
+      return false; // Fail-closed
+   }
+   
+   out_ratio = out_curr_atr / out_base_atr;
+   G_TF[idx].phase3_current_atr = out_curr_atr;
+   G_TF[idx].phase3_baseline_atr = out_base_atr;
+   G_TF[idx].phase3_atr_ratio = out_ratio;
+   
+   if(out_ratio < TF_PHASE3_MIN_ATR_RATIO)
+   {
+      reject_reason = "VOLATILITY_TOO_LOW";
+   }
+   else if(out_ratio > TF_PHASE3_MAX_ATR_RATIO)
+   {
+      reject_reason = "VOLATILITY_SPIKE";
+   }
+   
+   bool pass = (reject_reason == "NONE");
+   
+   Print("\n[TF_PHASE3_VOLATILITY]");
+   PrintFormat("SYMBOL=%s", sym);
+   PrintFormat("CURRENT_ATR=%.5f", out_curr_atr);
+   PrintFormat("BASELINE_ATR=%.5f", out_base_atr);
+   PrintFormat("ATR_RATIO=%.2f", out_ratio);
+   PrintFormat("MIN_RATIO=%.2f", TF_PHASE3_MIN_ATR_RATIO);
+   PrintFormat("MAX_RATIO=%.2f", TF_PHASE3_MAX_ATR_RATIO);
+   PrintFormat("RESULT=%s", pass ? "PASS" : "REJECT");
+   PrintFormat("REASON=%s", reject_reason);
+   
+   return pass;
+}
+
+// ------------------------------------------------------------------
+// Phase 3.2: Entry Candle Quality
+// ------------------------------------------------------------------
+bool ValidateTFPhase3EntryCandle(int idx, int direction, double &out_range, double &out_body, double &out_body_ratio, double &out_close_loc, string &reject_reason)
+{
+   out_range = 0.0;
+   out_body = 0.0;
+   out_body_ratio = 0.0;
+   out_close_loc = 0.0;
+   reject_reason = "NONE";
+   
+   string sym = G_Pairs[idx].symbol;
+   double high1  = iHigh(sym, PERIOD_M5, 1);
+   double low1   = iLow(sym, PERIOD_M5, 1);
+   double open1  = iOpen(sym, PERIOD_M5, 1);
+   double close1 = iClose(sym, PERIOD_M5, 1);
+   
+   if(high1 <= 0 || low1 <= 0 || open1 <= 0 || close1 <= 0)
+   {
+      reject_reason = "TF_P3_CANDLE_DATA_UNAVAILABLE";
+      return false; // Fail-closed
+   }
+   
+   out_range = high1 - low1;
+   if(out_range <= 0.0)
+   {
+      reject_reason = "TF_P3_CANDLE_ZERO_RANGE";
+      return false; // Fail-closed
+   }
+   
+   out_body = MathAbs(close1 - open1);
+   out_body_ratio = out_body / out_range;
+   
+   G_TF[idx].phase3_entry_candle_range = out_range;
+   G_TF[idx].phase3_entry_candle_body = out_body;
+   G_TF[idx].phase3_entry_candle_body_ratio = out_body_ratio;
+   
+   if(direction == 1) // BUY
+   {
+      // 1. Must be bullish continuation candle
+      if(close1 <= open1)
+      {
+         reject_reason = "BEARISH_OR_FLAT_ENTRY_CANDLE";
+         return false;
+      }
+      
+      // 2. Close location ratio (relative to candle low)
+      out_close_loc = (close1 - low1) / out_range;
+      G_TF[idx].phase3_entry_candle_close_loc = out_close_loc;
+      
+      // 3. Body ratio check
+      if(out_body_ratio < TF_PHASE3_MIN_ENTRY_BODY_RATIO)
+      {
+         reject_reason = "BODY_RATIO_TOO_SMALL";
+         return false;
+      }
+      
+      // 4. Close location check
+      if(out_close_loc < TF_PHASE3_MIN_CLOSE_LOCATION_RATIO)
+      {
+         reject_reason = "CLOSE_LOCATION_TOO_LOW";
+         return false;
+      }
+      
+      // 5. Upper rejection wick check (adverse wick)
+      double upper_wick_ratio = (high1 - close1) / out_range;
+      if(upper_wick_ratio > TF_PHASE3_MAX_REJECTION_WICK_RATIO)
+      {
+         reject_reason = "UPPER_REJECTION_WICK_TOO_LARGE";
+         return false;
+      }
+   }
+   else if(direction == -1) // SELL
+   {
+      // 1. Must be bearish continuation candle
+      if(close1 >= open1)
+      {
+         reject_reason = "BULLISH_OR_FLAT_ENTRY_CANDLE";
+         return false;
+      }
+      
+      // 2. Close location ratio (relative to candle high: closer to low means higher ratio)
+      out_close_loc = (high1 - close1) / out_range;
+      G_TF[idx].phase3_entry_candle_close_loc = out_close_loc;
+      
+      // 3. Body ratio check
+      if(out_body_ratio < TF_PHASE3_MIN_ENTRY_BODY_RATIO)
+      {
+         reject_reason = "BODY_RATIO_TOO_SMALL";
+         return false;
+      }
+      
+      // 4. Close location check
+      if(out_close_loc < TF_PHASE3_MIN_CLOSE_LOCATION_RATIO)
+      {
+         reject_reason = "CLOSE_LOCATION_TOO_HIGH";
+         return false;
+      }
+      
+      // 5. Lower rejection wick check (adverse wick)
+      double lower_wick_ratio = (close1 - low1) / out_range;
+      if(lower_wick_ratio > TF_PHASE3_MAX_REJECTION_WICK_RATIO)
+      {
+         reject_reason = "LOWER_REJECTION_WICK_TOO_LARGE";
+         return false;
+      }
+   }
+   else
+   {
+      reject_reason = "INVALID_DIRECTION";
+      return false;
+   }
+   
+   return true;
+}
+
+// ------------------------------------------------------------------
+// Phase 3.3: Spread / Execution Quality
+// ------------------------------------------------------------------
+bool ValidateTFPhase3ExecutionQuality(int idx, double &out_spread_pts, double &out_spread_atr, string &reject_reason)
+{
+   out_spread_pts = 0.0;
+   out_spread_atr = 0.0;
+   reject_reason = "NONE";
+   
+   string sym = G_Pairs[idx].symbol;
+   long spread_pts = SymbolInfoInteger(sym, SYMBOL_SPREAD);
+   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+   
+   if(spread_pts < 0 || point <= 0.0)
+   {
+      reject_reason = "TF_P3_SPREAD_INFO_UNAVAILABLE";
+      return false; // Fail-closed
+   }
+   
+   out_spread_pts = (double)spread_pts;
+   double spread_price = spread_pts * point;
+   
+   double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
+   if(atr <= 0.0)
+   {
+      reject_reason = "TF_P3_SPREAD_ATR_INVALID";
+      return false; // Fail-closed
+   }
+   
+   out_spread_atr = spread_price / atr;
+   G_TF[idx].phase3_spread_points = out_spread_pts;
+   G_TF[idx].phase3_spread_atr = out_spread_atr;
+   
+   if(out_spread_pts > TF_PHASE3_MAX_SPREAD_POINTS)
+   {
+      reject_reason = "SPREAD_POINTS_EXCEEDED";
+   }
+   else if(out_spread_atr > TF_PHASE3_MAX_SPREAD_ATR)
+   {
+      reject_reason = "SPREAD_ATR_EXCEEDED";
+   }
+   
+   bool pass = (reject_reason == "NONE");
+   
+   Print("\n[TF_PHASE3_SPREAD]");
+   PrintFormat("SYMBOL=%s", sym);
+   PrintFormat("SPREAD_POINTS=%.0f", out_spread_pts);
+   PrintFormat("SPREAD_ATR=%.2f", out_spread_atr);
+   PrintFormat("MAX_SPREAD_ATR=%.2f", TF_PHASE3_MAX_SPREAD_ATR);
+   PrintFormat("RESULT=%s", pass ? "PASS" : "REJECT");
+   PrintFormat("REASON=%s", reject_reason);
+   
+   return pass;
+}
+
+// ------------------------------------------------------------------
+// Phase 3.4: Relative Displacement Extension
+// ------------------------------------------------------------------
+bool ValidateTFPhase3DisplacementExtension(int idx, int direction, double &out_dist_mss, double &out_disp_range, double &out_rel_ext, string &reject_reason)
+{
+   out_dist_mss = 0.0;
+   out_disp_range = 0.0;
+   out_rel_ext = 0.0;
+   reject_reason = "NONE";
+   
+   string sym = G_Pairs[idx].symbol;
+   if(G_TF[idx].m5_mss_break_level <= 0.0)
+   {
+      reject_reason = "MSS_BREAK_LEVEL_INVALID";
+      return false; // Fail-closed
+   }
+   
+   double close1 = iClose(sym, PERIOD_M5, 1);
+   if(close1 <= 0.0)
+   {
+      reject_reason = "CLOSE_PRICE_UNAVAILABLE";
+      return false; // Fail-closed
+   }
+   
+   out_dist_mss = MathAbs(close1 - G_TF[idx].m5_mss_break_level);
+   
+   // Retrieve displacement candle range
+   out_disp_range = G_TF[idx].m5_displacement_range;
+   if(out_disp_range <= 0.0 && G_TF[idx].m5_displacement_time > 0)
+   {
+      int disp_shift = iBarShift(sym, PERIOD_M5, G_TF[idx].m5_displacement_time, true);
+      if(disp_shift >= 1)
+      {
+         double dh = iHigh(sym, PERIOD_M5, disp_shift);
+         double dl = iLow(sym, PERIOD_M5, disp_shift);
+         if(dh > dl && dl > 0)
+         {
+            out_disp_range = dh - dl;
+            G_TF[idx].m5_displacement_range = out_disp_range;
+         }
+      }
+   }
+   
+   if(out_disp_range <= 0.0)
+   {
+      reject_reason = "DISPLACEMENT_RANGE_UNAVAILABLE";
+      return false; // Fail-closed
+   }
+   
+   out_rel_ext = out_dist_mss / out_disp_range;
+   G_TF[idx].phase3_rel_disp_extension = out_rel_ext;
+   
+   if(out_rel_ext > TF_PHASE3_MAX_DISPLACEMENT_EXTENSION)
+   {
+      reject_reason = "DISPLACEMENT_EXTENSION_EXCEEDED";
+      return false;
+   }
+   
+   return true;
+}
+
+// ------------------------------------------------------------------
+// Phase 3.5: Post-MSS Adverse Retracement
+// ------------------------------------------------------------------
+bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adverse_atr, string &reject_reason)
+{
+   out_adverse_atr = 0.0;
+   reject_reason = "NONE";
+   
+   if(G_TF[idx].m5_mss_time <= 0 || G_TF[idx].m5_mss_break_level <= 0.0)
+   {
+      reject_reason = "MSS_METRICS_INVALID";
+      return false; // Fail-closed
+   }
+   
+   string sym = G_Pairs[idx].symbol;
+   int mss_shift = iBarShift(sym, PERIOD_M5, G_TF[idx].m5_mss_time, true);
+   if(mss_shift < 1)
+   {
+      reject_reason = "MSS_SHIFT_INVALID";
+      return false; // Fail-closed
+   }
+   
+   double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
+   if(atr <= 0.0)
+   {
+      reject_reason = "ATR_UNAVAILABLE";
+      return false; // Fail-closed
+   }
+   
+   // Closed candles from shift 1 (candidate entry) to shift mss_shift
+   double adverse_distance = 0.0;
+   
+   if(direction == 1) // BUY
+   {
+      double lowest_low = iLow(sym, PERIOD_M5, 1);
+      for(int s = 1; s <= mss_shift; s++)
+      {
+         double ls = iLow(sym, PERIOD_M5, s);
+         if(ls <= 0.0) { reject_reason = "CANDLE_DATA_MISSING"; return false; }
+         if(ls < lowest_low) lowest_low = ls;
+      }
+      
+      // If price dropped below the MSS break level
+      if(lowest_low < G_TF[idx].m5_mss_break_level)
+         adverse_distance = G_TF[idx].m5_mss_break_level - lowest_low;
+   }
+   else if(direction == -1) // SELL
+   {
+      double highest_high = iHigh(sym, PERIOD_M5, 1);
+      for(int s = 1; s <= mss_shift; s++)
+      {
+         double hs = iHigh(sym, PERIOD_M5, s);
+         if(hs <= 0.0) { reject_reason = "CANDLE_DATA_MISSING"; return false; }
+         if(hs > highest_high) highest_high = hs;
+      }
+      
+      // If price rallied above the MSS break level
+      if(highest_high > G_TF[idx].m5_mss_break_level)
+         adverse_distance = highest_high - G_TF[idx].m5_mss_break_level;
+   }
+   else
+   {
+      reject_reason = "INVALID_DIRECTION";
+      return false;
+   }
+   
+   out_adverse_atr = adverse_distance / atr;
+   G_TF[idx].phase3_post_mss_adverse_atr = out_adverse_atr;
+   
+   if(out_adverse_atr > TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR)
+   {
+      reject_reason = "ADVERSE_RETRACEMENT_EXCEEDED";
+      return false;
+   }
+   
+   return true;
+}
+
+// ------------------------------------------------------------------
+// Phase 3 Centralized Validation Layer
+// ------------------------------------------------------------------
+bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
+{
+   bool pass = true;
+   string first_reject = "";
+   string sym = G_Pairs[idx].symbol;
+   
+   // 1. Volatility Regime
+   double curr_atr = 0.0, base_atr = 0.0, atr_ratio = 0.0;
+   string vol_reason = "";
+   bool vol_pass = ValidateTFPhase3Volatility(idx, curr_atr, base_atr, atr_ratio, vol_reason);
+   if(!vol_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_VOLATILITY_REJECT";
+      pass = false;
+   }
+   
+   // 2. Entry Candle Quality
+   double c_range = 0.0, c_body = 0.0, c_body_ratio = 0.0, c_close_loc = 0.0;
+   string candle_reason = "";
+   bool candle_pass = ValidateTFPhase3EntryCandle(idx, direction, c_range, c_body, c_body_ratio, c_close_loc, candle_reason);
+   if(!candle_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_ENTRY_CANDLE_REJECT";
+      pass = false;
+   }
+   
+   // 3. Spread / Execution Quality
+   double spread_pts = 0.0, spread_atr = 0.0;
+   string spread_reason = "";
+   bool spread_pass = ValidateTFPhase3ExecutionQuality(idx, spread_pts, spread_atr, spread_reason);
+   if(!spread_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_SPREAD_REJECT";
+      pass = false;
+   }
+   
+   // 4. Relative Displacement Extension
+   double dist_mss = 0.0, disp_range = 0.0, rel_ext = 0.0;
+   string ext_reason = "";
+   bool ext_pass = ValidateTFPhase3DisplacementExtension(idx, direction, dist_mss, disp_range, rel_ext, ext_reason);
+   if(!ext_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_DISPLACEMENT_EXTENSION_REJECT";
+      pass = false;
+   }
+   
+   // 5. Post-MSS Adverse Retracement
+   double adverse_atr = 0.0;
+   string retrace_reason = "";
+   bool retrace_pass = ValidateTFPhase3PostMSSRetracement(idx, direction, adverse_atr, retrace_reason);
+   if(!retrace_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_ADVERSE_RETRACE_REJECT";
+      pass = false;
+   }
+   
+   // Print [TF_PHASE3_DIAGNOSTIC] block
+   Print("\n[TF_PHASE3_DIAGNOSTIC]");
+   Print("");
+   PrintFormat("SYMBOL=%s", sym);
+   PrintFormat("DIRECTION=%s", (direction == 1 ? "BUY" : (direction == -1 ? "SELL" : "NONE")));
+   Print("");
+   Print("VOLATILITY:");
+   PrintFormat("  CURRENT_ATR=%.5f", curr_atr);
+   PrintFormat("  BASELINE_ATR=%.5f", base_atr);
+   PrintFormat("  ATR_RATIO=%.2f", atr_ratio);
+   PrintFormat("  RESULT=%s", vol_pass ? "PASS" : "REJECT (" + vol_reason + ")");
+   Print("");
+   Print("ENTRY_CANDLE:");
+   PrintFormat("  RANGE=%.5f", c_range);
+   PrintFormat("  BODY=%.5f", c_body);
+   PrintFormat("  BODY_RATIO=%.2f", c_body_ratio);
+   PrintFormat("  CLOSE_LOCATION=%.2f", c_close_loc);
+   PrintFormat("  RESULT=%s", candle_pass ? "PASS" : "REJECT (" + candle_reason + ")");
+   Print("");
+   Print("EXECUTION:");
+   PrintFormat("  SPREAD_POINTS=%.0f", spread_pts);
+   PrintFormat("  SPREAD_ATR=%.2f", spread_atr);
+   PrintFormat("  RESULT=%s", spread_pass ? "PASS" : "REJECT (" + spread_reason + ")");
+   Print("");
+   Print("DISPLACEMENT_EXTENSION:");
+   PrintFormat("  DISTANCE_FROM_MSS=%.5f", dist_mss);
+   PrintFormat("  DISPLACEMENT_RANGE=%.5f", disp_range);
+   PrintFormat("  RELATIVE_EXTENSION=%.2f", rel_ext);
+   PrintFormat("  RESULT=%s", ext_pass ? "PASS" : "REJECT (" + ext_reason + ")");
+   Print("");
+   Print("POST_MSS_RETRACE:");
+   PrintFormat("  ADVERSE_ATR=%.2f", adverse_atr);
+   PrintFormat("  MAX_ADVERSE_ATR=%.2f", TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR);
+   PrintFormat("  RESULT=%s", retrace_pass ? "PASS" : "REJECT (" + retrace_reason + ")");
+   Print("");
+   PrintFormat("FINAL_RESULT=%s", pass ? "PASS" : "REJECT");
+   if(!pass) PrintFormat("REJECT_REASON=%s", first_reject);
+   
+   rejectReason = first_reject;
+   return pass;
+}
+
+bool ValidateTFPhase3EntryContext(int idx)
+{
+   string rejectReason = "";
+   return ValidateTFPhase3EntryContext(idx, G_TF[idx].h1_trend_direction, rejectReason);
+}
+
 void LogTFTimeoutSnapshot(int idx)
 {
    string sym = G_Pairs[idx].symbol;
@@ -2356,18 +2874,64 @@ int CheckTrendFollowingSignal(int idx)
       
       if(hardPass)
       {
-         G_TF[idx].status = "TRIGGER";
-         LogTFDecision(idx, dir, "ENTRY_READY", "All Gates Passed", score);
+         string p3RejectReason = "";
+         bool p3Pass = ValidateTFPhase3EntryContext(idx, dir, p3RejectReason);
          
-         Print("\n[TF_FINAL_PASS]");
-         PrintFormat("SYMBOL=%s", sym);
-         PrintFormat("DIRECTION=%s", (dir == 1 ? "BUY" : "SELL"));
-         PrintFormat("SCORE=%.0f", score);
-         PrintFormat("DXY=%s", (G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_STRONG ? "NOT_REQUIRED (H1 STRONG)" : "PASS (H1 BASE)"));
-         
-         int result = dir;
-         ResetTFSetup(idx, "Entry Triggered - Reset");
-         return result;
+         if(p3Pass)
+         {
+            G_TF[idx].status = "TRIGGER";
+            LogTFDecision(idx, dir, "ENTRY_READY", "All Gates Passed", score);
+            
+            Print("\n[TF_FINAL_PASS]");
+            PrintFormat("SYMBOL=%s", sym);
+            PrintFormat("DIRECTION=%s", (dir == 1 ? "BUY" : "SELL"));
+            PrintFormat("SCORE=%.0f", score);
+            PrintFormat("DXY=%s", (G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_STRONG ? "NOT_REQUIRED (H1 STRONG)" : "PASS (H1 BASE)"));
+            PrintFormat("PHASE2=PASS");
+            PrintFormat("PHASE3=PASS");
+            
+            int result = dir;
+            ResetTFSetup(idx, "Entry Triggered - Reset");
+            return result;
+         }
+         else
+         {
+            LogTFDecision(idx, dir, "REJECT", p3RejectReason, score);
+            
+            if(p3RejectReason == "TF_P3_SPREAD_REJECT" || p3RejectReason == "TF_P3_VOLATILITY_REJECT")
+            {
+               // Environmental condition: do NOT reset H1/M15/M5 evidence. EA waits for next candle/tick.
+               G_TF[idx].status = "WAIT: " + p3RejectReason;
+               return 0;
+            }
+            else if(p3RejectReason == "TF_P3_ENTRY_CANDLE_REJECT")
+            {
+               // Entry candle quality not confirmed: wait for next closed candle within momentum window
+               G_TF[idx].status = "WAIT: " + p3RejectReason;
+               return 0;
+            }
+            else if(p3RejectReason == "TF_P3_DISPLACEMENT_EXTENSION_REJECT")
+            {
+               // Price overextended relative to displacement range: reset M5 only, keep H1+M15
+               ResetTFM5Evidence(idx);
+               SetTFState(idx, TF_STATE_M15_PULLBACK, "DISPLACEMENT_EXTENSION_REJECT");
+               G_TF[idx].status = "M5 RE-ACCUMULATING (displacement_extension)";
+               return 0;
+            }
+            else if(p3RejectReason == "TF_P3_ADVERSE_RETRACE_REJECT")
+            {
+               // Price retraced too deep against MSS: reset M5 only, keep H1+M15
+               ResetTFM5Evidence(idx);
+               SetTFState(idx, TF_STATE_M15_PULLBACK, "ADVERSE_RETRACE_REJECT");
+               G_TF[idx].status = "M5 RE-ACCUMULATING (adverse_retrace)";
+               return 0;
+            }
+            else
+            {
+               G_TF[idx].status = "WAIT: " + p3RejectReason;
+               return 0;
+            }
+         }
       }
       else
       {

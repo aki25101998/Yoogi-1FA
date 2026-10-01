@@ -292,6 +292,18 @@ const double TF_MIN_DISPLACEMENT_ATR         = 0.60;  // Closed M5 displacement 
 const double TF_MIN_MSS_BREAK_ATR            = 0.10;  // Closed M5 MSS break distance >= ATR * 0.10
 const double TF_MAX_MSS_ENTRY_EXTENSION_ATR  = 1.50;  // Closed M5 entry distance from MSS <= ATR * 1.50
 
+// --- Trend-Following Phase 3 Quality Constants ---
+const int    TF_PHASE3_ATR_LOOKBACK                = 50;    // Baseline ATR lookback (closed M5 bars)
+const double TF_PHASE3_MIN_ATR_RATIO               = 0.50;  // Current ATR >= 50% baseline ATR (avoid flat/dead market)
+const double TF_PHASE3_MAX_ATR_RATIO               = 2.50;  // Current ATR <= 250% baseline ATR (avoid news/abnormal volatility spike)
+const double TF_PHASE3_MIN_ENTRY_BODY_RATIO        = 0.30;  // Entry candle body >= 30% of total range
+const double TF_PHASE3_MIN_CLOSE_LOCATION_RATIO    = 0.55;  // Close location in top 45% (BUY) or bottom 45% (SELL)
+const double TF_PHASE3_MAX_REJECTION_WICK_RATIO    = 0.45;  // Adverse rejection wick <= 45% of total range
+const double TF_PHASE3_MAX_SPREAD_ATR              = 0.35;  // Spread price / M5 ATR <= 0.35
+const int    TF_PHASE3_MAX_SPREAD_POINTS           = 50;    // Spread points <= 50 (5.0 pips max)
+const double TF_PHASE3_MAX_DISPLACEMENT_EXTENSION  = 2.00;  // Distance from MSS <= 2.0x displacement candle range
+const double TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR    = 1.00;  // Max adverse excursion after MSS <= 1.00 M5 ATR
+
 // --- Internal Constants for DXY TF Engine Freshness ---
 const int    DXY_TF_H1_MAX_AGE_BARS    = 3;
 const int    DXY_TF_M15_MAX_AGE_BARS   = 4;
@@ -336,6 +348,20 @@ struct TrendFollowingContext
    double m5_mss_break_distance_atr;    // Closed MSS candle penetration distance in ATR
    double m5_entry_extension_mss_atr;   // Distance from MSS break level in ATR at entry ready
    double m5_entry_extension_prot_atr;  // Distance from protected structure in ATR at entry ready
+   
+   // Phase 3 M5 Quality Metrics
+   double m5_displacement_range;        // Closed displacement candle range in price units
+   double phase3_current_atr;           // Current M5 ATR
+   double phase3_baseline_atr;          // Baseline M5 ATR
+   double phase3_atr_ratio;             // current_atr / baseline_atr
+   double phase3_entry_candle_range;    // Closed entry candle range in price
+   double phase3_entry_candle_body;     // Closed entry candle body in price
+   double phase3_entry_candle_body_ratio; // body / range
+   double phase3_entry_candle_close_loc;  // close location ratio
+   double phase3_spread_points;         // Current spread points
+   double phase3_spread_atr;            // Spread in ATR units
+   double phase3_rel_disp_extension;    // Distance from MSS / displacement range
+   double phase3_post_mss_adverse_atr;  // Post-MSS adverse excursion in ATR
    
    // Real timestamp tracking for chronological validation
    datetime m5_sweep_time;
@@ -838,6 +864,18 @@ void InitGlobals()
       G_TF[i].m5_mss_break_distance_atr = 0.0;
       G_TF[i].m5_entry_extension_mss_atr = 0.0;
       G_TF[i].m5_entry_extension_prot_atr = 0.0;
+      G_TF[i].m5_displacement_range = 0.0;
+      G_TF[i].phase3_current_atr = 0.0;
+      G_TF[i].phase3_baseline_atr = 0.0;
+      G_TF[i].phase3_atr_ratio = 0.0;
+      G_TF[i].phase3_entry_candle_range = 0.0;
+      G_TF[i].phase3_entry_candle_body = 0.0;
+      G_TF[i].phase3_entry_candle_body_ratio = 0.0;
+      G_TF[i].phase3_entry_candle_close_loc = 0.0;
+      G_TF[i].phase3_spread_points = 0.0;
+      G_TF[i].phase3_spread_atr = 0.0;
+      G_TF[i].phase3_rel_disp_extension = 0.0;
+      G_TF[i].phase3_post_mss_adverse_atr = 0.0;
       G_TF[i].m5_sweep_time = 0;
       G_TF[i].m5_displacement_time = 0;
       G_TF[i].m5_mss_time = 0;
