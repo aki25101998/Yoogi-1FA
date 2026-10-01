@@ -2433,6 +2433,13 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
       return false; // Fail-closed
    }
    
+   if(mss_shift <= 1)
+   {
+      out_mss_shift = mss_shift;
+      reject_reason = "NO_POST_MSS_CANDLES";
+      return false; // Fail-closed
+   }
+   
    // Safety check on MSS age (cannot exceed reasonable boundary)
    if(mss_shift > TF_MAX_EVENT_BARS + TF_MOMENTUM_MAX_BARS + 5)
    {
@@ -2441,8 +2448,13 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
    }
    
    out_mss_shift = mss_shift;
-   out_scan_start = iTime(sym, PERIOD_M5, mss_shift);
+   out_scan_start = iTime(sym, PERIOD_M5, mss_shift - 1);
    out_scan_end = iTime(sym, PERIOD_M5, 1);
+   if(out_scan_start <= 0 || out_scan_end <= 0)
+   {
+      reject_reason = "CANDLE_DATA_MISSING";
+      return false; // Fail-closed
+   }
    
    double atr = CalculateATR_Generic(sym, PERIOD_M5, InpReversal_ATR_Period, 1);
    if(atr <= 0.0)
@@ -2451,13 +2463,13 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
       return false; // Fail-closed
    }
    
-   // Strictly closed candles: shift 1 (decision candle) through shift mss_shift (MSS candle)
+   // Strictly post-MSS closed candles: shift 1 (decision candle) through shift (mss_shift - 1)
    double adverse_distance = 0.0;
    
    if(direction == 1) // BUY
    {
       double lowest_low = DBL_MAX;
-      for(int s = 1; s <= mss_shift; s++)
+      for(int s = 1; s < mss_shift; s++)
       {
          double ls = iLow(sym, PERIOD_M5, s);
          if(ls <= 0.0) { reject_reason = "CANDLE_DATA_MISSING"; return false; }
@@ -2473,7 +2485,7 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
    else if(direction == -1) // SELL
    {
       double highest_high = 0.0;
-      for(int s = 1; s <= mss_shift; s++)
+      for(int s = 1; s < mss_shift; s++)
       {
          double hs = iHigh(sym, PERIOD_M5, s);
          if(hs <= 0.0) { reject_reason = "CANDLE_DATA_MISSING"; return false; }
@@ -2564,7 +2576,13 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
    bool retrace_pass = ValidateTFPhase3PostMSSRetracement(idx, direction, adverse_atr, mss_shift, scan_start, scan_end, retrace_reason);
    if(!retrace_pass)
    {
-      if(first_reject == "") first_reject = "TF_P3_ADVERSE_RETRACE_REJECT";
+      if(first_reject == "")
+      {
+         if(retrace_reason == "NO_POST_MSS_CANDLES")
+            first_reject = "TF_P3_NO_POST_MSS_CANDLES";
+         else
+            first_reject = "TF_P3_ADVERSE_RETRACE_REJECT";
+      }
       pass = false;
    }
    
@@ -2605,12 +2623,23 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
    Print("");
    Print("POST_MSS_RETRACE:");
    PrintFormat("  MSS_SHIFT=%d", mss_shift);
-   PrintFormat("  DECISION_SHIFT=1");
-   PrintFormat("  RETRACE_SCAN_START=%s", TimeToString(scan_start));
-   PrintFormat("  RETRACE_SCAN_END=%s", TimeToString(scan_end));
-   PrintFormat("  ADVERSE_ATR=%.2f", adverse_atr);
-   PrintFormat("  MAX_ADVERSE_ATR=%.2f", TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR);
-   PrintFormat("  RESULT=%s", retrace_pass ? "PASS" : "REJECT (" + retrace_reason + ")");
+   PrintFormat("  MSS_CANDLE_INCLUDED=false");
+   if(mss_shift > 1)
+   {
+      PrintFormat("  POST_MSS_SCAN_SHIFTS=1..%d", mss_shift - 1);
+      PrintFormat("  DECISION_SHIFT=1");
+      PrintFormat("  RETRACE_SCAN_START=%s", TimeToString(scan_start));
+      PrintFormat("  RETRACE_SCAN_END=%s", TimeToString(scan_end));
+      PrintFormat("  ADVERSE_ATR=%.2f", adverse_atr);
+      PrintFormat("  MAX_ADVERSE_ATR=%.2f", TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR);
+      PrintFormat("  RESULT=%s", retrace_pass ? "PASS" : "REJECT (" + retrace_reason + ")");
+   }
+   else
+   {
+      PrintFormat("  POST_MSS_SCAN_SHIFTS=NONE");
+      PrintFormat("  DECISION_SHIFT=1");
+      PrintFormat("  RESULT=REJECT (%s)", retrace_reason);
+   }
    Print("");
    PrintFormat("FINAL_RESULT=%s", pass ? "PASS" : "REJECT");
    if(!pass) PrintFormat("REJECT_REASON=%s", first_reject);
@@ -2961,9 +2990,9 @@ int CheckTrendFollowingSignal(int idx)
          {
             LogTFDecision(idx, dir, "REJECT", p3RejectReason, score);
             
-            if(p3RejectReason == "TF_P3_SPREAD_REJECT" || p3RejectReason == "TF_P3_VOLATILITY_REJECT")
+            if(p3RejectReason == "TF_P3_SPREAD_REJECT" || p3RejectReason == "TF_P3_VOLATILITY_REJECT" || p3RejectReason == "TF_P3_NO_POST_MSS_CANDLES")
             {
-               // Environmental condition: do NOT reset H1/M15/M5 evidence. EA waits for next candle/tick.
+               // Environmental condition / waiting for post-MSS candle: do NOT reset H1/M15/M5 evidence. EA waits for next candle/tick.
                G_TF[idx].status = "WAIT: " + p3RejectReason;
                return 0;
             }
