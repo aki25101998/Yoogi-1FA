@@ -1286,16 +1286,17 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             }
             else
             {
-               // Check if event window expired
+               // Weak break -> MSS NOT CONFIRMED, continue waiting if within event window
                long period_sec = PeriodSeconds(m5);
                long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
-               if(bars_since_sweep >= TF_MAX_EVENT_BARS)
+               if(bars_since_sweep > TF_MAX_EVENT_BARS)
                {
                   LogTFReset(idx, "M5", "TF_P2_MSS_REJECT");
                   ResetTFM5Evidence(idx);
                   SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "TF_P2_MSS_REJECT");
                   return;
                }
+               G_TF[idx].status = "WAIT MSS (weak break)";
                return; // Wait for next candle if still within window
             }
          }
@@ -1798,10 +1799,11 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    string first_reject = "";
    string sym = G_Pairs[idx].symbol;
    
-   // 1. H1 Quality >= 15
+   // 1. H1 Quality >= 15 & Direction
    if(G_TF[idx].h1_trend_direction != direction || G_TF[idx].h1_trend_quality < TF_H1_QUALITY_BASE)
    {
       if(first_reject == "") first_reject = "TF_P2_H1_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] H1 (direction=%d, quality=%.0f)", G_TF[idx].h1_trend_direction, G_TF[idx].h1_trend_quality);
       pass = false;
    }
    
@@ -1809,34 +1811,35 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    if(!G_TF[idx].m15_pullback_valid || G_TF[idx].m15_pullback_quality < 20.0)
    {
       if(first_reject == "") first_reject = "TF_P2_M15_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] M15 (valid=%s, quality=%.0f)", G_TF[idx].m15_pullback_valid ? "true" : "false", G_TF[idx].m15_pullback_quality);
       pass = false;
    }
    
    // 3. M15 Protected Structure Intact (closed M5 candle must not invalidate protected level)
    double close1 = iClose(sym, PERIOD_M5, 1);
+   bool prot_ok = true;
    if(direction == 1)
    {
       double prot = (G_TF[idx].m15_protected_low > 0.0) ? G_TF[idx].m15_protected_low : G_TF[idx].h1_protected_structure;
-      if(prot > 0.0 && close1 < prot)
-      {
-         if(first_reject == "") first_reject = "TF_P2_M15_REJECT";
-         pass = false;
-      }
+      if(prot > 0.0 && close1 < prot) prot_ok = false;
    }
    else if(direction == -1)
    {
       double prot = (G_TF[idx].m15_protected_high > 0.0) ? G_TF[idx].m15_protected_high : G_TF[idx].h1_protected_structure;
-      if(prot > 0.0 && close1 > prot)
-      {
-         if(first_reject == "") first_reject = "TF_P2_M15_REJECT";
-         pass = false;
-      }
+      if(prot > 0.0 && close1 > prot) prot_ok = false;
+   }
+   if(!prot_ok)
+   {
+      if(first_reject == "") first_reject = "TF_P2_M15_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] Protected Structure (close=%.5f broken)", close1);
+      pass = false;
    }
    
    // 4. Sweep Valid
    if(!G_TF[idx].m5_sweep)
    {
-      if(first_reject == "") first_reject = "M5_SWEEP_NOT_FOUND";
+      if(first_reject == "") first_reject = "TF_P2_SWEEP_REJECT";
+      Print("[TF_PHASE2_REJECT] Sweep");
       pass = false;
    }
    
@@ -1844,6 +1847,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    if(!G_TF[idx].m5_displacement || G_TF[idx].m5_displacement_range_atr < TF_MIN_DISPLACEMENT_ATR)
    {
       if(first_reject == "") first_reject = "TF_P2_DISPLACEMENT_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] Displacement (range_atr=%.2f < min=%.2f)", G_TF[idx].m5_displacement_range_atr, TF_MIN_DISPLACEMENT_ATR);
       pass = false;
    }
    
@@ -1851,6 +1855,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    if(!G_TF[idx].m5_mss || G_TF[idx].m5_mss_break_level <= 0.0 || G_TF[idx].m5_mss_break_distance_atr < TF_MIN_MSS_BREAK_ATR)
    {
       if(first_reject == "") first_reject = "TF_P2_MSS_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] MSS (level=%.5f, break_atr=%.2f < min=%.2f)", G_TF[idx].m5_mss_break_level, G_TF[idx].m5_mss_break_distance_atr, TF_MIN_MSS_BREAK_ATR);
       pass = false;
    }
    
@@ -1859,6 +1864,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    if(!event_coherent)
    {
       if(first_reject == "") first_reject = "EVENT_NOT_COHERENT";
+      Print("[TF_PHASE2_REJECT] Event Coherence");
       pass = false;
    }
    
@@ -1866,6 +1872,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    if(G_TF[idx].score_momentum < 10.0)
    {
       if(first_reject == "") first_reject = "TF_P2_MOMENTUM_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] Momentum (score=%.0f < 10)", G_TF[idx].score_momentum);
       pass = false;
    }
    
@@ -1875,6 +1882,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    if(!dist_valid)
    {
       if(first_reject == "") first_reject = "TF_P2_ENTRY_LOCATION_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] Entry Distance (dist_atr=%.2f > max=%.2f)", d_atr, max_d);
       pass = false;
    }
    
@@ -1884,20 +1892,38 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    if(!ext_valid)
    {
       if(first_reject == "") first_reject = "TF_P2_ENTRY_LOCATION_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] Entry Extension (mss_ext_atr=%.2f > max=%.2f)", ext_mss, max_ext);
       pass = false;
    }
    
    // 11. DXY Confirmation Valid
-   string dxy_reason = "";
-   if(G_Pairs[idx].isUSDPair && G_TF[idx].total_score >= InpTF_RequiredScore)
+   // H1 STRONG -> DXY NOT REQUIRED (do not reject)
+   // H1 BASE   -> DXY REQUIRED (hard gate)
+   bool h1_strong = (G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_STRONG);
+   bool h1_base   = (G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_BASE && G_TF[idx].h1_trend_quality < TF_H1_QUALITY_STRONG);
+   
+   if(h1_strong)
    {
-      PrintFormat("\n[TF_DXY_GATE]\nPAIR=%s\nCALLING=DXYTrendFollowingEngine", G_Pairs[idx].symbol);
+      PrintFormat("\n[TF_DXY_GATE] H1 STRONG -> DXY not required (symbol=%s)", sym);
+      if(G_Pairs[idx].isUSDPair)
+      {
+         string dxy_info_reason = "";
+         bool dxy_info_pass = CheckDXYTrendFollowingConfirmation(idx, direction, dxy_info_reason);
+         PrintFormat("[TF_DXY_INFO] H1 STRONG -> DXY result ignored (pass=%s, reason=%s)",
+                     dxy_info_pass ? "true" : "false", dxy_info_reason);
+      }
    }
-   bool dxy_pass = CheckDXYTrendFollowingConfirmation(idx, direction, dxy_reason);
-   if(!dxy_pass)
+   else if(h1_base)
    {
-      if(first_reject == "") first_reject = (StringFind(dxy_reason, "DXY_") == 0) ? dxy_reason : "TF_P2_DXY_REJECT";
-      pass = false;
+      PrintFormat("\n[TF_DXY_GATE] H1 BASE -> DXY required (symbol=%s)", sym);
+      string dxy_reason = "";
+      bool dxy_pass = CheckDXYTrendFollowingConfirmation(idx, direction, dxy_reason);
+      if(!dxy_pass)
+      {
+         if(first_reject == "") first_reject = (StringFind(dxy_reason, "DXY_") == 0) ? dxy_reason : "TF_P2_DXY_REJECT";
+         PrintFormat("[TF_PHASE2_REJECT] DXY (H1 BASE -> DXY REQUIRED, reason=%s)", dxy_reason);
+         pass = false;
+      }
    }
    
    // 12. Total Score >= InpTF_RequiredScore
@@ -1905,6 +1931,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    if(score < InpTF_RequiredScore)
    {
       if(first_reject == "") first_reject = "TF_P2_SCORE_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] Final Score (score=%.0f < req=%.0f)", score, InpTF_RequiredScore);
       pass = false;
    }
    
@@ -1994,6 +2021,10 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    PrintFormat("  MAX_DISTANCE_ATR=%.2f", max_d);
    PrintFormat("  VALID=%s", dist_valid ? "true" : "false");
    PrintFormat("  SCORE=%.0f", G_TF[idx].score_entry_distance);
+   Print("");
+   Print("DXY:");
+   PrintFormat("  GATE=%s", h1_strong ? "NOT REQUIRED (H1 STRONG)" : "REQUIRED (H1 BASE)");
+   PrintFormat("  SCORE=%.0f", G_TF[idx].score_dxy);
    Print("");
 
    PrintFormat("TOTAL_SCORE=%.0f", score);
@@ -2332,7 +2363,7 @@ int CheckTrendFollowingSignal(int idx)
          PrintFormat("SYMBOL=%s", sym);
          PrintFormat("DIRECTION=%s", (dir == 1 ? "BUY" : "SELL"));
          PrintFormat("SCORE=%.0f", score);
-         PrintFormat("DXY=PASS");
+         PrintFormat("DXY=%s", (G_TF[idx].h1_trend_quality >= TF_H1_QUALITY_STRONG ? "NOT_REQUIRED (H1 STRONG)" : "PASS (H1 BASE)"));
          
          int result = dir;
          ResetTFSetup(idx, "Entry Triggered - Reset");
@@ -2367,6 +2398,21 @@ int CheckTrendFollowingSignal(int idx)
             ResetTFM5Evidence(idx);
             SetTFState(idx, TF_STATE_M15_PULLBACK, "MSS_REJECT");
             G_TF[idx].status = "M5 RE-ACCUMULATING (mss)";
+            return 0;
+         }
+         else if(rejectReason == "TF_P2_M15_REJECT")
+         {
+            LogTFDecision(idx, dir, "REJECT", rejectReason, score);
+            ResetTFM15Evidence(idx);
+            ResetTFM5Evidence(idx);
+            SetTFState(idx, TF_STATE_H1_TREND, "M15_QUALITY_REJECT");
+            G_TF[idx].status = "H1 (M15 reject)";
+            return 0;
+         }
+         else if(rejectReason == "TF_P2_H1_REJECT")
+         {
+            LogTFDecision(idx, dir, "REJECT", rejectReason, score);
+            ResetTFSetup(idx, "H1_QUALITY_REJECT");
             return 0;
          }
          else if(rejectReason == "EVENT_NOT_COHERENT")
