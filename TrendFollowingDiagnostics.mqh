@@ -151,6 +151,7 @@ struct TFFunnelCounters
    
    // 9. Score Distribution Statistics
    int score_evaluated;
+   int score_reject;
    int score_ge_100;
    int score_95_99;
    int score_90_94;
@@ -245,7 +246,7 @@ struct TFFunnelCounters
       mom_combo_cci_rf = 0; mom_combo_cci_pc = 0; mom_combo_rf_pc = 0; mom_combo_all = 0;
       mom_fail_cci_stale = 0; mom_fail_rf_stale = 0; mom_fail_pc_missing = 0; mom_fail_opposite = 0;
       
-      score_evaluated = 0; score_ge_100 = 0; score_95_99 = 0; score_90_94 = 0;
+      score_evaluated = 0; score_reject = 0; score_ge_100 = 0; score_95_99 = 0; score_90_94 = 0;
       score_80_89 = 0; score_lt_80 = 0;
       ArrayInitialize(score_hist, 0);
       
@@ -349,6 +350,7 @@ struct TFFunnelCounters
       mom_fail_opposite += other.mom_fail_opposite;
       
       score_evaluated += other.score_evaluated;
+      score_reject += other.score_reject;
       score_ge_100 += other.score_ge_100;
       score_95_99 += other.score_95_99;
       score_90_94 += other.score_90_94;
@@ -889,6 +891,12 @@ void TFDiag_RecordScore(int idx, int dir, double score, double req_score, dateti
    int d = TFDiag_DirToIdx(dir);
    TF_INC(idx, d, score_evaluated);
    
+   double req = (req_score > 0.0) ? req_score : InpTF_RequiredScore;
+   if(score < req)
+   {
+      TF_INC(idx, d, score_reject);
+   }
+   
    int int_score = (int)MathRound(score);
    if(int_score < 0) int_score = 0;
    if(int_score > 100) int_score = 100;
@@ -1059,7 +1067,7 @@ void PrintFunnelBlock(string title, const TFFunnelCounters &c)
    PrintFormat("MSS                   : %d", c.mss_reject);
    PrintFormat("Coherence             : %d", c.coherence_reject);
    PrintFormat("Momentum              : %d", c.mom_fail + c.mom_timeout);
-   PrintFormat("Score                 : %d", (c.score_evaluated - c.funnel_score_pass));
+   PrintFormat("Score                 : %d", c.score_reject);
    PrintFormat("Phase2                : %d", (c.p2_evaluated - c.p2_pass));
    PrintFormat("Phase3 Volatility     : %d", c.p3_rej_volatility);
    PrintFormat("Phase3 Candle         : %d", c.p3_rej_entry_candle);
