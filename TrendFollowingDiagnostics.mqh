@@ -125,6 +125,8 @@ struct TFFunnelCounters
    int mss_reject;
    int mss_weak;
    int mss_timeout;
+   int mss_confirmed_bars_dist[6]; // [0]: 1-3 bars, [1]: 4-6 bars, [2]: 7-9 bars, [3]: 10-12 bars, [4]: 13-15 bars, [5]: >15 bars
+   TFMetricDist mss_bars_disp_to_mss; // Bars from displacement to MSS confirmation
    
    // 7. Event Coherence Statistics
    int coherence_evaluated;
@@ -238,6 +240,8 @@ struct TFFunnelCounters
       
       disp_evaluated = 0; disp_found = 0; disp_reject = 0; disp_weak = 0; disp_timeout = 0;
       mss_evaluated = 0; mss_found = 0; mss_reject = 0; mss_weak = 0; mss_timeout = 0;
+      ArrayInitialize(mss_confirmed_bars_dist, 0);
+      mss_bars_disp_to_mss.Init();
       
       coherence_evaluated = 0; coherence_pass = 0; coherence_reject = 0; coherence_timeout = 0;
       
@@ -327,6 +331,8 @@ struct TFFunnelCounters
       mss_reject += other.mss_reject;
       mss_weak += other.mss_weak;
       mss_timeout += other.mss_timeout;
+      for(int i = 0; i < 6; i++)
+         mss_confirmed_bars_dist[i] += other.mss_confirmed_bars_dist[i];
       
       coherence_evaluated += other.coherence_evaluated;
       coherence_pass += other.coherence_pass;
@@ -446,6 +452,13 @@ struct TFFunnelCounters
          dist_adverse_atr.sum += other.dist_adverse_atr.sum;
          if(other.dist_adverse_atr.min_val < dist_adverse_atr.min_val) dist_adverse_atr.min_val = other.dist_adverse_atr.min_val;
          if(other.dist_adverse_atr.max_val > dist_adverse_atr.max_val) dist_adverse_atr.max_val = other.dist_adverse_atr.max_val;
+      }
+      if(other.mss_bars_disp_to_mss.count > 0)
+      {
+         mss_bars_disp_to_mss.count += other.mss_bars_disp_to_mss.count;
+         mss_bars_disp_to_mss.sum += other.mss_bars_disp_to_mss.sum;
+         if(other.mss_bars_disp_to_mss.min_val < mss_bars_disp_to_mss.min_val) mss_bars_disp_to_mss.min_val = other.mss_bars_disp_to_mss.min_val;
+         if(other.mss_bars_disp_to_mss.max_val > mss_bars_disp_to_mss.max_val) mss_bars_disp_to_mss.max_val = other.mss_bars_disp_to_mss.max_val;
       }
    }
 };
@@ -774,6 +787,33 @@ void TFDiag_RecordMSS(int idx, int dir, bool pass, double break_atr, double min_
    }
 }
 
+void TFDiag_RecordMSSTimeout(int idx, int dir, int bars_since_disp, datetime tm)
+{
+   if(idx < 0 || idx >= TOTAL_PAIRS) return;
+   int d = TFDiag_DirToIdx(dir);
+   TF_INC(idx, d, mss_timeout);
+}
+
+void TFDiag_RecordMSSConfirmedBars(int idx, int dir, int bars_disp_to_mss)
+{
+   if(idx < 0 || idx >= TOTAL_PAIRS) return;
+   int d = TFDiag_DirToIdx(dir);
+   
+   int bin = 0;
+   if(bars_disp_to_mss <= 3) bin = 0;       // 1-3 bars (or 0)
+   else if(bars_disp_to_mss <= 6) bin = 1;  // 4-6 bars
+   else if(bars_disp_to_mss <= 9) bin = 2;  // 7-9 bars
+   else if(bars_disp_to_mss <= 12) bin = 3; // 10-12 bars
+   else if(bars_disp_to_mss <= 15) bin = 4; // 13-15 bars
+   else bin = 5;                            // >15 bars
+   
+   g_tf_diag[idx].stats[d].mss_confirmed_bars_dist[bin]++;
+   g_tf_diag[idx].stats[TF_DIR_TOT].mss_confirmed_bars_dist[bin]++;
+   
+   g_tf_diag[idx].stats[d].mss_bars_disp_to_mss.Add((double)bars_disp_to_mss);
+   g_tf_diag[idx].stats[TF_DIR_TOT].mss_bars_disp_to_mss.Add((double)bars_disp_to_mss);
+}
+
 // ------------------------------------------------------------------
 // 7. Event Coherence Statistics Recording
 // ------------------------------------------------------------------
@@ -1058,6 +1098,13 @@ void PrintFunnelBlock(string title, const TFFunnelCounters &c)
    PrintFormat("Phase2 pass        : %d", c.funnel_p2_pass);
    PrintFormat("Phase3 pass        : %d", c.funnel_p3_pass);
    PrintFormat("FINAL ENTRY        : %d", c.funnel_final_entry);
+   if(c.mss_bars_disp_to_mss.count > 0)
+   {
+      PrintFormat("MSS Timing Dist    : 1-3b=%d | 4-6b=%d | 7-9b=%d | 10-12b=%d | 13-15b=%d | >15b=%d (Avg=%.1f, Max=%.0f)",
+                  c.mss_confirmed_bars_dist[0], c.mss_confirmed_bars_dist[1], c.mss_confirmed_bars_dist[2],
+                  c.mss_confirmed_bars_dist[3], c.mss_confirmed_bars_dist[4], c.mss_confirmed_bars_dist[5],
+                  c.mss_bars_disp_to_mss.Avg(), c.mss_bars_disp_to_mss.Max());
+   }
    Print("");
    Print("REJECTIONS:");
    PrintFormat("H1                    : %d", c.h1_reject);
@@ -1065,6 +1112,7 @@ void PrintFunnelBlock(string title, const TFFunnelCounters &c)
    PrintFormat("Sweep                 : %d", c.sweep_reject);
    PrintFormat("Displacement          : %d", c.disp_reject);
    PrintFormat("MSS                   : %d", c.mss_reject);
+   PrintFormat("MSS Timeout           : %d", c.mss_timeout);
    PrintFormat("Coherence             : %d", c.coherence_reject);
    PrintFormat("Momentum              : %d", c.mom_fail + c.mom_timeout);
    PrintFormat("Score                 : %d", c.score_reject);
@@ -1085,8 +1133,16 @@ void PrintDetailedMetricsBlock(string sym, const TFFunnelCounters &c)
                c.sweep_evaluated, c.sweep_found, c.sweep_raw_total, c.sweep_rej_nosweep, c.sweep_rej_broken, c.sweep_rej_consumed, c.sweep_rej_range);
    PrintFormat("M5 Displacement: Evaluated=%d | Found=%d | RejTotal=%d | Weak(<%.2f ATR)=%d",
                c.disp_evaluated, c.disp_found, c.disp_reject, TF_MIN_DISPLACEMENT_ATR, c.disp_weak);
-   PrintFormat("M5 MSS: Evaluated=%d | Found=%d | RejTotal=%d | Weak(<%.2f ATR)=%d",
-               c.mss_evaluated, c.mss_found, c.mss_reject, TF_MIN_MSS_BREAK_ATR, c.mss_weak);
+   PrintFormat("M5 MSS: Evaluated=%d | Found=%d | RejTotal=%d | Weak(<%.2f ATR)=%d | Timeout(>%d bars)=%d",
+               c.mss_evaluated, c.mss_found, c.mss_reject, TF_MIN_MSS_BREAK_ATR, c.mss_weak, TF_MSS_MAX_WAIT_BARS, c.mss_timeout);
+   if(c.mss_bars_disp_to_mss.count > 0)
+   {
+      PrintFormat("  MSS Bars from Disp: Avg=%.1f | Min=%.0f | Max=%.0f",
+                  c.mss_bars_disp_to_mss.Avg(), c.mss_bars_disp_to_mss.Min(), c.mss_bars_disp_to_mss.Max());
+      PrintFormat("  MSS Timing Distribution: 1-3 bars=%d | 4-6 bars=%d | 7-9 bars=%d | 10-12 bars=%d | 13-15 bars=%d | >15 bars=%d",
+                  c.mss_confirmed_bars_dist[0], c.mss_confirmed_bars_dist[1], c.mss_confirmed_bars_dist[2],
+                  c.mss_confirmed_bars_dist[3], c.mss_confirmed_bars_dist[4], c.mss_confirmed_bars_dist[5]);
+   }
    PrintFormat("Event Coherence: Evaluated=%d | Pass=%d | RejTotal=%d | Timeout(>%d bars)=%d",
                c.coherence_evaluated, c.coherence_pass, c.coherence_reject, TF_MAX_EVENT_BARS, c.coherence_timeout);
    PrintFormat("Momentum: Evaluated=%d | Pass=%d | Fail=%d | Timeout(>%d bars)=%d",
@@ -1210,6 +1266,7 @@ void TFDiag_PrintFunnelSummary()
    
    ADD_RANK_ITEM(StringFormat("M5 Displacement: Weak Range (<%.2f ATR)", TF_MIN_DISPLACEMENT_ATR), all_symbols_total.disp_weak);
    ADD_RANK_ITEM(StringFormat("M5 MSS: Weak Break Distance (<%.2f ATR)", TF_MIN_MSS_BREAK_ATR), all_symbols_total.mss_weak);
+   ADD_RANK_ITEM(StringFormat("M5 MSS: Formation Timeout (>%d bars)", TF_MSS_MAX_WAIT_BARS), all_symbols_total.mss_timeout);
    ADD_RANK_ITEM(StringFormat("M5 Event: Sequence Timeout (>%d bars)", TF_MAX_EVENT_BARS), all_symbols_total.coherence_timeout);
    
    ADD_RANK_ITEM(StringFormat("Momentum: Window Timeout (>%d bars)", TF_MOMENTUM_MAX_BARS), all_symbols_total.mom_timeout);

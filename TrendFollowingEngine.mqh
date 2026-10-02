@@ -942,8 +942,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    datetime current_time = m5_tm[0];
    
    // --- GIAI ĐOẠN A: Event formation freshness ---
-   // TF_MAX_EVENT_BARS only controls Sweep -> Displacement -> MSS during formation.
-   // It MUST NOT apply once state reaches TF_STATE_ENTRY_READY (Giai đoạn B: Momentum confirmation window).
+   // TF_MAX_EVENT_BARS controls Sweep -> Displacement (max 5 bars).
+   // TF_MSS_MAX_WAIT_BARS controls Displacement -> MSS (max 15 bars).
+   // It MUST NOT apply once state reaches TF_STATE_ENTRY_READY (Giai đoạn C: Momentum confirmation window).
    long period_sec = PeriodSeconds(m5);
    if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_DISPLACEMENT)
    {
@@ -962,29 +963,40 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    }
    else if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_MSS)
    {
-      if(G_TF[idx].m5_sweep && G_TF[idx].m5_sweep_time > 0)
+      // Invariant: M15 pullback context must remain valid while waiting for MSS
+      if(!G_TF[idx].m15_pullback_valid || CheckM15PullbackInvalidation(idx))
       {
-         long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
-         if(bars_since_sweep > TF_MAX_EVENT_BARS)
+         LogTFReset(idx, "M15", "M15_INVALIDATION_DURING_MSS_WAIT");
+         ResetTFM15Evidence(idx);
+         ResetTFM5Evidence(idx);
+         SetTFState(idx, TF_STATE_H1_TREND, "M15_INVALIDATION");
+         G_TF[idx].status = "M15 PULLBACK INVALID";
+         TFDiag_RecordM15Invalidation(idx, trend_dir);
+         TFDiag_LogFunnel(idx, trend_dir, "M15_INVALIDATION", "REVERSAL_BROKEN");
+         return;
+      }
+      
+      // Stage B Freshness: Displacement -> MSS must complete within TF_MSS_MAX_WAIT_BARS
+      if(G_TF[idx].m5_displacement && G_TF[idx].m5_displacement_time > 0)
+      {
+         long bars_since_disp = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
+         long bars_since_sweep = (G_TF[idx].m5_sweep_time > 0) ? ((current_time - G_TF[idx].m5_sweep_time) / period_sec) : 0;
+         if(bars_since_disp > TF_MSS_MAX_WAIT_BARS)
          {
-            TFDiag_RecordCoherenceTimeout(idx, trend_dir, (int)bars_since_sweep, current_time);
-            TFDiag_LogFunnel(idx, trend_dir, "EVENT_COHERENCE", "REJECT", StringFormat("TIMEOUT: bars_since_sweep=%d > %d", bars_since_sweep, TF_MAX_EVENT_BARS));
+            TFDiag_RecordMSSTimeout(idx, trend_dir, (int)bars_since_disp, current_time);
+            TFDiag_LogFunnel(idx, trend_dir, "M5_MSS", "TIMEOUT",
+               StringFormat("bars_since_displacement=%d > TF_MSS_MAX_WAIT_BARS=%d (bars_since_sweep=%d, TF_MAX_EVENT_BARS=%d)",
+                            bars_since_disp, TF_MSS_MAX_WAIT_BARS, bars_since_sweep, TF_MAX_EVENT_BARS));
             ResetTFM5Evidence(idx);
             SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT");
             return;
          }
       }
-      if(G_TF[idx].m5_displacement && G_TF[idx].m5_displacement_time > 0)
+      else if(G_TF[idx].m5_displacement_time <= 0)
       {
-         long bars_since_disp = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
-         if(bars_since_disp > TF_MAX_EVENT_BARS)
-         {
-            TFDiag_RecordCoherenceTimeout(idx, trend_dir, (int)bars_since_disp, current_time);
-            TFDiag_LogFunnel(idx, trend_dir, "EVENT_COHERENCE", "REJECT", StringFormat("TIMEOUT: bars_since_disp=%d > %d", bars_since_disp, TF_MAX_EVENT_BARS));
-            ResetTFM5Evidence(idx);
-            SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_TIMEOUT");
-            return;
-         }
+         ResetTFM5Evidence(idx);
+         SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "M5_DISP_MISSING");
+         return;
       }
    }
    
@@ -1342,6 +1354,11 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_MSS_FOUND);
                TFDiag_LogFunnel(idx, trend_dir, "M5_MSS", "PASS", StringFormat("break_dist_atr=%.2f >= %.2f", break_dist_atr, TF_MIN_MSS_BREAK_ATR));
                PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f) on time=%s", sym, trend_dir, breakLvl, TimeToString(current_time));
+               
+               // Record MSS Timing Distribution (bars from displacement to MSS confirmation)
+               long bars_disp_to_mss = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
+               TFDiag_RecordMSSConfirmedBars(idx, trend_dir, (int)bars_disp_to_mss);
+               
                // Start Momentum Window
                if(G_TF[idx].m5_momentum_start_time == 0)
                   G_TF[idx].m5_momentum_start_time = (G_TF[idx].m5_sweep_time > 0) ? G_TF[idx].m5_sweep_time : current_time;
@@ -1355,13 +1372,16 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             else
             {
                TFDiag_LogFunnel(idx, trend_dir, "M5_MSS", "REJECT", StringFormat("WEAK: break_dist_atr=%.2f < %.2f", break_dist_atr, TF_MIN_MSS_BREAK_ATR));
-               // Weak break -> MSS NOT CONFIRMED, continue waiting if within event window
+               // Weak break -> MSS NOT CONFIRMED, continue waiting if within MSS wait window
                long period_sec = PeriodSeconds(m5);
-               long bars_since_sweep = (current_time - G_TF[idx].m5_sweep_time) / period_sec;
-               if(bars_since_sweep > TF_MAX_EVENT_BARS)
+               long bars_since_disp = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
+               long bars_since_sweep = (G_TF[idx].m5_sweep_time > 0) ? ((current_time - G_TF[idx].m5_sweep_time) / period_sec) : 0;
+               if(bars_since_disp > TF_MSS_MAX_WAIT_BARS)
                {
-                  TFDiag_RecordCoherenceTimeout(idx, trend_dir, (int)bars_since_sweep, current_time);
-                  TFDiag_LogFunnel(idx, trend_dir, "EVENT_COHERENCE", "REJECT", StringFormat("TIMEOUT: bars_since_sweep=%d > %d", bars_since_sweep, TF_MAX_EVENT_BARS));
+                  TFDiag_RecordMSSTimeout(idx, trend_dir, (int)bars_since_disp, current_time);
+                  TFDiag_LogFunnel(idx, trend_dir, "M5_MSS", "TIMEOUT",
+                     StringFormat("bars_since_displacement=%d > TF_MSS_MAX_WAIT_BARS=%d (bars_since_sweep=%d, TF_MAX_EVENT_BARS=%d)",
+                                  bars_since_disp, TF_MSS_MAX_WAIT_BARS, bars_since_sweep, TF_MAX_EVENT_BARS));
                   LogTFReset(idx, "M5", "TF_P2_MSS_REJECT");
                   ResetTFM5Evidence(idx);
                   SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "TF_P2_MSS_REJECT");
@@ -1656,7 +1676,8 @@ void EvaluateTFMomentumConfirmation(int idx, int trend_dir, bool &cci_confirmed,
 // ==================================================================
 // EVENT COHERENCE CHECK
 // ==================================================================
-// Sweep → Displacement → MSS must be within TF_MAX_EVENT_BARS of each other
+// Stage A: Sweep → Displacement must be within TF_MAX_EVENT_BARS (5 bars)
+// Stage B: Displacement → MSS must be within TF_MSS_MAX_WAIT_BARS (15 bars)
 
 bool CheckTFEventCoherence(int idx)
 {
@@ -1682,17 +1703,27 @@ bool CheckTFEventCoherence(int idx)
       return false;
    }
    
-   // Strict Freshness: entire sequence must complete within TF_MAX_EVENT_BARS
    long period_sec = PeriodSeconds(PERIOD_M5);
-   long total_sequence_bars = (G_TF[idx].m5_mss_time - G_TF[idx].m5_sweep_time) / period_sec;
-   if(total_sequence_bars > TF_MAX_EVENT_BARS)
+   
+   // Stage A Freshness: Sweep -> Displacement must complete within TF_MAX_EVENT_BARS
+   long sweep_to_disp_bars = (G_TF[idx].m5_displacement_time - G_TF[idx].m5_sweep_time) / period_sec;
+   if(sweep_to_disp_bars > TF_MAX_EVENT_BARS)
    {
-      TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, (int)total_sequence_bars, TF_MAX_EVENT_BARS, m5_time);
+      TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, (int)sweep_to_disp_bars, TF_MAX_EVENT_BARS, m5_time);
       return false;
    }
    
+   // Stage B Freshness: Displacement -> MSS must complete within TF_MSS_MAX_WAIT_BARS
+   long disp_to_mss_bars = (G_TF[idx].m5_mss_time - G_TF[idx].m5_displacement_time) / period_sec;
+   if(disp_to_mss_bars > TF_MSS_MAX_WAIT_BARS)
+   {
+      TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, (int)disp_to_mss_bars, TF_MSS_MAX_WAIT_BARS, m5_time);
+      return false;
+   }
+   
+   long total_sequence_bars = (G_TF[idx].m5_mss_time - G_TF[idx].m5_sweep_time) / period_sec;
    G_TF[idx].score_event_coherence = 10.0;
-   TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, true, (int)total_sequence_bars, TF_MAX_EVENT_BARS, m5_time);
+   TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, true, (int)total_sequence_bars, TF_MAX_EVENT_BARS + TF_MSS_MAX_WAIT_BARS, m5_time);
    return true;
 }
 
@@ -1962,7 +1993,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
       pass = false;
    }
    
-   // 7. Event Coherence <= 5 bars
+   // 7. Event Coherence (Sweep->Disp <= TF_MAX_EVENT_BARS, Disp->MSS <= TF_MSS_MAX_WAIT_BARS)
    bool event_coherent = CheckTFEventCoherence(idx);
    if(!event_coherent)
    {
@@ -2562,7 +2593,7 @@ bool ValidateTFPhase3PostMSSRetracement(int idx, int direction, double &out_adve
    }
    
    // Safety check on MSS age (cannot exceed reasonable boundary)
-   if(mss_shift > TF_MAX_EVENT_BARS + TF_MOMENTUM_MAX_BARS + 5)
+   if(mss_shift > TF_MAX_EVENT_BARS + TF_MSS_MAX_WAIT_BARS + TF_MOMENTUM_MAX_BARS + 5)
    {
       reject_reason = "MSS_AGE_EXCEEDED";
       return false; // Fail-closed

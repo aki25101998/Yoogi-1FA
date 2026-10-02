@@ -271,7 +271,8 @@ PairContext G_Pairs[TOTAL_PAIRS];
 #define TF_STATE_ENTRY_READY          6
 
 // --- Trend-Following Internal Constants ---
-const int    TF_MAX_EVENT_BARS         = 5;     // Sweep→Displacement→MSS must be within 5 M5 bars
+const int    TF_MAX_EVENT_BARS         = 5;     // Sweep→Displacement must be within 5 M5 bars
+const int    TF_MSS_MAX_WAIT_BARS      = 15;    // Displacement→MSS must be within 15 M5 bars
 const double TF_MAX_ENTRY_DISTANCE_ATR = 2.0;   // Don't chase price beyond 2x M5 ATR
 const int    TF_MAX_SETUP_BARS         = 100;   // Setup timeout in M5 bars
 const int    TF_MOMENTUM_MAX_BARS      = 10;    // Momentum timeout in M5 bars (max window, entry on first PASS)

@@ -90,6 +90,7 @@ int OnInit()
    PrintFormat("CT_REQUIRED_SCORE=%.0f", InpCT_RequiredScore);
    PrintFormat("TF_REQUIRED_SCORE=%.0f", InpTF_RequiredScore);
    PrintFormat("TF_MAX_EVENT_BARS=%d", TF_MAX_EVENT_BARS);
+   PrintFormat("TF_MSS_MAX_WAIT_BARS=%d", TF_MSS_MAX_WAIT_BARS);
    
     Print("[DCA] Mode: ENABLED (ALWAYS ON)");
     PrintFormat("[DCA] Step: %d pips", InpKhoangMoPip);
