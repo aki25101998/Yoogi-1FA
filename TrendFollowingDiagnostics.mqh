@@ -1046,7 +1046,7 @@ void PrintFunnelBlock(string title, const TFFunnelCounters &c)
    PrintFormat("Displacement found : %d", c.funnel_disp_found);
    PrintFormat("MSS found          : %d", c.funnel_mss_found);
    PrintFormat("Momentum pass      : %d", c.funnel_mom_pass);
-   PrintFormat("Score >=95         : %d", c.funnel_score_pass);
+   PrintFormat("%-19s: %d", StringFormat("Score >=%.0f", InpTF_RequiredScore), c.funnel_score_pass);
    PrintFormat("Phase2 pass        : %d", c.funnel_p2_pass);
    PrintFormat("Phase3 pass        : %d", c.funnel_p3_pass);
    PrintFormat("FINAL ENTRY        : %d", c.funnel_final_entry);
@@ -1059,7 +1059,7 @@ void PrintFunnelBlock(string title, const TFFunnelCounters &c)
    PrintFormat("MSS                   : %d", c.mss_reject);
    PrintFormat("Coherence             : %d", c.coherence_reject);
    PrintFormat("Momentum              : %d", c.mom_fail + c.mom_timeout);
-   PrintFormat("Score                 : %d", (c.score_evaluated - c.score_ge_100 - c.score_95_99));
+   PrintFormat("Score                 : %d", (c.score_evaluated - c.funnel_score_pass));
    PrintFormat("Phase2                : %d", (c.p2_evaluated - c.p2_pass));
    PrintFormat("Phase3 Volatility     : %d", c.p3_rej_volatility);
    PrintFormat("Phase3 Candle         : %d", c.p3_rej_entry_candle);
@@ -1075,14 +1075,14 @@ void PrintDetailedMetricsBlock(string sym, const TFFunnelCounters &c)
                c.m15_reject, c.m15_rej_protected, c.m15_rej_depth, c.m15_rej_ema, c.m15_rej_stale, c.m15_rej_impulse, c.m15_rej_h1_trend, c.m15_invalidation);
    PrintFormat("M5 Sweep: Evaluated=%d | Found=%d | RejRaw=%d | RejNosweep=%d | RejBroken=%d | RejConsumed=%d | RejRange=%d",
                c.sweep_evaluated, c.sweep_found, c.sweep_raw_total, c.sweep_rej_nosweep, c.sweep_rej_broken, c.sweep_rej_consumed, c.sweep_rej_range);
-   PrintFormat("M5 Displacement: Evaluated=%d | Found=%d | RejTotal=%d | Weak(<0.60 ATR)=%d",
-               c.disp_evaluated, c.disp_found, c.disp_reject, c.disp_weak);
-   PrintFormat("M5 MSS: Evaluated=%d | Found=%d | RejTotal=%d | Weak(<0.20 ATR)=%d",
-               c.mss_evaluated, c.mss_found, c.mss_reject, c.mss_weak);
-   PrintFormat("Event Coherence: Evaluated=%d | Pass=%d | RejTotal=%d | Timeout(>5 bars)=%d",
-               c.coherence_evaluated, c.coherence_pass, c.coherence_reject, c.coherence_timeout);
-   PrintFormat("Momentum: Evaluated=%d | Pass=%d | Fail=%d | Timeout(>10 bars)=%d",
-               c.mom_evaluated, c.mom_pass, c.mom_fail, c.mom_timeout);
+   PrintFormat("M5 Displacement: Evaluated=%d | Found=%d | RejTotal=%d | Weak(<%.2f ATR)=%d",
+               c.disp_evaluated, c.disp_found, c.disp_reject, TF_MIN_DISPLACEMENT_ATR, c.disp_weak);
+   PrintFormat("M5 MSS: Evaluated=%d | Found=%d | RejTotal=%d | Weak(<%.2f ATR)=%d",
+               c.mss_evaluated, c.mss_found, c.mss_reject, TF_MIN_MSS_BREAK_ATR, c.mss_weak);
+   PrintFormat("Event Coherence: Evaluated=%d | Pass=%d | RejTotal=%d | Timeout(>%d bars)=%d",
+               c.coherence_evaluated, c.coherence_pass, c.coherence_reject, TF_MAX_EVENT_BARS, c.coherence_timeout);
+   PrintFormat("Momentum: Evaluated=%d | Pass=%d | Fail=%d | Timeout(>%d bars)=%d",
+               c.mom_evaluated, c.mom_pass, c.mom_fail, TF_MOMENTUM_MAX_BARS, c.mom_timeout);
    PrintFormat("  Components: CCI=%d | RF=%d | PC=%d", c.mom_cci_pass, c.mom_rf_pass, c.mom_pc_pass);
    PrintFormat("  Combos: CCI+RF=%d | CCI+PC=%d | RF+PC=%d | ALL_THREE=%d",
                c.mom_combo_cci_rf, c.mom_combo_cci_pc, c.mom_combo_rf_pc, c.mom_combo_all);
@@ -1116,13 +1116,13 @@ void PrintDetailedMetricsBlock(string sym, const TFFunnelCounters &c)
    if(c.dist_atr_ratio.count > 0)
    {
       PrintFormat("Phase 3 Metric Distributions (N=%d):", c.dist_atr_ratio.count);
-      PrintFormat("  ATR Ratio      : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: 0.80..1.50)", c.dist_atr_ratio.Min(), c.dist_atr_ratio.Max(), c.dist_atr_ratio.Avg());
-      PrintFormat("  Body Ratio     : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: >=0.35)", c.dist_body_ratio.Min(), c.dist_body_ratio.Max(), c.dist_body_ratio.Avg());
-      PrintFormat("  Close Location : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: >=0.55)", c.dist_close_loc.Min(), c.dist_close_loc.Max(), c.dist_close_loc.Avg());
-      PrintFormat("  Spread Points  : Min=%.0f, Max=%.0f, Avg=%.1f (Allowed: <=30)", c.dist_spread_pts.Min(), c.dist_spread_pts.Max(), c.dist_spread_pts.Avg());
-      PrintFormat("  Spread ATR     : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: <=0.40)", c.dist_spread_atr.Min(), c.dist_spread_atr.Max(), c.dist_spread_atr.Avg());
-      PrintFormat("  Disp Extension : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: <=1.80)", c.dist_rel_ext.Min(), c.dist_rel_ext.Max(), c.dist_rel_ext.Avg());
-      PrintFormat("  Adverse Retrace: Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: <=0.60)", c.dist_adverse_atr.Min(), c.dist_adverse_atr.Max(), c.dist_adverse_atr.Avg());
+      PrintFormat("  ATR Ratio      : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: %.2f..%.2f)", c.dist_atr_ratio.Min(), c.dist_atr_ratio.Max(), c.dist_atr_ratio.Avg(), TF_PHASE3_MIN_ATR_RATIO, TF_PHASE3_MAX_ATR_RATIO);
+      PrintFormat("  Body Ratio     : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: >=%.2f)", c.dist_body_ratio.Min(), c.dist_body_ratio.Max(), c.dist_body_ratio.Avg(), TF_PHASE3_MIN_ENTRY_BODY_RATIO);
+      PrintFormat("  Close Location : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: >=%.2f)", c.dist_close_loc.Min(), c.dist_close_loc.Max(), c.dist_close_loc.Avg(), TF_PHASE3_MIN_CLOSE_LOCATION_RATIO);
+      PrintFormat("  Spread Points  : Min=%.0f, Max=%.0f, Avg=%.1f (Allowed: <=%d)", c.dist_spread_pts.Min(), c.dist_spread_pts.Max(), c.dist_spread_pts.Avg(), TF_PHASE3_MAX_SPREAD_POINTS);
+      PrintFormat("  Spread ATR     : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: <=%.2f)", c.dist_spread_atr.Min(), c.dist_spread_atr.Max(), c.dist_spread_atr.Avg(), TF_PHASE3_MAX_SPREAD_ATR);
+      PrintFormat("  Disp Extension : Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: <=%.2f)", c.dist_rel_ext.Min(), c.dist_rel_ext.Max(), c.dist_rel_ext.Avg(), TF_PHASE3_MAX_DISPLACEMENT_EXTENSION);
+      PrintFormat("  Adverse Retrace: Min=%.2f, Max=%.2f, Avg=%.2f (Allowed: <=%.2f)", c.dist_adverse_atr.Min(), c.dist_adverse_atr.Max(), c.dist_adverse_atr.Avg(), TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR);
    }
 }
 
@@ -1200,11 +1200,11 @@ void TFDiag_PrintFunnelSummary()
    ADD_RANK_ITEM("M5 Sweep: Target Consumed", all_symbols_total.sweep_rej_consumed);
    ADD_RANK_ITEM("M5 Sweep: Target Outside Range", all_symbols_total.sweep_rej_range);
    
-   ADD_RANK_ITEM("M5 Displacement: Weak Range (<0.60 ATR)", all_symbols_total.disp_weak);
-   ADD_RANK_ITEM("M5 MSS: Weak Break Distance (<0.20 ATR)", all_symbols_total.mss_weak);
-   ADD_RANK_ITEM("M5 Event: Sequence Timeout (>5 bars)", all_symbols_total.coherence_timeout);
+   ADD_RANK_ITEM(StringFormat("M5 Displacement: Weak Range (<%.2f ATR)", TF_MIN_DISPLACEMENT_ATR), all_symbols_total.disp_weak);
+   ADD_RANK_ITEM(StringFormat("M5 MSS: Weak Break Distance (<%.2f ATR)", TF_MIN_MSS_BREAK_ATR), all_symbols_total.mss_weak);
+   ADD_RANK_ITEM(StringFormat("M5 Event: Sequence Timeout (>%d bars)", TF_MAX_EVENT_BARS), all_symbols_total.coherence_timeout);
    
-   ADD_RANK_ITEM("Momentum: Window Timeout (>10 bars)", all_symbols_total.mom_timeout);
+   ADD_RANK_ITEM(StringFormat("Momentum: Window Timeout (>%d bars)", TF_MOMENTUM_MAX_BARS), all_symbols_total.mom_timeout);
    ADD_RANK_ITEM("Momentum: Price Continuation Missing", all_symbols_total.mom_fail_pc_missing);
    ADD_RANK_ITEM("Momentum: CCI Stale", all_symbols_total.mom_fail_cci_stale);
    ADD_RANK_ITEM("Momentum: Range Filter Stale", all_symbols_total.mom_fail_rf_stale);
