@@ -800,7 +800,7 @@ void TFDiag_RecordMSSConfirmedBars(int idx, int dir, int bars_disp_to_mss)
    int d = TFDiag_DirToIdx(dir);
    
    int bin = 0;
-   if(bars_disp_to_mss <= 3) bin = 0;       // 1-3 bars (or 0)
+   if(bars_disp_to_mss <= 3) bin = 0;       // 1-3 bars
    else if(bars_disp_to_mss <= 6) bin = 1;  // 4-6 bars
    else if(bars_disp_to_mss <= 9) bin = 2;  // 7-9 bars
    else if(bars_disp_to_mss <= 12) bin = 3; // 10-12 bars

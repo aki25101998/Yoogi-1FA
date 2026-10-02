@@ -1319,8 +1319,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
    
    if(G_TF[idx].setup_state == TF_STATE_M5_WAIT_MSS)
    {
-      // Allow MSS evaluation on the same candle as displacement (>= instead of >)
-      if(current_time >= G_TF[idx].m5_displacement_time)
+      // MSS must be evaluated only after the displacement candle.
+      // Do not allow same-candle Displacement + MSS confirmation.
+      if(current_time > G_TF[idx].m5_displacement_time)
       {
          double breakLvl = 0.0;
          string mssReason = "";
