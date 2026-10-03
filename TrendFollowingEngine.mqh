@@ -1288,12 +1288,15 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                G_TF[idx].m5_displacement_time = current_time;
                G_TF[idx].m5_displacement_price = close[0];
                G_TF[idx].m5_displacement_range = candle_range;
-               G_TF[idx].score_displacement = 10.0;
+               if(range_atr >= TF_DISPLACEMENT_BONUS_ATR)
+                  G_TF[idx].score_displacement = 15.0;
+               else
+                  G_TF[idx].score_displacement = 10.0;
                SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED");
                G_TF[idx].status = "WAIT MSS";
                TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_DISPLACEMENT_FOUND);
-               TFDiag_LogFunnel(idx, trend_dir, "M5_DISPLACEMENT", "PASS", StringFormat("range_atr=%.2f >= %.2f", range_atr, TF_MIN_DISPLACEMENT_ATR));
-               PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d) on time=%s", sym, trend_dir, TimeToString(current_time));
+               TFDiag_LogFunnel(idx, trend_dir, "M5_DISPLACEMENT", "PASS", StringFormat("range_atr=%.2f >= %.2f (score=%.0f)", range_atr, TF_MIN_DISPLACEMENT_ATR, G_TF[idx].score_displacement));
+               PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed (dir=%d, score=%.0f) on time=%s", sym, trend_dir, G_TF[idx].score_displacement, TimeToString(current_time));
             }
             else
             {
@@ -1349,12 +1352,15 @@ void EvaluateM5Trigger(int idx, int trend_dir)
                G_TF[idx].m5_mss = true;
                G_TF[idx].m5_mss_time = current_time;
                G_TF[idx].m5_mss_break_level = breakLvl;
-               G_TF[idx].score_mss = 10.0;
+               if(break_dist_atr >= TF_MSS_BONUS_ATR)
+                  G_TF[idx].score_mss = 15.0;
+               else
+                  G_TF[idx].score_mss = 10.0;
                SetTFState(idx, TF_STATE_ENTRY_READY, "M5_MSS_CONFIRMED"); // Forward to entry validation
                G_TF[idx].status = "MSS CONFIRMED";
                TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_MSS_FOUND);
-               TFDiag_LogFunnel(idx, trend_dir, "M5_MSS", "PASS", StringFormat("break_dist_atr=%.2f >= %.2f", break_dist_atr, TF_MIN_MSS_BREAK_ATR));
-               PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f) on time=%s", sym, trend_dir, breakLvl, TimeToString(current_time));
+               TFDiag_LogFunnel(idx, trend_dir, "M5_MSS", "PASS", StringFormat("break_dist_atr=%.2f >= %.2f (score=%.0f)", break_dist_atr, TF_MIN_MSS_BREAK_ATR, G_TF[idx].score_mss));
+               PrintFormat("[TREND-FOLLOWING][%s] M5 MSS Confirmed (dir=%d, level=%.5f, score=%.0f) on time=%s", sym, trend_dir, breakLvl, G_TF[idx].score_mss, TimeToString(current_time));
                
                // Record MSS Timing Distribution (bars from displacement to MSS confirmation)
                long bars_disp_to_mss = (current_time - G_TF[idx].m5_displacement_time) / period_sec;
@@ -1425,11 +1431,12 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       // bars_elapsed > TF_MOMENTUM_MAX_BARS means this bar is OUTSIDE the window
       if(bars_elapsed > TF_MOMENTUM_MAX_BARS)
       {
-         // If momentum was NOT fully confirmed within the window → TIMEOUT
-         if(G_TF[idx].score_momentum < 10.0)
+         // If momentum was NOT fully confirmed within the window AND score < required → TIMEOUT
+         double cur_score = CalculateTFScore(idx);
+         if(G_TF[idx].score_momentum < 10.0 && cur_score < InpTF_RequiredScore)
          {
             TFDiag_RecordMomentumTimeout(idx, trend_dir, bars_elapsed, closed_m5_time);
-            TFDiag_LogFunnel(idx, trend_dir, "MOMENTUM", "REJECT", StringFormat("TIMEOUT: bars=%d > %d, score=%.0f", bars_elapsed, TF_MOMENTUM_MAX_BARS, G_TF[idx].score_momentum));
+            TFDiag_LogFunnel(idx, trend_dir, "MOMENTUM", "REJECT", StringFormat("TIMEOUT: bars=%d > %d, score=%.0f, total=%.0f < %.0f", bars_elapsed, TF_MOMENTUM_MAX_BARS, G_TF[idx].score_momentum, cur_score, InpTF_RequiredScore));
             Print("\n[TF_MOMENTUM_TIMEOUT]");
             PrintFormat("SYMBOL=%s", sym);
             PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
@@ -1441,13 +1448,14 @@ void EvaluateM5Trigger(int idx, int trend_dir)
             PrintFormat("RF_CONFIRMED=%s", G_TF[idx].m5_momentum_rf ? "true" : "false");
             PrintFormat("PRICE_CONTINUATION=%s", G_TF[idx].m5_momentum_pc ? "true" : "false");
             PrintFormat("MOMENTUM_SCORE=%.0f", G_TF[idx].score_momentum);
+            PrintFormat("TOTAL_SCORE=%.0f", cur_score);
             PrintFormat("ACTION=RESET_M5");
             
             ResetTFM5Evidence(idx);
             SetTFState(idx, TF_STATE_M5_WAIT_SWEEP, "MOMENTUM_TIMEOUT");
             return;
          }
-         // Score was already 10, wait for Final Entry Gate
+         // Score was already sufficient or momentum confirmed, wait for Final Entry Gate
          return;
       }
       
@@ -1544,9 +1552,9 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       PrintFormat("score=%.0f", G_TF[idx].score_momentum);
       PrintFormat("%s", mom_q_status);
       
-      if(G_TF[idx].score_momentum == 10.0)
+      double current_total = CalculateTFScore(idx);
+      if(G_TF[idx].score_momentum == 10.0 || current_total >= InpTF_RequiredScore)
       {
-         double current_total = CalculateTFScore(idx);
          Print("\n[TF_SCORE_DIAGNOSTIC]");
          PrintFormat("SYMBOL=%s", sym);
          PrintFormat("H1=%.0f", G_TF[idx].score_h1_trend);
@@ -2003,11 +2011,12 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
       pass = false;
    }
    
-   // 8. Momentum Score = 10
-   if(G_TF[idx].score_momentum < 10.0)
+   // 8. Momentum Score = 10 (or Total Score >= InpTF_RequiredScore via High-Quality SMC Bonus)
+   double score = CalculateTFScore(idx);
+   if(G_TF[idx].score_momentum < 10.0 && score < InpTF_RequiredScore)
    {
       if(first_reject == "") first_reject = "TF_P2_MOMENTUM_REJECT";
-      PrintFormat("[TF_PHASE2_REJECT] Momentum (score=%.0f < 10)", G_TF[idx].score_momentum);
+      PrintFormat("[TF_PHASE2_REJECT] Momentum (score=%.0f < 10, total_score=%.0f < req=%.0f)", G_TF[idx].score_momentum, score, InpTF_RequiredScore);
       pass = false;
    }
    
@@ -2063,7 +2072,6 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    }
    
    // 12. Total Score >= InpTF_RequiredScore
-   double score = CalculateTFScore(idx);
    if(score < InpTF_RequiredScore)
    {
       if(first_reject == "") first_reject = "TF_P2_SCORE_REJECT";
@@ -2079,7 +2087,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    bool rej_disp  = (!G_TF[idx].m5_displacement || G_TF[idx].m5_displacement_range_atr < TF_MIN_DISPLACEMENT_ATR);
    bool rej_mss   = (!G_TF[idx].m5_mss || G_TF[idx].m5_mss_break_level <= 0.0 || G_TF[idx].m5_mss_break_distance_atr < TF_MIN_MSS_BREAK_ATR);
    bool rej_coh   = (!event_coherent);
-   bool rej_mom   = (G_TF[idx].score_momentum < 10.0);
+   bool rej_mom   = (G_TF[idx].score_momentum < 10.0 && score < InpTF_RequiredScore);
    bool rej_dist  = (!dist_valid);
    bool rej_ext   = (!ext_valid);
    bool rej_dxy   = (h1_base && !dxy_pass);

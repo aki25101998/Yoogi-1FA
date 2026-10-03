@@ -290,7 +290,9 @@ const int    TF_DXY_MAX_AGE_BARS_LTF   = 288;   // DXY LTF signal max age (bars)
 const double TF_H1_QUALITY_STRONG            = 20.0;
 const double TF_H1_QUALITY_BASE              = 15.0;
 const double TF_MIN_DISPLACEMENT_ATR         = 0.60;  // Closed M5 displacement candle range >= ATR * 0.60
+const double TF_DISPLACEMENT_BONUS_ATR       = 1.20;  // Range >= 1.20 ATR gets Quality Bonus (+5 pts)
 const double TF_MIN_MSS_BREAK_ATR            = 0.10;  // Closed M5 MSS break distance >= ATR * 0.10
+const double TF_MSS_BONUS_ATR                = 0.50;  // Break distance >= 0.50 ATR gets Quality Bonus (+5 pts)
 const double TF_MAX_MSS_ENTRY_EXTENSION_ATR  = 1.50;  // Closed M5 entry distance from MSS <= ATR * 1.50
 
 // --- Trend-Following Phase 3 Quality Constants ---
@@ -390,8 +392,8 @@ struct TrendFollowingContext
    double score_h1_trend;         // max 20
    double score_m15_pullback;     // max 20
    double score_sweep;            // max 10
-   double score_displacement;     // max 10
-   double score_mss;              // max 10
+   double score_displacement;     // 10 base, 15 with bonus
+   double score_mss;              // 10 base, 15 with bonus
    double score_event_coherence;  // max 10
    double score_momentum;         // max 10
    double score_entry_distance;   // max 10
