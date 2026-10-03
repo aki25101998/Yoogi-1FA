@@ -3071,6 +3071,20 @@ int CheckTrendFollowingSignal(int idx)
    }
    
    // === LAYER 3: M5 ENTRY TRIGGER (On M5 New Bar) ===
+   if(G_TF[idx].setup_state >= TF_STATE_M5_WAIT_SWEEP && !G_TF[idx].m15_pullback_valid)
+   {
+      LogTFReset(idx, "M15", "M15_PULLBACK_LOST_QUALITY");
+      ResetTFM5Evidence(idx);
+      ResetTFM15Evidence(idx);
+      SetTFState(idx, TF_STATE_H1_TREND, "M15_PULLBACK_LOST_QUALITY");
+      G_TF[idx].status = "M15 PULLBACK LOST QUALITY";
+      G_TF[idx].setup_bar_count = 0;
+      TFDiag_RecordM15Invalidation(idx, dir);
+      TFDiag_LogFunnel(idx, dir, "M15_INVALIDATION", "PULLBACK_LOST_QUALITY");
+      LogTFDecision(idx, dir, "M15_INVALID", "M15 pullback lost quality", 0);
+      return 0;
+   }
+   
    if(G_TF[idx].setup_state < TF_STATE_M15_PULLBACK) return 0;
    if(!G_TF[idx].m15_pullback_valid) return 0;
    
