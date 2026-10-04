@@ -2689,47 +2689,7 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
    datetime dec_time = iTime(sym, PERIOD_M5, 1);
    G_TF[idx].phase3_entry_candle_time = dec_time;
    
-   // 1. Volatility Regime
-   double curr_atr = 0.0, base_atr = 0.0, atr_ratio = 0.0;
-   string vol_reason = "";
-   bool vol_pass = ValidateTFPhase3Volatility(idx, curr_atr, base_atr, atr_ratio, vol_reason);
-   if(!vol_pass)
-   {
-      if(first_reject == "") first_reject = "TF_P3_VOLATILITY_REJECT";
-      pass = false;
-   }
-   
-   // 2. Entry Candle Quality
-   double c_range = 0.0, c_body = 0.0, c_body_ratio = 0.0, c_close_loc = 0.0;
-   string candle_reason = "";
-   bool candle_pass = ValidateTFPhase3EntryCandle(idx, direction, c_range, c_body, c_body_ratio, c_close_loc, candle_reason);
-   if(!candle_pass)
-   {
-      if(first_reject == "") first_reject = "TF_P3_ENTRY_CANDLE_REJECT";
-      pass = false;
-   }
-   
-   // 3. Spread / Execution Quality
-   double spread_pts = 0.0, spread_atr = 0.0;
-   string spread_reason = "";
-   bool spread_pass = ValidateTFPhase3ExecutionQuality(idx, spread_pts, spread_atr, spread_reason);
-   if(!spread_pass)
-   {
-      if(first_reject == "") first_reject = "TF_P3_SPREAD_REJECT";
-      pass = false;
-   }
-   
-   // 4. Relative Displacement Extension
-   double dist_mss = 0.0, disp_range = 0.0, rel_ext = 0.0;
-   string ext_reason = "";
-   bool ext_pass = ValidateTFPhase3DisplacementExtension(idx, direction, dist_mss, disp_range, rel_ext, ext_reason);
-   if(!ext_pass)
-   {
-      if(first_reject == "") first_reject = "TF_P3_DISPLACEMENT_EXTENSION_REJECT";
-      pass = false;
-   }
-   
-   // 5. Post-MSS Adverse Retracement
+   // 1. Post-MSS Adverse Retracement & Post-MSS Candle Confirmation
    double adverse_atr = 0.0;
    int mss_shift = 0;
    datetime scan_start = 0, scan_end = 0;
@@ -2744,6 +2704,46 @@ bool ValidateTFPhase3EntryContext(int idx, int direction, string &rejectReason)
          else
             first_reject = "TF_P3_ADVERSE_RETRACE_REJECT";
       }
+      pass = false;
+   }
+   
+   // 2. Volatility Regime
+   double curr_atr = 0.0, base_atr = 0.0, atr_ratio = 0.0;
+   string vol_reason = "";
+   bool vol_pass = ValidateTFPhase3Volatility(idx, curr_atr, base_atr, atr_ratio, vol_reason);
+   if(!vol_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_VOLATILITY_REJECT";
+      pass = false;
+   }
+   
+   // 3. Entry Candle Quality
+   double c_range = 0.0, c_body = 0.0, c_body_ratio = 0.0, c_close_loc = 0.0;
+   string candle_reason = "";
+   bool candle_pass = ValidateTFPhase3EntryCandle(idx, direction, c_range, c_body, c_body_ratio, c_close_loc, candle_reason);
+   if(!candle_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_ENTRY_CANDLE_REJECT";
+      pass = false;
+   }
+   
+   // 4. Spread / Execution Quality
+   double spread_pts = 0.0, spread_atr = 0.0;
+   string spread_reason = "";
+   bool spread_pass = ValidateTFPhase3ExecutionQuality(idx, spread_pts, spread_atr, spread_reason);
+   if(!spread_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_SPREAD_REJECT";
+      pass = false;
+   }
+   
+   // 5. Relative Displacement Extension
+   double dist_mss = 0.0, disp_range = 0.0, rel_ext = 0.0;
+   string ext_reason = "";
+   bool ext_pass = ValidateTFPhase3DisplacementExtension(idx, direction, dist_mss, disp_range, rel_ext, ext_reason);
+   if(!ext_pass)
+   {
+      if(first_reject == "") first_reject = "TF_P3_DISPLACEMENT_EXTENSION_REJECT";
       pass = false;
    }
    

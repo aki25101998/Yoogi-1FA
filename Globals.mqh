@@ -273,7 +273,7 @@ PairContext G_Pairs[TOTAL_PAIRS];
 // --- Trend-Following Internal Constants ---
 const int    TF_MAX_EVENT_BARS         = 5;     // Sweep→Displacement must be within 5 M5 bars
 const int    TF_MSS_MAX_WAIT_BARS      = 15;    // Displacement→MSS must be within 15 M5 bars
-const double TF_MAX_ENTRY_DISTANCE_ATR = 2.0;   // Don't chase price beyond 2x M5 ATR
+const double TF_MAX_ENTRY_DISTANCE_ATR = 2.50;  // Don't chase price beyond 2.5x M5 ATR
 const int    TF_MAX_SETUP_BARS         = 100;   // Setup timeout in M5 bars
 const int    TF_MOMENTUM_MAX_BARS      = 10;    // Momentum timeout in M5 bars (max window, entry on first PASS)
 const int    TF_MOMENTUM_SIGNAL_MAX_AGE_BARS = 20; // Max M5 bars since indicator signal for freshness
@@ -293,7 +293,7 @@ const double TF_MIN_DISPLACEMENT_ATR         = 0.60;  // Closed M5 displacement 
 const double TF_DISPLACEMENT_BONUS_ATR       = 1.20;  // Range >= 1.20 ATR gets Quality Bonus (+5 pts)
 const double TF_MIN_MSS_BREAK_ATR            = 0.10;  // Closed M5 MSS break distance >= ATR * 0.10
 const double TF_MSS_BONUS_ATR                = 0.50;  // Break distance >= 0.50 ATR gets Quality Bonus (+5 pts)
-const double TF_MAX_MSS_ENTRY_EXTENSION_ATR  = 1.50;  // Closed M5 entry distance from MSS <= ATR * 1.50
+const double TF_MAX_MSS_ENTRY_EXTENSION_ATR  = 2.50;  // Closed M5 entry distance from MSS <= ATR * 2.50
 
 // --- Trend-Following Phase 3 Quality Constants ---
 const int    TF_PHASE3_ATR_LOOKBACK                = 50;    // Baseline ATR lookback (closed M5 bars)
@@ -302,7 +302,7 @@ const double TF_PHASE3_MAX_ATR_RATIO               = 2.50;  // Current ATR <= 25
 const double TF_PHASE3_MIN_ENTRY_BODY_RATIO        = 0.30;  // Entry candle body >= 30% of total range
 const double TF_PHASE3_MIN_CLOSE_LOCATION_RATIO    = 0.55;  // Close location in top 45% (BUY) or bottom 45% (SELL)
 const double TF_PHASE3_MAX_REJECTION_WICK_RATIO    = 0.45;  // Adverse rejection wick <= 45% of total range
-const double TF_PHASE3_MAX_SPREAD_ATR              = 0.35;  // Spread price / M5 ATR <= 0.35
+const double TF_PHASE3_MAX_SPREAD_ATR              = 0.65;  // Spread price / M5 ATR <= 0.65 (allows execution during low-ATR sessions)
 const int    TF_PHASE3_MAX_SPREAD_POINTS           = 50;    // Spread points <= 50 (5.0 pips max)
 const double TF_PHASE3_MAX_DISPLACEMENT_EXTENSION  = 2.00;  // Distance from MSS <= 2.0x displacement candle range
 const double TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR    = 1.00;  // Max adverse excursion after MSS <= 1.00 M5 ATR
