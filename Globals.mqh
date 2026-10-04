@@ -280,6 +280,7 @@ const int    TF_MOMENTUM_SIGNAL_MAX_AGE_BARS = 20; // Max M5 bars since indicato
 const int    TF_PULLBACK_MAX_BARS      = 30;    // M15 pullback max age
 const double TF_PULLBACK_MIN_DEPTH_ATR = 0.3;   // Min pullback depth (ATR)
 const double TF_PULLBACK_MAX_DEPTH_ATR = 3.0;   // Max pullback depth before reversal
+const double TF_PULLBACK_MAX_EMA_EXT_ATR = 1.5; // Max distance (ATR) price may sit beyond M15 EMA50 on the trend side while still a valid pullback context
 const int    TF_SLOPE_LOOKBACK         = 5;     // Bars to measure EMA slope
 const double TF_SIDEWAY_ATR_RATIO      = 0.5;   // Below this = sideway
 const bool   TF_REQUIRE_RETEST         = false; // Module ready, default OFF

@@ -338,6 +338,12 @@ bool ValidateTFM15PullbackQuality(int idx, int trend_dir, string &reject_reason)
    double ema50 = CalculateEMA_Generic(sym, PERIOD_M15, 50, 1);
    double ema_dist_atr = (trend_dir == 1) ? ((ema50 - close[0]) / atr) : ((close[0] - ema50) / atr);
    
+   // Once the M5 execution sequence is in progress the M15 context is locked: price continuing
+   // beyond the impulse extreme is trend continuation (not a lost pullback), so only structural
+   // invalidation (protected level / origin broken) may kill the setup. Depth/EMA/age gates
+   // apply only while still qualifying the pullback itself.
+   bool ctx_locked = (G_TF[idx].setup_state >= TF_STATE_M5_WAIT_SWEEP);
+   
    double prot_struct = (trend_dir == 1) ? G_TF[idx].m15_protected_low : G_TF[idx].m15_protected_high;
    int impulse_age = G_TF[idx].m15_pullback_bar_count;
    if(G_TF[idx].m15_impulse_end_time > 0)
@@ -359,7 +365,7 @@ bool ValidateTFM15PullbackQuality(int idx, int trend_dir, string &reject_reason)
       {
          reject_reason = "M15_IMPULSE_NOT_BULLISH";
       }
-      else if(close[0] > G_TF[idx].m15_impulse_high)
+      else if(!ctx_locked && close[0] > G_TF[idx].m15_impulse_high)
       {
          reject_reason = "PRICE_ABOVE_IMPULSE_HIGH";
       }
@@ -371,15 +377,15 @@ bool ValidateTFM15PullbackQuality(int idx, int trend_dir, string &reject_reason)
       {
          reject_reason = "ORIGIN_LOW_INVALIDATED";
       }
-      else if(depth_atr < TF_PULLBACK_MIN_DEPTH_ATR || depth_atr > TF_PULLBACK_MAX_DEPTH_ATR)
+      else if(!ctx_locked && (depth_atr < TF_PULLBACK_MIN_DEPTH_ATR || depth_atr > TF_PULLBACK_MAX_DEPTH_ATR))
       {
          reject_reason = "PULLBACK_DEPTH_OUT_OF_BOUNDS";
       }
-      else if(ema_dist_atr < -0.5)
+      else if(!ctx_locked && ema_dist_atr < -TF_PULLBACK_MAX_EMA_EXT_ATR)
       {
          reject_reason = "EMA_DISTANCE_TOO_FAR";
       }
-      else if(impulse_age > TF_PULLBACK_MAX_BARS)
+      else if(!ctx_locked && impulse_age > TF_PULLBACK_MAX_BARS)
       {
          reject_reason = "IMPULSE_STALE";
       }
@@ -394,7 +400,7 @@ bool ValidateTFM15PullbackQuality(int idx, int trend_dir, string &reject_reason)
       {
          reject_reason = "M15_IMPULSE_NOT_BEARISH";
       }
-      else if(close[0] < G_TF[idx].m15_impulse_low)
+      else if(!ctx_locked && close[0] < G_TF[idx].m15_impulse_low)
       {
          reject_reason = "PRICE_BELOW_IMPULSE_LOW";
       }
@@ -406,15 +412,15 @@ bool ValidateTFM15PullbackQuality(int idx, int trend_dir, string &reject_reason)
       {
          reject_reason = "ORIGIN_HIGH_INVALIDATED";
       }
-      else if(depth_atr < TF_PULLBACK_MIN_DEPTH_ATR || depth_atr > TF_PULLBACK_MAX_DEPTH_ATR)
+      else if(!ctx_locked && (depth_atr < TF_PULLBACK_MIN_DEPTH_ATR || depth_atr > TF_PULLBACK_MAX_DEPTH_ATR))
       {
          reject_reason = "PULLBACK_DEPTH_OUT_OF_BOUNDS";
       }
-      else if(ema_dist_atr < -0.5)
+      else if(!ctx_locked && ema_dist_atr < -TF_PULLBACK_MAX_EMA_EXT_ATR)
       {
          reject_reason = "EMA_DISTANCE_TOO_FAR";
       }
-      else if(impulse_age > TF_PULLBACK_MAX_BARS)
+      else if(!ctx_locked && impulse_age > TF_PULLBACK_MAX_BARS)
       {
          reject_reason = "IMPULSE_STALE";
       }
