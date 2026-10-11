@@ -80,12 +80,12 @@ const double InpRetestToleranceATR = 0.5;
 const int    InpRetestMaxBars = 10;
 const double InpMinSwingDistanceATR = 0.5;
 const int    InpSafetyMaxSetupBars = 150;
-const double ENTRY_REQUIRED_SCORE = 100.0; // Hard requirement - Score phải đạt 100/100 để entry
+const double ENTRY_REQUIRED_SCORE = 75.0; // Benchmark reference (aligned with InpCT_RequiredScore)
 const int    InpExhaustionMaxAgeBars = 10;
 const int    InpSweepMaxAgeBars = 10;
 const int    InpDisplacementMaxAgeBars = 5;
 const int    InpMSSMaxAgeBars = 15;
-const bool   InpReversalDebug = false;
+const bool   InpReversalDebug = true;
 const double CT_MAX_ENTRY_DISTANCE_ATR = 3.0;  // CT: Don't entry if price moved > 3x LTF ATR from MSS break level
 const int    CT_MAX_EVENT_SPREAD_BARS  = 12;   // CT: Sweep→Displacement→MSS must complete within 12 LTF bars
 

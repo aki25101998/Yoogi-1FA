@@ -7,11 +7,14 @@
 //+------------------------------------------------------------------+
 #property strict
 
+#include "ReversalDiagnostics.mqh"
+
 // ==================================================================
 // HELPER: Reset toàn bộ Reversal Setup về trạng thái ban đầu
 // ==================================================================
 void ResetReversalSetup(int idx, string reason)
 {
+   CTDiag_RecordReset(idx, reason);
    if(InpReversalDebug && G_Pairs[idx].state_machine != STATE_NO_SETUP)
    {
       PrintFormat("[REVERSAL][%s] RESET | Prev State=%d | Dir=%d | Reason=%s",
@@ -236,6 +239,8 @@ void EvaluateHTFZone(int idx, int &direction)
    else if(bearish_zone && !bullish_zone) direction = -1;
    else if(bullish_zone && bearish_zone) { direction = 0; G_Pairs[idx].htf_conflict = true; }
    else direction = 0;
+
+   CTDiag_RecordHTFEval(idx, direction != 0);
 }
 
 // --- LOCATION SCORE (capped at 15) ---
@@ -927,6 +932,7 @@ double CalculateReversalScore(int idx, int direction)
                 + G_Pairs[idx].score_momentum;
    
    G_Pairs[idx].reversal_score = total;
+   CTDiag_RecordScore(idx, total, InpCT_RequiredScore);
    return total;
 }
 
@@ -1048,7 +1054,9 @@ bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
    // 8. Event Coherence: Sweep→Displacement→MSS must be within CT_MAX_EVENT_SPREAD_BARS
    if(InpEnableLiquiditySweep && InpEnableDisplacement && InpReversal_RequireStructureShift)
    {
-      if(!CheckCTEventCoherence(idx))
+      bool coherent = CheckCTEventCoherence(idx);
+      CTDiag_RecordCoherence(idx, coherent);
+      if(!coherent)
       {
          rejectReason = "CT_EVENT_NOT_COHERENT";
          return false;
@@ -1058,7 +1066,9 @@ bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
    // 9. Entry Distance: Don't chase if price moved too far from MSS break level
    {
       double ct_dist_atr = 0.0, ct_max_dist = 0.0;
-      if(!ValidateCTEntryDistance(idx, direction, ct_dist_atr, ct_max_dist))
+      bool dist_ok = ValidateCTEntryDistance(idx, direction, ct_dist_atr, ct_max_dist);
+      CTDiag_RecordEntryDistance(idx, dist_ok);
+      if(!dist_ok)
       {
          rejectReason = "CT_ENTRY_DISTANCE_TOO_FAR";
          return false;
@@ -1073,14 +1083,17 @@ bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
       
       if(dxy_signal == 0)
       {
+         CTDiag_RecordDXY(idx, 0);
          rejectReason = "DXY_NOT_READY";
          return false;
       }
       if(dxy_signal != direction)
       {
+         CTDiag_RecordDXY(idx, -1);
          rejectReason = "DXY_CONFLICT";
          return false;
       }
+      CTDiag_RecordDXY(idx, 1);
    }
    
    rejectReason = "";
@@ -1303,6 +1316,8 @@ int CheckCounterTrendSignal(int idx)
             G_Pairs[idx].conf_sweep = true;
             G_Pairs[idx].conf_sweep_age = 0;
             G_Pairs[idx].sweep_level = sweepTarget;
+            CTDiag_RecordSweep(idx, true);
+            CTDiag_LogFunnel(idx, dir, "SWEEP", "DETECTED");
             LogReversalDecision(idx, dir, "LIQUIDITY", "Sweep detected", 0);
          }
       }
@@ -1312,6 +1327,8 @@ int CheckCounterTrendSignal(int idx)
          if(DetectDisplacement(sym, ltf, dir)) {
             G_Pairs[idx].conf_displacement = true;
             G_Pairs[idx].conf_displacement_age = 0;
+            CTDiag_RecordDisplacement(idx, true);
+            CTDiag_LogFunnel(idx, dir, "DISPLACEMENT", "DETECTED");
             LogReversalDecision(idx, dir, "DISPLACEMENT", "Displacement candle detected", 0);
          }
       }
@@ -1324,6 +1341,8 @@ int CheckCounterTrendSignal(int idx)
             G_Pairs[idx].conf_mss = true;
             G_Pairs[idx].conf_mss_age = 0;
             G_Pairs[idx].mss_break_level = breakLvl;
+            CTDiag_RecordMSS(idx, true);
+            CTDiag_LogFunnel(idx, dir, "MSS", "CONFIRMED");
             LogReversalDecision(idx, dir, "MSS_CONFIRMED", "Structure shifted (quality)", 0);
          } else if (InpReversalDebug && mssRejectReason != "" && mssRejectReason != "MSS_BREAK_NOT_CLOSED") {
             // Log rejection reasons periodically or minimally to avoid spam (maybe only when something significant changes)
@@ -1338,6 +1357,7 @@ int CheckCounterTrendSignal(int idx)
          G_Pairs[idx].state_machine = STATE_RETEST;
          G_Pairs[idx].retest_bar_count = 0;
          G_Pairs[idx].rev_status = "EVIDENCE_READY_FOR_RETEST";
+         CTDiag_LogFunnel(idx, dir, "EVIDENCE_READY", "ALL_EVIDENCE", StringFormat("SCORE=%.0f", CalculateReversalScore(idx, dir)));
          LogReversalDecision(idx, dir, "EVIDENCE_READY", "All evidence gathered", CalculateReversalScore(idx, dir));
       }
       else
@@ -1391,6 +1411,8 @@ int CheckCounterTrendSignal(int idx)
       {
          G_Pairs[idx].rev_status = "TRIGGER";
          LogReversalDecision(idx, dir, "ENTRY_READY", "All Gates Passed", score);
+         CTDiag_RecordFinalEntry(idx, dir);
+         CTDiag_LogFunnel(idx, dir, "FINAL_ENTRY", "TRIGGER", StringFormat("SCORE=%.0f", score));
          
          int result = dir;
          ResetReversalSetup(idx, "Entry Triggered - Reset");

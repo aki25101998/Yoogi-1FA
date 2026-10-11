@@ -17,8 +17,8 @@ input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = d
 input double InpRiskPercent = 0.5; // % Balance dùng để tính Lot (ví dụ: 0.5 = 0.5%)
 
 input group "=== ENTRY ENGINE ==="
-input double InpCT_RequiredScore         = 100.0;  // Counter-Trend Required Score
-input double InpTF_RequiredScore         = 100.0;  // Trend-Following Required Score
+input double InpCT_RequiredScore         = 75.0;   // Counter-Trend Required Score (Constitution min >= 70.0)
+input double InpTF_RequiredScore         = 90.0;   // Trend-Following Required Score (Base complete setup = 90.0)
 
 
 
