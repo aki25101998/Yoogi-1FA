@@ -935,6 +935,147 @@ bool IsSwingIntactBeforeSweep(const double &highs[], const double &lows[],
 }
 
 // ==================================================================
+// PRAGMATIC SMC: STRUCTURE SHIFT DETECTION FOR TREND FOLLOWING
+// ==================================================================
+// Supports both Major MSS (full triplet) and Minor MSS (pullback pivot breakout)
+bool DetectTFStructureShift(int idx, string sym, ENUM_TIMEFRAMES tf, int direction,
+                            double &breakLevel, string &rejectReason)
+{
+   breakLevel = 0.0;
+   rejectReason = "";
+   
+   // 1. Try Major MSS (full fractal triplet) first if available
+   if(DetectStructureShift(idx, sym, tf, direction, breakLevel, rejectReason))
+   {
+      return true; // Major MSS confirmed
+   }
+   
+   // 2. Pragmatic SMC: Minor MSS (Pullback Pivot Breakout)
+   // In Trend Following, an M15 pullback on M5 is short (3-15 candles).
+   // A Minor MSS is confirmed when closed candle breaks the most recent pullback pivot
+   // or swing high/low formed during the pullback phase.
+   int lookback = 25; // Search within last 25 M5 bars
+   double highs[], lows[], close[];
+   if(!ReadHighLow_Generic(sym, tf, 1, lookback, highs, lows)) { rejectReason = "NO_DATA"; return false; }
+   if(CopyClose(sym, tf, 1, 1, close) < 1) { rejectReason = "NO_DATA"; return false; }
+   
+   double atr = CalculateATR_Generic(sym, tf, InpReversal_ATR_Period, 1);
+   if(atr <= 0) { rejectReason = "NO_ATR"; return false; }
+   
+   double minBreak = TF_MIN_MSS_BREAK_ATR * atr;
+   
+   if(direction == 1) // BUY setup: Looking for break above pullback pivot high
+   {
+      // Find the swing high or pivot high formed during the pullback prior to displacement
+      // Search from shift 2 to lookback for a swing high (left=1, right=1)
+      double pivotHigh = 0.0;
+      int pivotIdx = -1;
+      
+      for(int i = 2; i < lookback - 1; i++)
+      {
+         if(highs[i] > highs[i-1] && highs[i] >= highs[i+1])
+         {
+            pivotHigh = highs[i];
+            pivotIdx = i;
+            break; // Found the most recent swing high
+         }
+      }
+      
+      // Fallback: if no 1-1 fractal swing found, find the highest high among candles 2 to 6
+      if(pivotIdx == -1)
+      {
+         for(int i = 2; i <= MathMin(6, lookback - 1); i++)
+         {
+            if(highs[i] > pivotHigh)
+            {
+               pivotHigh = highs[i];
+               pivotIdx = i;
+            }
+         }
+      }
+      
+      if(pivotIdx == -1 || pivotHigh <= 0.0)
+      {
+         rejectReason = "NO_PULLBACK_PIVOT_HIGH";
+         return false;
+      }
+      
+      // Closed candle (shift 1) must close above pivotHigh with minBreak
+      if(close[0] <= pivotHigh)
+      {
+         rejectReason = "MSS_BREAK_NOT_CLOSED";
+         return false;
+      }
+      
+      double breakDistance = close[0] - pivotHigh;
+      if(breakDistance < minBreak)
+      {
+         rejectReason = "MSS_BREAK_TOO_WEAK";
+         return false;
+      }
+      
+      breakLevel = pivotHigh;
+      rejectReason = "MINOR_MSS_VALID";
+      return true;
+   }
+   else if(direction == -1) // SELL setup: Looking for break below pullback pivot low
+   {
+      double pivotLow = DBL_MAX;
+      int pivotIdx = -1;
+      
+      for(int i = 2; i < lookback - 1; i++)
+      {
+         if(lows[i] < lows[i-1] && lows[i] <= lows[i+1])
+         {
+            pivotLow = lows[i];
+            pivotIdx = i;
+            break; // Found the most recent swing low
+         }
+      }
+      
+      // Fallback: if no 1-1 fractal swing found, find the lowest low among candles 2 to 6
+      if(pivotIdx == -1)
+      {
+         pivotLow = DBL_MAX;
+         for(int i = 2; i <= MathMin(6, lookback - 1); i++)
+         {
+            if(lows[i] < pivotLow)
+            {
+               pivotLow = lows[i];
+               pivotIdx = i;
+            }
+         }
+      }
+      
+      if(pivotIdx == -1 || pivotLow <= 0.0 || pivotLow == DBL_MAX)
+      {
+         rejectReason = "NO_PULLBACK_PIVOT_LOW";
+         return false;
+      }
+      
+      // Closed candle (shift 1) must close below pivotLow with minBreak
+      if(close[0] >= pivotLow)
+      {
+         rejectReason = "MSS_BREAK_NOT_CLOSED";
+         return false;
+      }
+      
+      double breakDistance = pivotLow - close[0];
+      if(breakDistance < minBreak)
+      {
+         rejectReason = "MSS_BREAK_TOO_WEAK";
+         return false;
+      }
+      
+      breakLevel = pivotLow;
+      rejectReason = "MINOR_MSS_VALID";
+      return true;
+   }
+   
+   return false;
+}
+
+// ==================================================================
 // LAYER 3: M5 ENTRY TRIGGER
 // ==================================================================
 
@@ -1255,9 +1396,53 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       }
       else
       {
-         TFDiag_LogFunnel(idx, trend_dir, "M5_SWEEP", "REJECT", StringFormat("raw=%d, nosweep=%d, broken=%d, consumed=%d, range=%d", sum_raw, sum_rej_nosweep, sum_rej_broken, sum_rej_consumed, sum_rej_range));
-         PrintFormat("[M5_NO_VALID_SWEEP][%s] direction=%d", sym, trend_dir);
-         return; // Only return if no sweep found, otherwise fall through to evaluate Displacement on the same candle
+         TFDiag_LogFunnel(idx, trend_dir, "M5_SWEEP", "ABSENT", StringFormat("raw=%d, nosweep=%d, broken=%d, consumed=%d, range=%d", sum_raw, sum_rej_nosweep, sum_rej_broken, sum_rej_consumed, sum_rej_range));
+         PrintFormat("[M5_NO_VALID_SWEEP][%s] direction=%d (Pragmatic SMC: checking direct displacement)", sym, trend_dir);
+         
+         // Pragmatic SMC: Sweep is an optional bonus!
+         // If no sweep on this candle, directly evaluate if Displacement is present!
+         if(DetectDisplacement(sym, m5, trend_dir))
+         {
+            double close[]; CopyClose(sym, m5, 1, 1, close);
+            double high[], low[];
+            CopyHigh(sym, m5, 1, 1, high);
+            CopyLow(sym, m5, 1, 1, low);
+            
+            double candle_range = (ArraySize(high) > 0 && ArraySize(low) > 0) ? (high[0] - low[0]) : 0.0;
+            double range_atr = (atr > 0.0) ? (candle_range / atr) : 0.0;
+            G_TF[idx].m5_displacement_range_atr = range_atr;
+            
+            bool disp_pass = (range_atr >= TF_MIN_DISPLACEMENT_ATR);
+            TFDiag_RecordDisplacement(idx, trend_dir, disp_pass, range_atr, TF_MIN_DISPLACEMENT_ATR, current_time);
+            
+            Print("\n[TF_DISPLACEMENT_QUALITY]");
+            PrintFormat("symbol=%s", sym);
+            PrintFormat("direction=%s", (trend_dir == 1 ? "BUY" : "SELL"));
+            PrintFormat("range_atr=%.2f (NO SWEEP DIRECT)", range_atr);
+            PrintFormat("minimum_atr=%.2f", TF_MIN_DISPLACEMENT_ATR);
+            PrintFormat("%s", disp_pass ? "PASS" : "REJECT");
+            
+            if(disp_pass)
+            {
+               G_TF[idx].m5_sweep = false;
+               G_TF[idx].score_sweep = 0.0;
+               G_TF[idx].m5_displacement = true;
+               G_TF[idx].m5_displacement_time = current_time;
+               G_TF[idx].m5_displacement_price = close[0];
+               G_TF[idx].m5_displacement_range = candle_range;
+               if(range_atr >= TF_DISPLACEMENT_BONUS_ATR)
+                  G_TF[idx].score_displacement = 15.0;
+               else
+                  G_TF[idx].score_displacement = 10.0;
+               SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED_NO_SWEEP");
+               G_TF[idx].status = "WAIT MSS";
+               TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_DISPLACEMENT_FOUND);
+               TFDiag_LogFunnel(idx, trend_dir, "M5_DISPLACEMENT", "PASS", StringFormat("NO_SWEEP: range_atr=%.2f >= %.2f (score=%.0f)", range_atr, TF_MIN_DISPLACEMENT_ATR, G_TF[idx].score_displacement));
+               PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed WITHOUT SWEEP (dir=%d, score=%.0f) on time=%s", sym, trend_dir, G_TF[idx].score_displacement, TimeToString(current_time));
+               return;
+            }
+         }
+         return; // Only return if neither sweep nor displacement found
       }
    }
    
@@ -1334,7 +1519,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       {
          double breakLvl = 0.0;
          string mssReason = "";
-         if(DetectStructureShift(idx, sym, m5, trend_dir, breakLvl, mssReason))
+         if(DetectTFStructureShift(idx, sym, m5, trend_dir, breakLvl, mssReason))
          {
             double close[]; CopyClose(sym, m5, 1, 1, close);
             double atr = CalculateATR_Generic(sym, m5, InpReversal_ATR_Period, 1);
@@ -1697,22 +1882,20 @@ void EvaluateTFMomentumConfirmation(int idx, int trend_dir, bool &cci_confirmed,
 bool CheckTFEventCoherence(int idx)
 {
    datetime m5_time = iTime(G_Pairs[idx].symbol, PERIOD_M5, 1);
-   if(!G_TF[idx].m5_sweep || !G_TF[idx].m5_displacement || !G_TF[idx].m5_mss)
+   if(!G_TF[idx].m5_displacement || !G_TF[idx].m5_mss)
    {
       TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, 0, TF_MAX_EVENT_BARS, m5_time);
       return false;
    }
    
-   if(G_TF[idx].m5_sweep_time == 0 || G_TF[idx].m5_displacement_time == 0 || G_TF[idx].m5_mss_time == 0)
+   if(G_TF[idx].m5_displacement_time == 0 || G_TF[idx].m5_mss_time == 0)
    {
       TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, 0, TF_MAX_EVENT_BARS, m5_time);
       return false;
    }
       
    // Events can happen on the same candle (==), but must not happen backward in time (>)
-   if(G_TF[idx].m5_sweep_time > G_TF[idx].m5_displacement_time ||
-      G_TF[idx].m5_displacement_time > G_TF[idx].m5_mss_time ||
-      G_TF[idx].m15_protected_confirmed_time > G_TF[idx].m5_sweep_time)
+   if(G_TF[idx].m5_displacement_time > G_TF[idx].m5_mss_time)
    {
       TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, 0, TF_MAX_EVENT_BARS, m5_time);
       return false;
@@ -1720,12 +1903,22 @@ bool CheckTFEventCoherence(int idx)
    
    long period_sec = PeriodSeconds(PERIOD_M5);
    
-   // Stage A Freshness: Sweep -> Displacement must complete within TF_MAX_EVENT_BARS
-   long sweep_to_disp_bars = (G_TF[idx].m5_displacement_time - G_TF[idx].m5_sweep_time) / period_sec;
-   if(sweep_to_disp_bars > TF_MAX_EVENT_BARS)
+   // If sweep was detected, check sweep -> displacement freshness and ordering
+   if(G_TF[idx].m5_sweep && G_TF[idx].m5_sweep_time > 0)
    {
-      TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, (int)sweep_to_disp_bars, TF_MAX_EVENT_BARS, m5_time);
-      return false;
+      if(G_TF[idx].m5_sweep_time > G_TF[idx].m5_displacement_time ||
+         G_TF[idx].m15_protected_confirmed_time > G_TF[idx].m5_sweep_time)
+      {
+         TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, 0, TF_MAX_EVENT_BARS, m5_time);
+         return false;
+      }
+      
+      long sweep_to_disp_bars = (G_TF[idx].m5_displacement_time - G_TF[idx].m5_sweep_time) / period_sec;
+      if(sweep_to_disp_bars > TF_MAX_EVENT_BARS)
+      {
+         TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, false, (int)sweep_to_disp_bars, TF_MAX_EVENT_BARS, m5_time);
+         return false;
+      }
    }
    
    // Stage B Freshness: Displacement -> MSS must complete within TF_MSS_MAX_WAIT_BARS
@@ -1736,7 +1929,10 @@ bool CheckTFEventCoherence(int idx)
       return false;
    }
    
-   long total_sequence_bars = (G_TF[idx].m5_mss_time - G_TF[idx].m5_sweep_time) / period_sec;
+   long total_sequence_bars = disp_to_mss_bars;
+   if(G_TF[idx].m5_sweep && G_TF[idx].m5_sweep_time > 0)
+      total_sequence_bars = (G_TF[idx].m5_mss_time - G_TF[idx].m5_sweep_time) / period_sec;
+      
    G_TF[idx].score_event_coherence = 10.0;
    TFDiag_RecordCoherence(idx, G_TF[idx].h1_trend_direction, true, (int)total_sequence_bars, TF_MAX_EVENT_BARS + TF_MSS_MAX_WAIT_BARS, m5_time);
    return true;
@@ -1984,12 +2180,14 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
       pass = false;
    }
    
-   // 4. Sweep Valid
-   if(!G_TF[idx].m5_sweep)
+   // 4. Sweep Check (Optional in Pragmatic SMC - Quality Bonus only)
+   if(G_TF[idx].m5_sweep)
    {
-      if(first_reject == "") first_reject = "TF_P2_SWEEP_REJECT";
-      Print("[TF_PHASE2_REJECT] Sweep");
-      pass = false;
+      PrintFormat("[TF_PHASE2_INFO] Sweep Present (+10 pts bonus, price=%.5f)", G_TF[idx].m5_sweep_price);
+   }
+   else
+   {
+      Print("[TF_PHASE2_INFO] Sweep Absent (Pragmatic SMC: Optional, continuing with Displacement + MSS)");
    }
    
    // 5. Displacement Valid
@@ -2089,7 +2287,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    bool rej_h1    = (G_TF[idx].h1_trend_direction != direction || G_TF[idx].h1_trend_quality < TF_H1_QUALITY_BASE);
    bool rej_m15   = (!G_TF[idx].m15_pullback_valid || G_TF[idx].m15_pullback_quality < 20.0);
    bool rej_prot  = (!prot_ok);
-   bool rej_sweep = (!G_TF[idx].m5_sweep);
+   bool rej_sweep = false; // Sweep is optional bonus in Pragmatic SMC
    bool rej_disp  = (!G_TF[idx].m5_displacement || G_TF[idx].m5_displacement_range_atr < TF_MIN_DISPLACEMENT_ATR);
    bool rej_mss   = (!G_TF[idx].m5_mss || G_TF[idx].m5_mss_break_level <= 0.0 || G_TF[idx].m5_mss_break_distance_atr < TF_MIN_MSS_BREAK_ATR);
    bool rej_coh   = (!event_coherent);
@@ -3313,7 +3511,6 @@ int CheckTrendFollowingSignal(int idx)
       string missing = "";
       if(G_TF[idx].score_h1_trend < 15.0) missing += "H1_TREND ";
       if(G_TF[idx].score_m15_pullback < 20.0) missing += "M15_PB ";
-      if(!G_TF[idx].m5_sweep) missing += "SWEEP ";
       if(!G_TF[idx].m5_displacement) missing += "DISP ";
       if(!G_TF[idx].m5_mss) missing += "MSS ";
       if(G_TF[idx].score_momentum < 10.0) missing += "MOM ";

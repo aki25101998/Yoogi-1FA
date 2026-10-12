@@ -18,7 +18,7 @@ input double InpRiskPercent = 0.5; // % Balance dùng để tính Lot (ví dụ:
 
 input group "=== ENTRY ENGINE ==="
 input double InpCT_RequiredScore         = 75.0;   // Counter-Trend Required Score (Constitution min >= 70.0)
-input double InpTF_RequiredScore         = 90.0;   // Trend-Following Required Score (Base complete setup = 90.0)
+input double InpTF_RequiredScore         = 75.0;   // Trend-Following Required Score (Pragmatic SMC setup = 75.0)
 
 
 

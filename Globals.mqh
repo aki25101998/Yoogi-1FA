@@ -303,10 +303,10 @@ const double TF_PHASE3_MAX_ATR_RATIO               = 2.50;  // Current ATR <= 25
 const double TF_PHASE3_MIN_ENTRY_BODY_RATIO        = 0.30;  // Entry candle body >= 30% of total range
 const double TF_PHASE3_MIN_CLOSE_LOCATION_RATIO    = 0.55;  // Close location in top 45% (BUY) or bottom 45% (SELL)
 const double TF_PHASE3_MAX_REJECTION_WICK_RATIO    = 0.45;  // Adverse rejection wick <= 45% of total range
-const double TF_PHASE3_MAX_SPREAD_ATR              = 0.65;  // Spread price / M5 ATR <= 0.65 (allows execution during low-ATR sessions)
+const double TF_PHASE3_MAX_SPREAD_ATR              = 0.80;  // Spread price / M5 ATR <= 0.80 (allows execution during normal sessions)
 const int    TF_PHASE3_MAX_SPREAD_POINTS           = 50;    // Spread points <= 50 (5.0 pips max)
-const double TF_PHASE3_MAX_DISPLACEMENT_EXTENSION  = 2.00;  // Distance from MSS <= 2.0x displacement candle range
-const double TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR    = 1.00;  // Max adverse excursion after MSS <= 1.00 M5 ATR
+const double TF_PHASE3_MAX_DISPLACEMENT_EXTENSION  = 2.50;  // Distance from MSS <= 2.5x displacement candle range
+const double TF_PHASE3_MAX_POST_MSS_ADVERSE_ATR    = 1.30;  // Max adverse excursion after MSS <= 1.30 M5 ATR
 
 // --- Internal Constants for DXY TF Engine Freshness ---
 const int    DXY_TF_H1_MAX_AGE_BARS    = 3;
