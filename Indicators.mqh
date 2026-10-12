@@ -140,9 +140,10 @@ double CalculateRngFilt(double price, double r, double prev)
 // ==================================================================
 bool ReadCCI_2Bars(int handle, double &cci_curr, double &cci_prev)
 {
-   double cci[2];
-   if(handle == INVALID_HANDLE || CopyBuffer(handle, 0, 1, 2, cci) < 2) return false;
+   if(handle == INVALID_HANDLE) return false;
+   double cci[];
    ArraySetAsSeries(cci, true);
+   if(CopyBuffer(handle, 0, 1, 2, cci) < 2) return false;
    cci_curr = cci[0];
    cci_prev = cci[1];
    return true;
@@ -151,9 +152,9 @@ bool ReadCCI_2Bars(int handle, double &cci_curr, double &cci_prev)
 // --- Generic ReadClose_3Bars ---
 bool ReadClose_3Bars_Generic(string sym, ENUM_TIMEFRAMES tf, double &c0, double &c1, double &c2)
 {
-   double cbuf[3];
-   if(CopyClose(sym, tf, 1, 3, cbuf) < 3) return false;
+   double cbuf[];
    ArraySetAsSeries(cbuf, true);
+   if(CopyClose(sym, tf, 1, 3, cbuf) < 3) return false;
    c0 = cbuf[0];
    c1 = cbuf[1];
    c2 = cbuf[2];
