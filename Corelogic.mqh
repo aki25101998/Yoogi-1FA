@@ -779,9 +779,12 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 {
    string sym = G_Pairs[idx].symbol;
 
-   // Kiểm tra thời gian (tránh spam lệnh)
-   static ulong lastOpenTime = 0;
-   if(TimeCurrent() - lastOpenTime < 2) return;
+   // Kiểm tra thời gian per-pair (tránh spam lệnh cho cùng một cặp)
+   static ulong lastOpenTime[TOTAL_PAIRS];
+   if(idx >= 0 && idx < TOTAL_PAIRS)
+   {
+      if(TimeCurrent() - lastOpenTime[idx] < 2) return;
+   }
 
    if(!IsTradable(sym)) return;
 
@@ -875,7 +878,8 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
    if(res)
    {
-      lastOpenTime = TimeCurrent();
+      if(idx >= 0 && idx < TOTAL_PAIRS)
+         lastOpenTime[idx] = TimeCurrent();
 
       // Tính toán Dynamic Step
       double atr_val = CalculateATR_Generic(sym, PERIOD_M15, 14, 1);
