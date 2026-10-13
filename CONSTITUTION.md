@@ -246,9 +246,9 @@ Khi conditions xấu đi, TP được giảm xuống (chỉ giảm, không tăng
 - **Exit**: Khi trailing stop bị hit.
 - **Scope**: Chỉ áp dụng cho strategy FT và DUAL, KHÔNG áp dụng cho CT.
 
-### 8.4 Recovery-Aware TP
+### 8.4 Recovery-Aware TP & Dynamic Ceiling
 
-Khi hệ thống có Debt > 0, TP được mở rộng để cover:
+Khi hệ thống có Debt > 0, TP được tính toán để cover nợ:
 
 | Trạng thái | TP Target |
 |---|---|
@@ -257,10 +257,17 @@ Khi hệ thống có Debt > 0, TP được mở rộng để cover:
 | Recovery, 3+ positions, chưa partial | Debt × 100% + Normal Profit |
 | Recovery, đã partial trước đó | Debt × 100% + Normal Profit |
 
-- Recovery TP KHÔNG BAO GIỜ thấp hơn Natural TP.
-- Nếu Required TP vượt Available Space → log WARNING nhưng **không truncate** (EA chờ).
+- Recovery TP KHÔNG BAO GIỜ thấp hơn Natural TP (khi Natural TP nằm dưới trần).
+- **Dynamic Ceiling (Trần Khống Chế Động)**: Tránh bẫy "Gánh nặng TP" khi nợ lớn. TP không bao giờ được vượt quá `Available Space × 0.85` (vùng cản kỹ thuật EMA50 M15/H1) hoặc `Structure Target × 1.05`, và bị chặn trần tối đa bởi `InpDynamicTP_MaxPips = 90` pips.
+- **Amortization (Khấu trừ trả góp dần)**: Khi chuỗi chạm trần TP hoặc Break-Even chốt lời, toàn bộ lợi nhuận thực tế đạt được (`Realized Profit`) sẽ được trừ thẳng vào `$Debt` (`Debt_After = Debt_Before - Realized_Profit`), phần dôi dư mới tính vào lãi ròng. Các chuỗi tiếp theo sẽ trả nốt phần nợ còn lại thay vì cố ép 1 chuỗi phải gánh hết nợ bất khả thi.
 
-### 8.5 Basket TP
+### 8.5 Dynamic Break-Even & Trailing Lock (Bảo Vệ Hòa Vốn 2 Nấc)
+
+- **Nấc 1 (Khóa hòa vốn)**: Khi giá chạy được ≥ 75% Natural TP (hoặc ≥ 0.8× ATR M15, tối thiểu 10 pips) → Kích hoạt Break-Even, dời Stop ảo về `AvgEntry ± 2 pips` (`InpBreakEven_OffsetPips`).
+- **Nấc 2 (Trailing Lock)**: Khi giá vượt qua 100% Natural TP (đang rướn lên vùng Recovery TP) → Khóa bảo toàn tối thiểu 50% Natural TP hoặc Trailing theo sau giá 1.2× ATR M15. Stop chỉ dời theo hướng có lợi.
+- **Thoát lệnh**: Khi giá chạm Stop bảo vệ → đóng toàn bộ chuỗi với reason `BREAK_EVEN`, bảo toàn vốn và lấy lợi nhuận đạt được khấu trừ nợ.
+
+### 8.6 Basket TP
 
 - TP tính trên **Weighted Average Entry** của toàn bộ chain (không phải master entry).
 - TP Price = AvgEntry ± Required Distance.

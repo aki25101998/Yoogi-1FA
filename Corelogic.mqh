@@ -411,6 +411,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       if(pr_val == 1.0) reason = "MAX_DCA";
       else if(pr_val == 2.0) reason = "TP";
       else if(pr_val == 3.0) reason = "RUNNER";
+      else if(pr_val == 4.0) reason = "BREAK_EVEN";
       GlobalVariableDel(pending_reason_gv);
    }
    else if(reason == "BROKER_CLOSE")
@@ -551,40 +552,31 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          }
       }
    }
-   else if(reason == "TP" || reason == "RUNNER")
+   else if(reason == "TP" || reason == "RUNNER" || reason == "BREAK_EVEN")
    {
       if(debt_before <= 0.001)
       {
-         // Normal TP: no debt, reset sequence to 0 (ready for next chain starting at DCA 1)
+         // Normal TP / Break-Even: no debt, reset sequence to 0 (ready for next chain starting at DCA 1)
          SetSystemDCASeq(idx, 0);
          SetSystemRecLvl(idx, 0);
          SetSystemDebt(idx, 0.0);
          
-         PrintFormat("[NORMAL-TP]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_RESULT=%.2f\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
-                     sym, strat, realized_pnl);
+         PrintFormat("[NORMAL-EXIT]\nSYMBOL=%s\nSTRATEGY=%s\nREASON=%s\nCHAIN_RESULT=%.2f\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
+                     sym, strat, reason, realized_pnl);
       }
       else
       {
-         // Recovery TP: settle debt with realized profit
+         // Recovery TP / Break-Even: settle debt with realized profit (Amortization)
          if(realized_pnl > 0.0)
          {
-            bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
-            double debt_target = 0.0;
-            if(partial_done)
-               debt_target = debt_before;  // Already partially recovered → 100%
-            else if(pos_count <= 2)
-               debt_target = debt_before * 0.50;  // First recovery, small chain → 50%
-            else
-               debt_target = debt_before;  // First recovery, 3+ pos → 100%
-
-            double debt_reduction = MathMin(debt_target, realized_pnl);
-            debt_reduction = MathMin(debt_reduction, debt_before);
+            // Amortization (Trả nợ trừ dần): Bất kể lãi bao nhiêu cũng ưu tiên trừ thẳng vào nợ
+            double debt_reduction = MathMin(debt_before, realized_pnl);
 
             double normal_profit = realized_pnl - debt_reduction;
             double debt_after = debt_before - debt_reduction;
             
-            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
-                        sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
+            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nREASON=%s\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
+                        sym, strat, chain_id, reason, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
 
             if(debt_after <= 0.00001)
             {
@@ -709,6 +701,7 @@ void CloseAndResolveChain(int idx, string reason)
    if(reason == "MAX_DCA") pr_val = 1.0;
    else if(reason == "TP") pr_val = 2.0;
    else if(reason == "RUNNER") pr_val = 3.0;
+   else if(reason == "BREAK_EVEN") pr_val = 4.0;
    GlobalVariableSet(pending_reason_gv, pr_val);
 
    // 1. Request closing of all positions belonging to this chain
@@ -993,6 +986,12 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
          
          SaveChainState_Multi(idx);
 
+         // Reset Break-Even state for the new basket average
+         G_TradeProfile[idx].be_active = false;
+         G_TradeProfile[idx].be_stop_price = 0.0;
+         G_TradeProfile[idx].be_stage = 0;
+         SaveTradeProfile(idx, id);
+
          double current_debt = GetSystemDebt(idx);
          string mode_str = IsSystemInRecovery(idx) ? "RECOVERY" : "NORMAL";
 
@@ -1218,6 +1217,15 @@ void ManagePairs()
                {
                   PrintFormat("[%s] >>> RUNNER EXIT: Trailing stop hit. Closing...", sym);
                   CloseAndResolveChain(i, "RUNNER");
+                  continue;
+               }
+
+               // Check Break-Even / Trailing Lock exit
+               if(InpEnableBreakEven && G_TradeProfile[i].be_active && IsBreakEvenStopped(i, current_price, basket_dir))
+               {
+                  PrintFormat("[%s] >>> BREAK-EVEN EXIT: Price hit BE/Trailing Stop (Current=%.5f Stop=%.5f Stage=%d). Closing...",
+                              sym, current_price, G_TradeProfile[i].be_stop_price, G_TradeProfile[i].be_stage);
+                  CloseAndResolveChain(i, "BREAK_EVEN");
                   continue;
                }
 

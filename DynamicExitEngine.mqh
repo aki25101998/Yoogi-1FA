@@ -53,6 +53,11 @@ struct TradeProfile
    double last_compression_tp; // Last compressed TP (anti-jitter)
    datetime last_update_time;  // Last Dynamic Exit update time
 
+   // Break-Even & Dynamic Trailing Lock
+   bool   be_active;           // Break-Even / Trailing Lock activated?
+   double be_stop_price;       // Absolute stop price for BE / Trailing Lock
+   int    be_stage;            // 0=off, 1=BE locked (+offset), 2=Trailing Lock (>=50% Natural TP)
+
    // State
    bool   is_valid;            // Profile initialized?
 };
@@ -64,6 +69,8 @@ void SaveTradeProfile(int idx, ulong chain_id);
 void LoadTradeProfile(int idx, ulong chain_id);
 void ClearTradeProfilePersistence(int idx, ulong chain_id);
 double GetBasketTPPrice(int idx, double avg_entry, int direction);
+void UpdateBreakEvenState(int idx);
+bool IsBreakEvenStopped(int idx, double current_price, int direction);
 
 // ==================================================================
 // HELPER: Determine strategy type from entry_mode string
@@ -457,6 +464,9 @@ void InitTradeProfile(int idx, int direction, int strategy_type, double entry_pr
    G_TradeProfile[idx].runner_trail_price = 0.0;
    G_TradeProfile[idx].compression_active = false;
    G_TradeProfile[idx].last_compression_tp = natural_tp;
+   G_TradeProfile[idx].be_active = false;
+   G_TradeProfile[idx].be_stop_price = 0.0;
+   G_TradeProfile[idx].be_stage = 0;
    G_TradeProfile[idx].last_update_time = TimeCurrent();
    G_TradeProfile[idx].is_valid = true;
 
@@ -512,6 +522,9 @@ void ResetTradeProfile(int idx)
    G_TradeProfile[idx].runner_trail_price = 0.0;
    G_TradeProfile[idx].compression_active = false;
    G_TradeProfile[idx].last_compression_tp = 0.0;
+   G_TradeProfile[idx].be_active = false;
+   G_TradeProfile[idx].be_stop_price = 0.0;
+   G_TradeProfile[idx].be_stage = 0;
    G_TradeProfile[idx].last_update_time = 0;
 }
 
@@ -1017,7 +1030,62 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
       if(req_distance < natural_distance)
          req_distance = natural_distance;
 
-      final_distance = req_distance;
+      // --- DYNAMIC RECOVERY TP CEILING ---
+      // 1. Available Space (Kháng cự/Hỗ trợ gần nhất)
+      double avail_space_pips = G_TradeProfile[idx].available_space_pips;
+      if(avail_space_pips <= 0.0)
+         avail_space_pips = CalcAvailableSpace(idx);
+
+      // 2. Structure Target (Swing high/low gần nhất)
+      double struct_pips = G_TradeProfile[idx].structure_target_pips;
+      if(struct_pips <= 0.0)
+         struct_pips = CalcStructureTarget(idx);
+
+      // dynamic ceiling ban đầu là InpDynamicTP_MaxPips (90 pips)
+      double dynamic_ceiling_pips = (double)InpDynamicTP_MaxPips;
+
+      // Nếu cản kỹ thuật có sẵn (> 10 pips), trần không vượt quá InpRecoverySpaceRatio * AvailableSpace (85%)
+      if(avail_space_pips > 10.0)
+      {
+         double space_cap = avail_space_pips * InpRecoverySpaceRatio;
+         if(space_cap < dynamic_ceiling_pips)
+            dynamic_ceiling_pips = space_cap;
+      }
+
+      // Structure Target hợp lệ
+      if(struct_pips >= (double)InpDynamicTP_MinPips && struct_pips <= (double)InpDynamicTP_MaxPips)
+      {
+         double struct_cap = struct_pips * 1.05; // Dung sai 5% trên cản cấu trúc
+         if(struct_cap < dynamic_ceiling_pips)
+            dynamic_ceiling_pips = struct_cap;
+      }
+
+      // Đảm bảo trần không bé hơn InpDynamicTP_MinPips (15 pips)
+      if(dynamic_ceiling_pips < (double)InpDynamicTP_MinPips)
+         dynamic_ceiling_pips = (double)InpDynamicTP_MinPips;
+
+      double dynamic_ceiling_dist = PipsToPrice(idx, dynamic_ceiling_pips);
+
+      // Áp dụng trần khống chế: nếu req_distance vượt quá dynamic ceiling thì ép về ceiling
+      if(req_distance > dynamic_ceiling_dist)
+      {
+         final_distance = dynamic_ceiling_dist;
+         static double last_capped_logged[TOTAL_PAIRS];
+         if(MathAbs(final_distance - last_capped_logged[idx]) >= G_Pairs[idx].point)
+         {
+            last_capped_logged[idx] = final_distance;
+            PrintFormat("\n[RECOVERY-TP-DYNAMIC-CAPPED]\nSYMBOL=%s\nREQ_PIPS=%.1f\nCAPPED_PIPS=%.1f\nAVAIL_SPACE=%.1f\nSTRUCT_TARGET=%.1f\nREASON=Prevent unreachable TP behind technical barrier",
+                        sym, PriceToPips(idx, req_distance), dynamic_ceiling_pips, avail_space_pips, struct_pips);
+         }
+      }
+      else
+      {
+         final_distance = req_distance;
+      }
+
+      // Final distance vẫn phải tối thiểu là natural_distance (nếu natural_distance <= dynamic_ceiling_dist)
+      if(final_distance < natural_distance && natural_distance <= dynamic_ceiling_dist)
+         final_distance = natural_distance;
 
       if(direction == 1)
          tp_price = avg_entry + final_distance;
@@ -1027,9 +1095,6 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
       // Available Space warning: If required TP distance exceeds available space,
       // log clear warning. Accounting and required profit are NEVER truncated.
       double required_tp_pips = PriceToPips(idx, final_distance);
-      double avail_space_pips = G_TradeProfile[idx].available_space_pips;
-      if(avail_space_pips <= 0.0)
-         avail_space_pips = CalcAvailableSpace(idx);
 
       if(avail_space_pips > 0.0 && required_tp_pips > avail_space_pips)
       {
@@ -1111,6 +1176,9 @@ void SaveTradeProfile(int idx, ulong chain_id)
    GlobalVariableSet("Yoogi_Runner_Trail_" + sym + "_" + id_str, G_TradeProfile[idx].runner_trail_price);
    GlobalVariableSet("Yoogi_DynTP_Compress_" + sym + "_" + id_str, G_TradeProfile[idx].compression_active ? 1.0 : 0.0);
    GlobalVariableSet("Yoogi_DynTP_LastComp_" + sym + "_" + id_str, G_TradeProfile[idx].last_compression_tp);
+   GlobalVariableSet("Yoogi_BE_Active_" + sym + "_" + id_str, G_TradeProfile[idx].be_active ? 1.0 : 0.0);
+   GlobalVariableSet("Yoogi_BE_Stop_" + sym + "_" + id_str, G_TradeProfile[idx].be_stop_price);
+   GlobalVariableSet("Yoogi_BE_Stage_" + sym + "_" + id_str, (double)G_TradeProfile[idx].be_stage);
 }
 
 void LoadTradeProfile(int idx, ulong chain_id)
@@ -1132,13 +1200,17 @@ void LoadTradeProfile(int idx, ulong chain_id)
       G_TradeProfile[idx].runner_trail_price  = GlobalVariableGet("Yoogi_Runner_Trail_" + sym + "_" + id_str);
       G_TradeProfile[idx].compression_active  = (GlobalVariableGet("Yoogi_DynTP_Compress_" + sym + "_" + id_str) > 0.5);
       G_TradeProfile[idx].last_compression_tp = GlobalVariableGet("Yoogi_DynTP_LastComp_" + sym + "_" + id_str);
+      G_TradeProfile[idx].be_active           = (GlobalVariableGet("Yoogi_BE_Active_" + sym + "_" + id_str) > 0.5);
+      G_TradeProfile[idx].be_stop_price       = GlobalVariableGet("Yoogi_BE_Stop_" + sym + "_" + id_str);
+      G_TradeProfile[idx].be_stage            = (int)GlobalVariableGet("Yoogi_BE_Stage_" + sym + "_" + id_str);
       G_TradeProfile[idx].last_update_time    = TimeCurrent();
       G_TradeProfile[idx].is_valid            = true;
 
-      PrintFormat("[%s] >>> DYNAMIC EXIT RESTORED: Strat=%d, Dir=%d, InitTP=%.1f, CurrTP=%.1f, Runner=%s, Trail=%.5f",
+      PrintFormat("[%s] >>> DYNAMIC EXIT RESTORED: Strat=%d, Dir=%d, InitTP=%.1f, CurrTP=%.1f, Runner=%s, Trail=%.5f, BE=%s, BEStop=%.5f",
                   sym, G_TradeProfile[idx].strategy_type, G_TradeProfile[idx].direction,
                   G_TradeProfile[idx].initial_dynamic_tp, G_TradeProfile[idx].current_dynamic_tp,
-                  G_TradeProfile[idx].runner_active ? "YES" : "NO", G_TradeProfile[idx].runner_trail_price);
+                  G_TradeProfile[idx].runner_active ? "YES" : "NO", G_TradeProfile[idx].runner_trail_price,
+                  G_TradeProfile[idx].be_active ? "YES" : "NO", G_TradeProfile[idx].be_stop_price);
    }
    else
    {
@@ -1176,6 +1248,130 @@ void ClearTradeProfilePersistence(int idx, ulong chain_id)
    GlobalVariableDel("Yoogi_Runner_Trail_" + sym + "_" + id_str);
    GlobalVariableDel("Yoogi_DynTP_Compress_" + sym + "_" + id_str);
    GlobalVariableDel("Yoogi_DynTP_LastComp_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_BE_Active_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_BE_Stop_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_BE_Stage_" + sym + "_" + id_str);
+}
+
+// ==================================================================
+// BREAK-EVEN & TRAILING LOCK ENGINE (DYNAMIC 2-STAGE)
+// ==================================================================
+void UpdateBreakEvenState(int idx)
+{
+   if(!InpEnableBreakEven) return;
+   if(!G_TradeProfile[idx].is_valid) return;
+   if(G_TradeProfile[idx].runner_active) return; // Runner mode has its own trailing logic
+
+   string sym = G_Pairs[idx].symbol;
+   int dir = G_TradeProfile[idx].direction;
+   double avg_entry = G_TradeProfile[idx].entry_price;
+   if(avg_entry <= 0.0) return;
+
+   double current_price = (dir == 1) ? SymbolInfoDouble(sym, SYMBOL_BID)
+                                     : SymbolInfoDouble(sym, SYMBOL_ASK);
+   if(current_price <= 0.0) return;
+
+   // Profit in pips currently achieved
+   double pips_run = 0.0;
+   if(dir == 1)
+      pips_run = PriceToPips(idx, current_price - avg_entry);
+   else
+      pips_run = PriceToPips(idx, avg_entry - current_price);
+
+   if(pips_run <= 0.0) return;
+
+   // Natural TP in pips
+   double natural_tp_pips = G_TradeProfile[idx].initial_dynamic_tp;
+   if(natural_tp_pips <= 0.0)
+      natural_tp_pips = (double)InpDynamicTP_MinPips;
+
+   // ATR M15 in pips for dynamic thresholding
+   double atr_val = G_TradeProfile[idx].initial_atr;
+   if(atr_val <= 0.0)
+      atr_val = CalculateATR_Generic(sym, PERIOD_M15, InpReversal_ATR_Period, 1);
+   double atr_pips = PriceToPips(idx, atr_val);
+
+   // --- THRESHOLD NẤC 1: Trigger BE khi đạt 75% Natural TP (hoặc >= 0.8x ATR M15, min 10 pips) ---
+   double be_threshold_pips = natural_tp_pips * InpBreakEven_TriggerRatio;
+   if(atr_pips > 0.0 && be_threshold_pips < atr_pips * 0.8)
+      be_threshold_pips = atr_pips * 0.8;
+   if(be_threshold_pips < 10.0)
+      be_threshold_pips = 10.0;
+
+   // --- NẤC 1: Khóa hòa vốn (+ offset bù spread) ---
+   if(pips_run >= be_threshold_pips && G_TradeProfile[idx].be_stage < 1)
+   {
+      G_TradeProfile[idx].be_active = true;
+      G_TradeProfile[idx].be_stage = 1;
+      double offset_dist = PipsToPrice(idx, InpBreakEven_OffsetPips);
+      if(dir == 1)
+         G_TradeProfile[idx].be_stop_price = avg_entry + offset_dist;
+      else
+         G_TradeProfile[idx].be_stop_price = avg_entry - offset_dist;
+
+      PrintFormat("[%s] >>> DYNAMIC BREAK-EVEN ACTIVATED (Stage 1): PipsRun=%.1f Threshold=%.1f AvgEntry=%.5f StopPrice=%.5f Offset=%.1f pips",
+                  sym, pips_run, be_threshold_pips, avg_entry, G_TradeProfile[idx].be_stop_price, InpBreakEven_OffsetPips);
+
+      if(G_Pairs[idx].active_chain_id > 0)
+         SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
+   }
+
+   // --- NẤC 2: Khi giá rướn vượt qua Natural TP (đang vươn tới Recovery TP) ---
+   // Khóa bảo toàn ít nhất 50% Natural TP hoặc Trailing theo sau giá 1.2x ATR
+   if(pips_run >= natural_tp_pips && G_TradeProfile[idx].be_stage >= 1)
+   {
+      double min_lock_pips = natural_tp_pips * 0.50;
+      double trail_dist = (atr_pips > 0.0) ? PipsToPrice(idx, atr_pips * 1.2) : PipsToPrice(idx, min_lock_pips);
+
+      double candidate_stop = 0.0;
+      if(dir == 1)
+      {
+         double min_stop = avg_entry + PipsToPrice(idx, min_lock_pips);
+         candidate_stop = current_price - trail_dist;
+         if(candidate_stop < min_stop) candidate_stop = min_stop;
+
+         if(candidate_stop > G_TradeProfile[idx].be_stop_price)
+         {
+            G_TradeProfile[idx].be_stage = 2;
+            G_TradeProfile[idx].be_stop_price = candidate_stop;
+            PrintFormat("[%s] >>> DYNAMIC TRAILING LOCK UPDATED (Stage 2): StopPrice=%.5f CurrentPrice=%.5f LockedPips=%.1f",
+                        sym, G_TradeProfile[idx].be_stop_price, current_price, PriceToPips(idx, G_TradeProfile[idx].be_stop_price - avg_entry));
+            if(G_Pairs[idx].active_chain_id > 0)
+               SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
+         }
+      }
+      else
+      {
+         double min_stop = avg_entry - PipsToPrice(idx, min_lock_pips);
+         candidate_stop = current_price + trail_dist;
+         if(candidate_stop > min_stop) candidate_stop = min_stop;
+
+         if(G_TradeProfile[idx].be_stop_price <= 0.0 || candidate_stop < G_TradeProfile[idx].be_stop_price)
+         {
+            G_TradeProfile[idx].be_stage = 2;
+            G_TradeProfile[idx].be_stop_price = candidate_stop;
+            PrintFormat("[%s] >>> DYNAMIC TRAILING LOCK UPDATED (Stage 2): StopPrice=%.5f CurrentPrice=%.5f LockedPips=%.1f",
+                        sym, G_TradeProfile[idx].be_stop_price, current_price, PriceToPips(idx, avg_entry - G_TradeProfile[idx].be_stop_price));
+            if(G_Pairs[idx].active_chain_id > 0)
+               SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
+         }
+      }
+   }
+}
+
+// Kiểm tra giá đã chạm BE / Trailing Stop chưa
+bool IsBreakEvenStopped(int idx, double current_price, int direction)
+{
+   if(!InpEnableBreakEven) return false;
+   if(!G_TradeProfile[idx].be_active) return false;
+   if(G_TradeProfile[idx].be_stop_price <= 0.0) return false;
+
+   if(direction == 1 && current_price <= G_TradeProfile[idx].be_stop_price)
+      return true;
+   if(direction == -1 && current_price >= G_TradeProfile[idx].be_stop_price)
+      return true;
+
+   return false;
 }
 
 // ==================================================================
@@ -1196,6 +1392,9 @@ void UpdateDynamicExit(int idx)
       int dir = G_TradeProfile[idx].direction;
       G_TradeProfile[idx].tp_price = GetBasketTPPrice(idx, avg, dir);
    }
+
+   // --- Break-Even & Trailing Lock Update ---
+   UpdateBreakEvenState(idx);
 
    // --- Runner Mode (FT only) ---
    if(G_TradeProfile[idx].runner_active)
