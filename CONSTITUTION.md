@@ -204,6 +204,7 @@ Cho dù tổng điểm có cao đến đâu, CT Entry **bắt buộc** phải pa
 
 - **Dynamic Step**: Tính từ ATR(14) M15 × multiplier, clamp trong [30, 60] pips. Step được **cố định tại thời điểm mở Master** và áp dụng cho toàn bộ chain.
 - **Chain Limit**: Khi đạt `InpMaxDCAPerChain` (3 positions) mà giá vẫn đi ngược, toàn bộ chain bị đóng (reason: MAX_DCA). Phần lỗ được ghi thành **System Debt** và hệ thống chuyển sang Recovery Mode.
+- **Margin Exhaustion Fail-safe**: Khi giá đi ngược chạm mốc DCA tiếp theo nhưng tài khoản không đủ Free Margin (`OrderCalcMargin` > FreeMargin) hoặc Broker từ chối mở lệnh (`TRADE_RETCODE_NO_MONEY`), toàn bộ chain lập tức bị đóng khẩn cấp (`CloseAndResolveChain(idx, "MAX_DCA")`) để bảo vệ tài khoản khỏi bị Margin Call / Stop Out, tuyệt đối không để lệnh trôi nổi khi không còn margin phòng thủ.
 - **Chain ID**: Mỗi chain có ID unique (monotonic), lưu persistent qua GlobalVariable, survive EA restart.
 - **Strategy Attribution**: Mỗi chain gắn tag CT/FT/DUAL, lưu persistent, detect qua 7-priority fallback chain.
 

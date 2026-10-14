@@ -973,6 +973,20 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
       else
          new_lot = CalculateDCALot(idx, next_dca_seq, working_balance);
 
+      // --- MARGIN EXHAUSTION PRE-CHECK ---
+      ENUM_ORDER_TYPE order_type = (master_type == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      double margin_required = 0.0;
+      bool margin_calc_ok = OrderCalcMargin(order_type, sym, new_lot, current_price, margin_required);
+      double free_margin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+
+      if(margin_calc_ok && margin_required > 0.0 && free_margin < margin_required)
+      {
+         PrintFormat("\n[MARGIN-EXHAUSTION-FAILSAFE]\nSYMBOL=%s\nACTION=EMERGENCY_CLOSE_CHAIN\nREASON=NOT_ENOUGH_FREE_MARGIN\nFreeMargin=%.2f\nRequiredMargin=%.2f\nAttemptedLot=%.2f\nChainPosition=%d\nAction=Closing chain immediately to protect account from Margin Call/Stop Out.",
+                     sym, free_margin, margin_required, new_lot, cur_pos_count);
+         CloseAndResolveChain(idx, "MAX_DCA");
+         return;
+      }
+
       // 4. Mở lệnh
       string cmt = strat + " | DCA " + IntegerToString(next_dca_seq);
       bool res = OpenChildOrder_Multi(idx, master_type, new_lot, cmt);
@@ -998,6 +1012,24 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
          // LOG BẮT BUỘC THEO SPEC
          PrintFormat("[DCA-OPEN]\nSYMBOL=%s\nSTRATEGY=%s\nDCA_SEQUENCE=%d\nCHAIN_POSITION=%d\nMAX_CHAIN_POSITIONS=%d\nLOT=%.2f\nMODE=%s\nDEBT=%.2f",
                      sym, strat, next_dca_seq, next_chain_pos, InpMaxDCAPerChain, new_lot, mode_str, current_debt);
+      }
+      else
+      {
+         uint retcode = trade.ResultRetcode();
+         PrintFormat("\n[DCA-OPEN-FAILED]\nSYMBOL=%s\nRetCode=%u (%s)\nAttemptedLot=%.2f\nFreeMargin=%.2f\nChainPosition=%d",
+                     sym, retcode, trade.ResultRetcodeDescription(), new_lot, AccountInfoDouble(ACCOUNT_MARGIN_FREE), cur_pos_count);
+
+         // Margin Exhaustion Fail-safe: Nếu lệnh bị Broker từ chối do thiếu tiền hoặc không đủ margin
+         if(retcode == 10019 /* TRADE_RETCODE_NO_MONEY */ || 
+            retcode == 10020 /* TRADE_RETCODE_LIMIT_ORDERS */ || 
+            retcode == 10021 /* TRADE_RETCODE_LIMIT_VOLUME */ || 
+            AccountInfoDouble(ACCOUNT_MARGIN_FREE) <= 0.0)
+         {
+            PrintFormat("[%s] >>> MARGIN EXHAUSTION DETECTED: Broker rejected order with retcode %u. Emergency Close Chain...",
+                        sym, retcode);
+            CloseAndResolveChain(idx, "MAX_DCA");
+            return;
+         }
       }
    }
 }
