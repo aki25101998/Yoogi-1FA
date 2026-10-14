@@ -397,9 +397,26 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       }
    }
 
+   if(pos_count == 0)
+   {
+      // Orphan / phantom chain ID: No positions were ever filled in history
+      PrintFormat("[INFO] Chain %I64u on %s has no positions in history. Clearing phantom chain state.", chain_id, sym);
+      G_Pairs[idx].active_chain_id = 0;
+      G_Pairs[idx].chain_position_count = 0;
+      ResetTradeProfile(idx);
+      ClearChainState_Multi(idx);
+      SavePersistentState(idx);
+      return true;
+   }
+
    if(close_deals_found == 0)
    {
-      PrintFormat("[WARNING] Chain %I64u on %s has no closed deals yet. Resolution deferred.", chain_id, sym);
+      static datetime last_warn_time = 0;
+      if(TimeCurrent() - last_warn_time >= 5)
+      {
+         PrintFormat("[WARNING] Chain %I64u on %s has no closed deals yet. Resolution deferred.", chain_id, sym);
+         last_warn_time = TimeCurrent();
+      }
       return false;
    }
 
@@ -783,15 +800,6 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
    ulong new_chain_id = GenerateUniqueChainID(idx);
    trade.SetExpertMagicNumber(new_chain_id);
-
-   // --- DYNAMICAL STRATEGY STATE SELECTION ---
-   G_Pairs[idx].active_chain_strategy = entry_mode;
-   G_Pairs[idx].active_chain_id = new_chain_id;
-
-   // Immediately persist strategy and active chain ID
-   int strat_val = (entry_mode == "FT") ? 2 : ((entry_mode == "DUAL") ? 3 : 1);
-   GlobalVariableSet("Yoogi_Strat_" + sym + "_" + IntegerToString(new_chain_id), (double)strat_val);
-   GlobalVariableSet("Yoogi_ActiveChainID_" + sym, (double)new_chain_id);
    
    // USE SYSTEM-LEVEL state (AUTHORITATIVE) - strategy-independent recovery
    double current_debt = GetSystemDebt(idx);
@@ -874,6 +882,11 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       if(idx >= 0 && idx < TOTAL_PAIRS)
          lastOpenTime[idx] = TimeCurrent();
 
+      // Persist strategy and active chain ID only after order successfully placed
+      int strat_val = (entry_mode == "FT") ? 2 : ((entry_mode == "DUAL") ? 3 : 1);
+      GlobalVariableSet("Yoogi_Strat_" + sym + "_" + IntegerToString(new_chain_id), (double)strat_val);
+      GlobalVariableSet("Yoogi_ActiveChainID_" + sym, (double)new_chain_id);
+
       // Tính toán Dynamic Step
       double atr_val = CalculateATR_Generic(sym, PERIOD_M15, 14, 1);
       int dyn_step = InpDCA_MinStepPips;
@@ -885,6 +898,7 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       }
 
       // Cập nhật trạng thái Global cho cặp này
+      G_Pairs[idx].active_chain_strategy = entry_mode;
       G_Pairs[idx].active_chain_id = new_chain_id;
       G_Pairs[idx].chain_position_count = 1;
       G_Pairs[idx].chain_start_dca_seq = next_dca_seq;
@@ -916,6 +930,14 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
       PrintFormat("[%s] >>> OPEN CHAIN [%s]: %.2f lots (Risk: %.2f%%, Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
                   sym, entry_mode, initial_lot, InpRiskPercent, current_bal, lot_calculation_bal, new_chain_id);
+   }
+   else
+   {
+      PrintFormat("[%s] >>> OPEN CHAIN FAILED [%s]: RetCode=%u (%s). Magic=%I64u",
+                  sym, entry_mode, trade.ResultRetcode(), trade.ResultRetcodeDescription(), new_chain_id);
+      G_Pairs[idx].active_chain_id = 0;
+      G_Pairs[idx].active_chain_strategy = "";
+      if(InpEnableDynamicTP) G_TradeProfile[idx].is_valid = false;
    }
 }
 
