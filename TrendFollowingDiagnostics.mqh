@@ -87,6 +87,7 @@ struct TFFunnelCounters
    int h1_reject;
    int h1_strong;
    int h1_base;
+   int h4_trend_reject;
    
    // 3. M15 Statistics
    int m15_evaluated;
@@ -228,6 +229,7 @@ struct TFFunnelCounters
       funnel_final_entry = 0;
 
       h1_evaluated = 0; h1_valid = 0; h1_reject = 0; h1_strong = 0; h1_base = 0;
+      h4_trend_reject = 0;
       m15_evaluated = 0; m15_valid = 0; m15_reject = 0;
       m15_rej_protected = 0; m15_rej_depth = 0; m15_rej_ema = 0;
       m15_rej_stale = 0; m15_rej_impulse = 0; m15_rej_h1_trend = 0;
@@ -297,6 +299,7 @@ struct TFFunnelCounters
       h1_reject += other.h1_reject;
       h1_strong += other.h1_strong;
       h1_base += other.h1_base;
+      h4_trend_reject += other.h4_trend_reject;
       
       m15_evaluated += other.m15_evaluated;
       m15_valid += other.m15_valid;
@@ -642,6 +645,16 @@ void TFDiag_RecordH1(int idx, int dir, double quality, datetime tm)
    {
       g_tf_diag[idx].stats[TF_DIR_TOT].h1_reject++;
    }
+}
+
+// ------------------------------------------------------------------
+// 2b. H4 Filter Statistics Recording
+// ------------------------------------------------------------------
+void TFDiag_RecordH4Reject(int idx, int dir)
+{
+   if(idx < 0 || idx >= TOTAL_PAIRS) return;
+   int d = TFDiag_DirToIdx(dir);
+   TF_INC(idx, d, h4_trend_reject);
 }
 
 // ------------------------------------------------------------------
@@ -1108,6 +1121,7 @@ void PrintFunnelBlock(string title, const TFFunnelCounters &c)
    Print("");
    Print("REJECTIONS:");
    PrintFormat("H1                    : %d", c.h1_reject);
+   PrintFormat("H4 Trend Filter       : %d", c.h4_trend_reject);
    PrintFormat("M15                   : %d", c.m15_reject);
    PrintFormat("Sweep                 : %d", c.sweep_reject);
    PrintFormat("Displacement          : %d", c.disp_reject);

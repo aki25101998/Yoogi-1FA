@@ -1285,76 +1285,74 @@ void UpdateBreakEvenState(int idx)
    if(natural_tp_pips <= 0.0)
       natural_tp_pips = (double)InpDynamicTP_MinPips;
 
-   // ATR M15 in pips for dynamic thresholding
+   // ATR M15 in pips for dynamic thresholding & trailing buffer
    double atr_val = G_TradeProfile[idx].initial_atr;
    if(atr_val <= 0.0)
       atr_val = CalculateATR_Generic(sym, PERIOD_M15, InpReversal_ATR_Period, 1);
    double atr_pips = PriceToPips(idx, atr_val);
 
-   // --- THRESHOLD NẤC 1: Trigger BE khi đạt 75% Natural TP (hoặc >= 0.8x ATR M15, min 10 pips) ---
-   double be_threshold_pips = natural_tp_pips * InpBreakEven_TriggerRatio;
-   if(atr_pips > 0.0 && be_threshold_pips < atr_pips * 0.8)
-      be_threshold_pips = atr_pips * 0.8;
+   // --- NGƯỠNG KÍCH HOẠT DYNAMIC TRAILING STOP: Max(1.0x ATR, 60% Natural TP, min 10 pips) ---
+   double be_threshold_pips = MathMax(atr_pips * 1.0, natural_tp_pips * 0.60);
    if(be_threshold_pips < 10.0)
       be_threshold_pips = 10.0;
 
-   // --- NẤC 1: Khóa hòa vốn (+ offset bù spread) ---
-   if(pips_run >= be_threshold_pips && G_TradeProfile[idx].be_stage < 1)
+   // Chưa đạt ngưỡng bứt phá tối thiểu -> Cho lệnh thở tự do
+   if(pips_run < be_threshold_pips) return;
+
+   // Khoảng cách Trailing Stop động: 1.5x ATR M15
+   double trail_pips = (atr_pips > 0.0) ? (atr_pips * 1.5) : 20.0;
+   double trail_dist = PipsToPrice(idx, trail_pips);
+
+   if(dir == 1) // BUY
    {
-      G_TradeProfile[idx].be_active = true;
-      G_TradeProfile[idx].be_stage = 1;
-      double offset_dist = PipsToPrice(idx, InpBreakEven_OffsetPips);
-      if(dir == 1)
-         G_TradeProfile[idx].be_stop_price = avg_entry + offset_dist;
-      else
-         G_TradeProfile[idx].be_stop_price = avg_entry - offset_dist;
+      double min_stop = avg_entry + PipsToPrice(idx, InpBreakEven_OffsetPips); // Bảo vệ tối thiểu điểm hòa vốn
+      double candidate_stop = current_price - trail_dist;
+      if(candidate_stop < min_stop) candidate_stop = min_stop;
 
-      PrintFormat("[%s] >>> DYNAMIC BREAK-EVEN ACTIVATED (Stage 1): PipsRun=%.1f Threshold=%.1f AvgEntry=%.5f StopPrice=%.5f Offset=%.1f pips",
-                  sym, pips_run, be_threshold_pips, avg_entry, G_TradeProfile[idx].be_stop_price, InpBreakEven_OffsetPips);
-
-      if(G_Pairs[idx].active_chain_id > 0)
-         SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
-   }
-
-   // --- NẤC 2: Khi giá rướn vượt qua Natural TP (đang vươn tới Recovery TP) ---
-   // Khóa bảo toàn ít nhất 50% Natural TP hoặc Trailing theo sau giá 1.2x ATR
-   if(pips_run >= natural_tp_pips && G_TradeProfile[idx].be_stage >= 1)
-   {
-      double min_lock_pips = natural_tp_pips * 0.50;
-      double trail_dist = (atr_pips > 0.0) ? PipsToPrice(idx, atr_pips * 1.2) : PipsToPrice(idx, min_lock_pips);
-
-      double candidate_stop = 0.0;
-      if(dir == 1)
+      if(!G_TradeProfile[idx].be_active)
       {
-         double min_stop = avg_entry + PipsToPrice(idx, min_lock_pips);
-         candidate_stop = current_price - trail_dist;
-         if(candidate_stop < min_stop) candidate_stop = min_stop;
-
-         if(candidate_stop > G_TradeProfile[idx].be_stop_price)
-         {
-            G_TradeProfile[idx].be_stage = 2;
-            G_TradeProfile[idx].be_stop_price = candidate_stop;
-            PrintFormat("[%s] >>> DYNAMIC TRAILING LOCK UPDATED (Stage 2): StopPrice=%.5f CurrentPrice=%.5f LockedPips=%.1f",
-                        sym, G_TradeProfile[idx].be_stop_price, current_price, PriceToPips(idx, G_TradeProfile[idx].be_stop_price - avg_entry));
-            if(G_Pairs[idx].active_chain_id > 0)
-               SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
-         }
+         G_TradeProfile[idx].be_active = true;
+         G_TradeProfile[idx].be_stage = 1;
+         G_TradeProfile[idx].be_stop_price = candidate_stop;
+         PrintFormat("[%s] >>> DYNAMIC ATR TRAILING ACTIVATED (BUY): PipsRun=%.1f Threshold=%.1f AvgEntry=%.5f StopPrice=%.5f LockedPips=%.1f",
+                     sym, pips_run, be_threshold_pips, avg_entry, candidate_stop, PriceToPips(idx, candidate_stop - avg_entry));
+         if(G_Pairs[idx].active_chain_id > 0)
+            SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
       }
-      else
+      else if(candidate_stop > G_TradeProfile[idx].be_stop_price)
       {
-         double min_stop = avg_entry - PipsToPrice(idx, min_lock_pips);
-         candidate_stop = current_price + trail_dist;
-         if(candidate_stop > min_stop) candidate_stop = min_stop;
+         G_TradeProfile[idx].be_stop_price = candidate_stop;
+         G_TradeProfile[idx].be_stage = 2;
+         PrintFormat("[%s] >>> DYNAMIC ATR TRAILING UPDATED (BUY): StopPrice=%.5f CurrentPrice=%.5f LockedPips=%.1f",
+                     sym, G_TradeProfile[idx].be_stop_price, current_price, PriceToPips(idx, G_TradeProfile[idx].be_stop_price - avg_entry));
+         if(G_Pairs[idx].active_chain_id > 0)
+            SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
+      }
+   }
+   else if(dir == -1) // SELL
+   {
+      double max_stop = avg_entry - PipsToPrice(idx, InpBreakEven_OffsetPips); // Bảo vệ tối thiểu điểm hòa vốn
+      double candidate_stop = current_price + trail_dist;
+      if(candidate_stop > max_stop) candidate_stop = max_stop;
 
-         if(G_TradeProfile[idx].be_stop_price <= 0.0 || candidate_stop < G_TradeProfile[idx].be_stop_price)
-         {
-            G_TradeProfile[idx].be_stage = 2;
-            G_TradeProfile[idx].be_stop_price = candidate_stop;
-            PrintFormat("[%s] >>> DYNAMIC TRAILING LOCK UPDATED (Stage 2): StopPrice=%.5f CurrentPrice=%.5f LockedPips=%.1f",
-                        sym, G_TradeProfile[idx].be_stop_price, current_price, PriceToPips(idx, avg_entry - G_TradeProfile[idx].be_stop_price));
-            if(G_Pairs[idx].active_chain_id > 0)
-               SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
-         }
+      if(!G_TradeProfile[idx].be_active)
+      {
+         G_TradeProfile[idx].be_active = true;
+         G_TradeProfile[idx].be_stage = 1;
+         G_TradeProfile[idx].be_stop_price = candidate_stop;
+         PrintFormat("[%s] >>> DYNAMIC ATR TRAILING ACTIVATED (SELL): PipsRun=%.1f Threshold=%.1f AvgEntry=%.5f StopPrice=%.5f LockedPips=%.1f",
+                     sym, pips_run, be_threshold_pips, avg_entry, candidate_stop, PriceToPips(idx, avg_entry - candidate_stop));
+         if(G_Pairs[idx].active_chain_id > 0)
+            SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
+      }
+      else if(G_TradeProfile[idx].be_stop_price <= 0.0 || candidate_stop < G_TradeProfile[idx].be_stop_price)
+      {
+         G_TradeProfile[idx].be_stop_price = candidate_stop;
+         G_TradeProfile[idx].be_stage = 2;
+         PrintFormat("[%s] >>> DYNAMIC ATR TRAILING UPDATED (SELL): StopPrice=%.5f CurrentPrice=%.5f LockedPips=%.1f",
+                     sym, G_TradeProfile[idx].be_stop_price, current_price, PriceToPips(idx, avg_entry - G_TradeProfile[idx].be_stop_price));
+         if(G_Pairs[idx].active_chain_id > 0)
+            SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
       }
    }
 }

@@ -69,6 +69,8 @@ void ResetTFSetup(int idx, string reason)
    G_TF[idx].h1_price_above_ema = false;
    G_TF[idx].h1_structure_valid = false;
    G_TF[idx].h1_not_sideway = false;
+   G_TF[idx].h4_trend_aligned = false;
+   G_TF[idx].h4_trend_direction = 0;
    
    ResetTFM15Evidence(idx);
    ResetTFM5Evidence(idx);
@@ -160,6 +162,48 @@ void ResetTFM15Evidence(int idx)
    G_TF[idx].score_m15_pullback = 0.0;
    G_TF[idx].m15_protected_low = 0.0;
    G_TF[idx].m15_protected_high = 0.0;
+}
+
+// ==================================================================
+// LAYER 0: H4 TREND ALIGNMENT FILTER
+// ==================================================================
+// Returns true if H4 trend aligns with required_direction (1=BUY, -1=SELL)
+bool EvaluateH4TrendFilter(int idx, int required_direction)
+{
+   if(required_direction == 0) return false;
+   string sym = G_Pairs[idx].symbol;
+   
+   // 1. Calculate H4 EMA20 and EMA50 on closed bar 1
+   double ema20_h4 = CalculateEMA_Generic(sym, PERIOD_H4, 20, 1);
+   double ema50_h4 = CalculateEMA_Generic(sym, PERIOD_H4, 50, 1);
+   if(ema20_h4 <= 0.0 || ema50_h4 <= 0.0) return false;
+   
+   // 2. Calculate H4 EMA50 slope (compare closed bar 1 vs 1 + TF_SLOPE_LOOKBACK)
+   double ema50_h4_prev = CalculateEMA_Generic(sym, PERIOD_H4, 50, 1 + TF_SLOPE_LOOKBACK);
+   if(ema50_h4_prev <= 0.0) return false;
+   bool h4_slope_bull = (ema50_h4 > ema50_h4_prev);
+   bool h4_slope_bear = (ema50_h4 < ema50_h4_prev);
+   
+   // 3. Price position on H4 closed bar 1
+   double close_h4[];
+   if(CopyClose(sym, PERIOD_H4, 1, 1, close_h4) < 1) return false;
+   
+   if(required_direction == 1) // BUY
+   {
+      bool h4_ema_aligned = (ema20_h4 > ema50_h4);
+      bool h4_price_above = (close_h4[0] > ema50_h4);
+      if(h4_ema_aligned && h4_slope_bull && h4_price_above)
+         return true;
+   }
+   else if(required_direction == -1) // SELL
+   {
+      bool h4_ema_aligned = (ema20_h4 < ema50_h4);
+      bool h4_price_below = (close_h4[0] < ema50_h4);
+      if(h4_ema_aligned && h4_slope_bear && h4_price_below)
+         return true;
+   }
+   
+   return false;
 }
 
 // ==================================================================
@@ -262,6 +306,31 @@ int EvaluateH1TrendRegime(int idx, double &out_protected_struct)
    
    bool buy_minimum = (buy_ema && buy_slope && buy_price && not_sideway);
    bool sell_minimum = (sell_ema && sell_slope && sell_price && not_sideway);
+   
+   if(buy_minimum)
+   {
+      bool h4_pass = EvaluateH4TrendFilter(idx, 1);
+      G_TF[idx].h4_trend_aligned = h4_pass;
+      G_TF[idx].h4_trend_direction = h4_pass ? 1 : 0;
+      if(!h4_pass)
+      {
+         buy_minimum = false;
+         TFDiag_RecordH4Reject(idx, 1);
+         PrintFormat("[FT_H4_FILTER][%s] BUY BLOCKED: H4 Trend not aligned (EMA20/50, Slope, or Price vs EMA50)", sym);
+      }
+   }
+   else if(sell_minimum)
+   {
+      bool h4_pass = EvaluateH4TrendFilter(idx, -1);
+      G_TF[idx].h4_trend_aligned = h4_pass;
+      G_TF[idx].h4_trend_direction = h4_pass ? -1 : 0;
+      if(!h4_pass)
+      {
+         sell_minimum = false;
+         TFDiag_RecordH4Reject(idx, -1);
+         PrintFormat("[FT_H4_FILTER][%s] SELL BLOCKED: H4 Trend not aligned (EMA20/50, Slope, or Price vs EMA50)", sym);
+      }
+   }
    
    if(buy_minimum)
    {
@@ -2149,6 +2218,14 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    {
       if(first_reject == "") first_reject = "TF_P2_H1_REJECT";
       PrintFormat("[TF_PHASE2_REJECT] H1 (direction=%d, quality=%.0f)", G_TF[idx].h1_trend_direction, G_TF[idx].h1_trend_quality);
+      pass = false;
+   }
+   
+   // 1b. H4 Trend Alignment Valid (Hard Gate)
+   if(!EvaluateH4TrendFilter(idx, direction))
+   {
+      if(first_reject == "") first_reject = "TF_P2_H4_REJECT";
+      PrintFormat("[TF_PHASE2_REJECT] H4 Alignment (direction=%d not supported by H4)", direction);
       pass = false;
    }
    

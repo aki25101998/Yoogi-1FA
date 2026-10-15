@@ -328,6 +328,8 @@ struct TrendFollowingContext
    bool   h1_price_above_ema;     // Price above EMA50 (BUY) or below (SELL)
    bool   h1_structure_valid;     // HH/HL or LL/LH
    bool   h1_not_sideway;         // Not in sideway range
+   bool   h4_trend_aligned;       // H4 EMA20/50, slope, and price position aligned with H1
+   int    h4_trend_direction;     // 1=BUY, -1=SELL, 0=NONE
 
    // M15 Pullback
    bool   m15_pullback_valid;
