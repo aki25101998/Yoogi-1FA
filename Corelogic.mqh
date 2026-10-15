@@ -429,6 +429,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       else if(pr_val == 2.0) reason = "TP";
       else if(pr_val == 3.0) reason = "RUNNER";
       else if(pr_val == 4.0) reason = "BREAK_EVEN";
+      else if(pr_val == 5.0) reason = "SL";
       GlobalVariableDel(pending_reason_gv);
    }
    else if(reason == "BROKER_CLOSE")
@@ -503,9 +504,18 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
    }
 
    // Update Debt, Recovery State & DCA Sequence based on Reason and Realized P&L
-   if(reason == "MAX_DCA")
+   if(reason == "MAX_DCA" || reason == "SL")
    {
-      if(realized_pnl < 0.0)
+      if(!InpEnableDCA)
+      {
+         // Khi tắt DCA (đánh lệnh đơn): Không tích luỹ nợ chuỗi hay tăng DCA sequence
+         SetSystemDCASeq(idx, 0);
+         SetSystemRecLvl(idx, 0);
+         SetSystemDebt(idx, 0.0);
+         PrintFormat("\n[SINGLE-ORDER-EXIT]\nSYMBOL=%s\nSTRATEGY=%s\nREASON=SL\nRESULT=%.2f\nMODE=NORMAL",
+                     sym, strat, realized_pnl);
+      }
+      else if(realized_pnl < 0.0)
       {
          double net_loss = MathAbs(realized_pnl);
          double debt_after = debt_before + net_loss;
@@ -571,7 +581,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
    }
    else if(reason == "TP" || reason == "RUNNER" || reason == "BREAK_EVEN")
    {
-      if(debt_before <= 0.001)
+      if(!InpEnableDCA || debt_before <= 0.001)
       {
          // Normal TP / Break-Even: no debt, reset sequence to 0 (ready for next chain starting at DCA 1)
          SetSystemDCASeq(idx, 0);
@@ -719,6 +729,7 @@ void CloseAndResolveChain(int idx, string reason)
    else if(reason == "TP") pr_val = 2.0;
    else if(reason == "RUNNER") pr_val = 3.0;
    else if(reason == "BREAK_EVEN") pr_val = 4.0;
+   else if(reason == "SL") pr_val = 5.0;
    GlobalVariableSet(pending_reason_gv, pr_val);
 
    // 1. Request closing of all positions belonging to this chain
@@ -803,8 +814,8 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
    
    // USE SYSTEM-LEVEL state (AUTHORITATIVE) - strategy-independent recovery
    double current_debt = GetSystemDebt(idx);
-   bool is_recovery    = (current_debt > 0.001);
-   int current_dca_seq = GetSystemDCASeq(idx);
+   bool is_recovery    = (InpEnableDCA && current_debt > 0.001);
+   int current_dca_seq = InpEnableDCA ? GetSystemDCASeq(idx) : 0;
 
    int next_dca_seq = 1;
    if(is_recovery)
@@ -816,8 +827,8 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       next_dca_seq = 1;
    }
 
-   // --- COMMENT VỚI DCA SEQUENCE (BỎ HOÀN TOÀN ENTRY) ---
-   string comment = entry_mode + " | DCA " + IntegerToString(next_dca_seq);
+   // --- COMMENT VỚI DCA SEQUENCE HOẶC SINGLE ---
+   string comment = entry_mode + (InpEnableDCA ? (" | DCA " + IntegerToString(next_dca_seq)) : " | SINGLE");
    
    bool   res     = false;
    double sl=0.0, tp=0.0;
@@ -924,9 +935,9 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       SaveChainState_Multi(idx);
 
       // --- LOG BẮT BUỘC THEO SPEC ---
-      string mode_str = is_recovery ? "RECOVERY" : "NORMAL";
+      string mode_str = is_recovery ? "RECOVERY" : (InpEnableDCA ? "NORMAL" : "SINGLE");
       PrintFormat("[DCA-OPEN]\nSYMBOL=%s\nSTRATEGY=%s\nDCA_SEQUENCE=%d\nCHAIN_POSITION=%d\nMAX_CHAIN_POSITIONS=%d\nLOT=%.2f\nRISK=%.2f%%\nMODE=%s\nDEBT=%.2f",
-                  sym, entry_mode, next_dca_seq, 1, InpMaxDCAPerChain, initial_lot, InpRiskPercent, mode_str, current_debt);
+                  sym, entry_mode, next_dca_seq, 1, (InpEnableDCA ? InpMaxDCAPerChain : 1), initial_lot, InpRiskPercent, mode_str, current_debt);
 
       PrintFormat("[%s] >>> OPEN CHAIN [%s]: %.2f lots (Risk: %.2f%%, Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
                   sym, entry_mode, initial_lot, InpRiskPercent, current_bal, lot_calculation_bal, new_chain_id);
@@ -946,8 +957,6 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 // ==================================================================
 void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master_type)
 {
-   if(InpMaxDCAPerChain <= 0) return;
-
    string sym = G_Pairs[idx].symbol;
    ulong  id  = G_Pairs[idx].active_chain_id;
 
@@ -966,6 +975,17 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
    if(enough)
    {
+      // KHI TẮT DCA (ĐÁNH LỆNH ĐƠN): Giá đi ngược chạm 1 Dynamic Step ATR -> Đóng cắt lỗ lệnh đơn ngay lập tức
+      if(!InpEnableDCA)
+      {
+         PrintFormat("\n[SINGLE-ORDER-SL]\nSYMBOL=%s\nENTRY=%.5f\nCURRENT=%.5f\nSL_STEP=%d pips\nACTION=CLOSE_ORDER",
+                     sym, last_price, current_price, step_pips);
+         CloseAndResolveChain(idx, "SL");
+         return;
+      }
+
+      if(InpMaxDCAPerChain <= 0) return;
+
       string strat = G_Pairs[idx].active_chain_strategy;
       if(strat == "") strat = "CT";
       
