@@ -946,8 +946,8 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction)
    double final_distance = natural_distance;
    double tp_price = 0.0;
 
-   // NORMAL MODE: Debt == 0
-   if(debt <= 0.001)
+   // NORMAL MODE: Debt == 0 HOẶC Chế độ DCA 3 lệnh cố định (không ép TP xa để gỡ nợ)
+   if(InpDCA3Orders || debt <= 0.001)
    {
       final_distance = natural_distance;
       if(direction == 1)

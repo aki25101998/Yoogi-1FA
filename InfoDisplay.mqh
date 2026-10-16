@@ -206,7 +206,7 @@ void UpdateDisplay()
       string r = IntegerToString(i);
       string sym_short = G_Pairs[i].base_name;
       double pair_debt = GetSystemDebt(i);
-      bool is_recovery = (pair_debt > 0.001 || G_Pairs[i].system_recovery_active);
+      bool is_recovery = (!InpDCA3Orders && (pair_debt > 0.001 || G_Pairs[i].system_recovery_active));
 
       // COLUMN 1: PAIR
       string s_pair = StringFormat("%-6s", sym_short);

@@ -429,7 +429,6 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       else if(pr_val == 2.0) reason = "TP";
       else if(pr_val == 3.0) reason = "RUNNER";
       else if(pr_val == 4.0) reason = "BREAK_EVEN";
-      else if(pr_val == 5.0) reason = "SL";
       GlobalVariableDel(pending_reason_gv);
    }
    else if(reason == "BROKER_CLOSE")
@@ -504,70 +503,90 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
    }
 
    // Update Debt, Recovery State & DCA Sequence based on Reason and Realized P&L
-   if(reason == "MAX_DCA" || reason == "SL")
+   if(reason == "MAX_DCA")
    {
-      if(!InpEnableDCA)
-      {
-         // Khi tắt DCA (đánh lệnh đơn): Không tích luỹ nợ chuỗi hay tăng DCA sequence
-         SetSystemDCASeq(idx, 0);
-         SetSystemRecLvl(idx, 0);
-         SetSystemDebt(idx, 0.0);
-         PrintFormat("\n[SINGLE-ORDER-EXIT]\nSYMBOL=%s\nSTRATEGY=%s\nREASON=SL\nRESULT=%.2f\nMODE=NORMAL",
-                     sym, strat, realized_pnl);
-      }
-      else if(realized_pnl < 0.0)
+      if(realized_pnl < 0.0)
       {
          double net_loss = MathAbs(realized_pnl);
          double debt_after = debt_before + net_loss;
-         rec_lvl++;
          
+         // LUÔN LƯU VÀ CỘNG DỒN DEBT ĐỂ THEO DÕI CẶP NÀO ĐANG LỖ NHẤT
          SetSystemDebt(idx, debt_after);
-         SetSystemRecLvl(idx, rec_lvl);
-         G_Pairs[idx].system_debt_partially_recovered = false; // New loss → reset partial flag
-         // Global DCA sequence stays at current_dca_seq (does NOT reset)
          
-         PrintFormat("[DEBT-ADD]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
-                     sym, strat, chain_id, dca_from, dca_to, realized_pnl, debt_before, net_loss, debt_after, current_dca_seq);
+         if(InpDCA3Orders)
+         {
+            // CHẾ ĐỘ DCA 3 LỆNH CỐ ĐỊNH: Chấp nhận cắt lỗ, reset sequence để chuỗi sau làm lại từ đầu lot gốc
+            SetSystemRecLvl(idx, 0);
+            SetSystemDCASeq(idx, 0);
+            G_Pairs[idx].system_debt_partially_recovered = false;
+            
+            PrintFormat("\n[CHAIN-LOSS-RESET-DCA3]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nTOTAL_DEBT=%.2f\nNEXT_DCA_SEQUENCE=1 (START_FRESH)",
+                        sym, strat, chain_id, realized_pnl, debt_before, net_loss, debt_after);
+         }
+         else
+         {
+            // CHẾ ĐỘ CŨ (NÂNG LOT GỠ NỢ): Tăng rec_lvl, giữ nguyên DCA sequence để chuỗi sau nâng lot
+            rec_lvl++;
+            SetSystemRecLvl(idx, rec_lvl);
+            G_Pairs[idx].system_debt_partially_recovered = false; // New loss → reset partial flag
+            // Global DCA sequence stays at current_dca_seq (does NOT reset)
+            
+            PrintFormat("[DEBT-ADD]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
+                        sym, strat, chain_id, dca_from, dca_to, realized_pnl, debt_before, net_loss, debt_after, current_dca_seq);
+         }
       }
       else
       {
          // MAX_DCA with profit (not TP)
          if(debt_before > 0.001 && realized_pnl > 0.0)
          {
-            bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
-            double debt_target = 0.0;
-            if(partial_done)
-               debt_target = debt_before;  // Already partially recovered → 100%
-            else if(pos_count <= 2)
-               debt_target = debt_before * 0.50;  // First recovery, small chain → 50%
-            else
-               debt_target = debt_before;  // First recovery, 3+ pos → 100%
-
-            double debt_reduction = MathMin(debt_target, realized_pnl);
-            debt_reduction = MathMin(debt_reduction, debt_before);
-
-            double normal_profit = realized_pnl - debt_reduction;
-            double debt_after = debt_before - debt_reduction;
-            
-            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
-                        sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
-
-            if(debt_after <= 0.00001)
+            if(InpDCA3Orders)
             {
-               // Full Recovery Complete!
-               SetSystemDebt(idx, 0.0);
+               double debt_reduction = MathMin(debt_before, realized_pnl);
+               double debt_after = debt_before - debt_reduction;
+               SetSystemDebt(idx, debt_after);
                SetSystemRecLvl(idx, 0);
                SetSystemDCASeq(idx, 0);
-               G_Pairs[idx].system_debt_partially_recovered = false;
+               PrintFormat("\n[MAX_DCA PROFIT]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nRemainingDebt=%.2f",
+                           sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, debt_after);
             }
             else
             {
-               // Partial Recovery
-               SetSystemDebt(idx, debt_after);
-               G_Pairs[idx].system_debt_partially_recovered = true;
+               bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
+               double debt_target = 0.0;
+               if(partial_done)
+                  debt_target = debt_before;  // Already partially recovered → 100%
+               else if(pos_count <= 2)
+                  debt_target = debt_before * 0.50;  // First recovery, small chain → 50%
+               else
+                  debt_target = debt_before;  // First recovery, 3+ pos → 100%
+
+               double debt_reduction = MathMin(debt_target, realized_pnl);
+               debt_reduction = MathMin(debt_reduction, debt_before);
+
+               double normal_profit = realized_pnl - debt_reduction;
+               double debt_after = debt_before - debt_reduction;
                
-               // Tiered Recovery: Khóa Level DCA bằng cách lặp lại chain hiện tại
-               SetSystemDCASeq(idx, MathMax(0, G_Pairs[idx].chain_start_dca_seq - 1));
+               PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
+                           sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
+
+               if(debt_after <= 0.00001)
+               {
+                  // Full Recovery Complete!
+                  SetSystemDebt(idx, 0.0);
+                  SetSystemRecLvl(idx, 0);
+                  SetSystemDCASeq(idx, 0);
+                  G_Pairs[idx].system_debt_partially_recovered = false;
+               }
+               else
+               {
+                  // Partial Recovery
+                  SetSystemDebt(idx, debt_after);
+                  G_Pairs[idx].system_debt_partially_recovered = true;
+                  
+                  // Tiered Recovery: Khóa Level DCA bằng cách lặp lại chain hiện tại
+                  SetSystemDCASeq(idx, MathMax(0, G_Pairs[idx].chain_start_dca_seq - 1));
+               }
             }
          }
          else
@@ -581,7 +600,29 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
    }
    else if(reason == "TP" || reason == "RUNNER" || reason == "BREAK_EVEN")
    {
-      if(!InpEnableDCA || debt_before <= 0.001)
+      if(InpDCA3Orders)
+      {
+         // Chuỗi mới luôn bắt đầu từ DCA 1 (lot gốc)
+         SetSystemDCASeq(idx, 0);
+         SetSystemRecLvl(idx, 0);
+         
+         // Giảm trừ nợ nếu có nợ tích lũy
+         if(debt_before > 0.001 && realized_pnl > 0.0)
+         {
+            double debt_reduction = MathMin(debt_before, realized_pnl);
+            double debt_after = debt_before - debt_reduction;
+            SetSystemDebt(idx, debt_after);
+            PrintFormat("\n[PROFIT CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nREASON=%s\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nRemainingDebt=%.2f",
+                        sym, strat, chain_id, reason, realized_pnl, debt_before, debt_reduction, debt_after);
+         }
+         else if(debt_before <= 0.001)
+         {
+            SetSystemDebt(idx, 0.0);
+            PrintFormat("[NORMAL-EXIT]\nSYMBOL=%s\nSTRATEGY=%s\nREASON=%s\nCHAIN_RESULT=%.2f\nRESET_DCA_SEQUENCE=true\nMODE=NORMAL",
+                        sym, strat, reason, realized_pnl);
+         }
+      }
+      else if(debt_before <= 0.001)
       {
          // Normal TP / Break-Even: no debt, reset sequence to 0 (ready for next chain starting at DCA 1)
          SetSystemDCASeq(idx, 0);
@@ -729,7 +770,6 @@ void CloseAndResolveChain(int idx, string reason)
    else if(reason == "TP") pr_val = 2.0;
    else if(reason == "RUNNER") pr_val = 3.0;
    else if(reason == "BREAK_EVEN") pr_val = 4.0;
-   else if(reason == "SL") pr_val = 5.0;
    GlobalVariableSet(pending_reason_gv, pr_val);
 
    // 1. Request closing of all positions belonging to this chain
@@ -814,8 +854,8 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
    
    // USE SYSTEM-LEVEL state (AUTHORITATIVE) - strategy-independent recovery
    double current_debt = GetSystemDebt(idx);
-   bool is_recovery    = (InpEnableDCA && current_debt > 0.001);
-   int current_dca_seq = InpEnableDCA ? GetSystemDCASeq(idx) : 0;
+   bool is_recovery    = (!InpDCA3Orders && current_debt > 0.001);
+   int current_dca_seq = (!InpDCA3Orders) ? GetSystemDCASeq(idx) : 0;
 
    int next_dca_seq = 1;
    if(is_recovery)
@@ -827,8 +867,8 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       next_dca_seq = 1;
    }
 
-   // --- COMMENT VỚI DCA SEQUENCE HOẶC SINGLE ---
-   string comment = entry_mode + (InpEnableDCA ? (" | DCA " + IntegerToString(next_dca_seq)) : " | SINGLE");
+   // --- COMMENT VỚI DCA SEQUENCE ---
+   string comment = entry_mode + " | DCA " + IntegerToString(next_dca_seq);
    
    bool   res     = false;
    double sl=0.0, tp=0.0;
@@ -935,9 +975,9 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       SaveChainState_Multi(idx);
 
       // --- LOG BẮT BUỘC THEO SPEC ---
-      string mode_str = is_recovery ? "RECOVERY" : (InpEnableDCA ? "NORMAL" : "SINGLE");
+      string mode_str = is_recovery ? "RECOVERY" : (InpDCA3Orders ? "DCA3_FIXED" : "NORMAL");
       PrintFormat("[DCA-OPEN]\nSYMBOL=%s\nSTRATEGY=%s\nDCA_SEQUENCE=%d\nCHAIN_POSITION=%d\nMAX_CHAIN_POSITIONS=%d\nLOT=%.2f\nRISK=%.2f%%\nMODE=%s\nDEBT=%.2f",
-                  sym, entry_mode, next_dca_seq, 1, (InpEnableDCA ? InpMaxDCAPerChain : 1), initial_lot, InpRiskPercent, mode_str, current_debt);
+                  sym, entry_mode, next_dca_seq, 1, InpMaxDCAPerChain, initial_lot, InpRiskPercent, mode_str, current_debt);
 
       PrintFormat("[%s] >>> OPEN CHAIN [%s]: %.2f lots (Risk: %.2f%%, Actual Bal: $%.2f, Ref Bal: $%.2f). ID: %I64u",
                   sym, entry_mode, initial_lot, InpRiskPercent, current_bal, lot_calculation_bal, new_chain_id);
@@ -957,6 +997,8 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 // ==================================================================
 void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master_type)
 {
+   if(InpMaxDCAPerChain <= 0) return;
+
    string sym = G_Pairs[idx].symbol;
    ulong  id  = G_Pairs[idx].active_chain_id;
 
@@ -975,17 +1017,6 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
    if(enough)
    {
-      // KHI TẮT DCA (ĐÁNH LỆNH ĐƠN): Giá đi ngược chạm 1 Dynamic Step ATR -> Đóng cắt lỗ lệnh đơn ngay lập tức
-      if(!InpEnableDCA)
-      {
-         PrintFormat("\n[SINGLE-ORDER-SL]\nSYMBOL=%s\nENTRY=%.5f\nCURRENT=%.5f\nSL_STEP=%d pips\nACTION=CLOSE_ORDER",
-                     sym, last_price, current_price, step_pips);
-         CloseAndResolveChain(idx, "SL");
-         return;
-      }
-
-      if(InpMaxDCAPerChain <= 0) return;
-
       string strat = G_Pairs[idx].active_chain_strategy;
       if(strat == "") strat = "CT";
       
