@@ -15,7 +15,6 @@
 input group "=== TÙY CHỈNH CHUNG ==="
 input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = dùng ACCOUNT_BALANCE thực tế)
 input double InpRiskPercent = 0.5; // % Balance dùng để tính Lot (ví dụ: 0.5 = 0.5%)
-input bool   InpDCA3Orders = true; // DCA 3 Lệnh (true = Cắt lỗ làm lại từ đầu lot gốc, false = Nâng lot gỡ nợ chuỗi sau)
 
 input group "=== ENTRY ENGINE ==="
 input double InpCT_RequiredScore         = 75.0;   // Counter-Trend Required Score (Constitution min >= 70.0)
