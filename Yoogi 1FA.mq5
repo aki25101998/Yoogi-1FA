@@ -50,8 +50,8 @@ int OnInit()
    if(!CheckLicense()) { return(INIT_FAILED); }
 
    // --- 3. KHỞI TẠO LOGIC ĐA CẶP ---
-   InitGlobals();    // Khởi tạo 7 cặp tiền và Risk % cứng
-   InitIndicators(); // Khởi tạo chỉ báo cho 7 cặp
+   InitGlobals();    // Khởi tạo 6 cặp tiền và Risk % cứng
+   InitIndicators(); // Khởi tạo chỉ báo cho 6 cặp
    InitAllTradeProfiles(); // Khởi tạo Dynamic Exit Profiles
    CreateDisplay();  // Vẽ giao diện Dashboard
 
@@ -62,7 +62,7 @@ int OnInit()
 
    // [CẬP NHẬT] Thay đổi nội dung log in ra tab Expert
    Print(">>> Yoogi One For All đã khởi động trên EURUSD.");
-   Print(">>> Chế độ: 7 Pairs Fixed - Optimized Timer (3s).");
+   Print(">>> Chế độ: 6 Pairs Fixed - Optimized Timer (3s).");
    
    Print("\n[DXY_TF_INIT]");
    Print("ENGINE=ACTIVE");

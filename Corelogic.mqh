@@ -1190,7 +1190,7 @@ void ManagePairs()
       }
    }
 
-   // --- VONG LAP QUA 5 CAP TIEN ---
+   // --- VONG LAP QUA 6 CAP TIEN ---
    for(int i = 0; i < TOTAL_PAIRS; ++i)
    {
       string sym = G_Pairs[i].symbol;

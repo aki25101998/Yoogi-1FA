@@ -10,8 +10,8 @@
 // ==================================================================
 // HẰNG SỐ & CẤU HÌNH GIỚI HẠN
 // ==================================================================
-#define TOTAL_PAIRS 5   // Tổng cộng 5 cặp tiền
-#define DXY_CONTEXTS 5 // So luong DXY context dong bo voi 5 cap
+#define TOTAL_PAIRS 6   // Tổng cộng 6 cặp tiền
+#define DXY_CONTEXTS 6 // So luong DXY context dong bo voi 6 cap
 #define EA_MAGIC_NUMBER 1
 
 // --- GIỚI HẠN HOẠT ĐỘNG (Dựa trên Virtual Balance) ---
@@ -482,7 +482,7 @@ int     activeChainsCount = 0;
 // DANH SÁCH TÊN CHUẨN (5 CẶP)
 // ==================================================================
 string StandardBaseNames[TOTAL_PAIRS] = {
-   "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "USDCHF"
+   "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "GBPUSD", "NZDUSD"
 };
 
 // ==================================================================
@@ -498,7 +498,7 @@ string GetBrokerSymbol(string std_name)
 
    // List base để detect suffix
    string CommonBases[] = {
-      "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "USDCHF"
+      "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "GBPUSD", "NZDUSD"
    };
 
    string prefix = "";
@@ -940,7 +940,7 @@ void InitGlobals()
       }
       else if(StringFind(bn, "USD") > 0)
       {
-         // xxxUSD (VD: EURUSD, AUDUSD, USDCHF)
+         // xxxUSD (VD: EURUSD, AUDUSD, GBPUSD, NZDUSD)
          G_Pairs[i].isUSDPair  = true;
          G_Pairs[i].isUSDFirst = false;
          G_Pairs[i].isUSDSecond = true;
@@ -1020,7 +1020,7 @@ void InitGlobals()
          G_DXY_TF[i].reject_reason = "";
       }
 
-      Print("DXY Filter: Symbol = ", dxy_broker, " | Contexts: 5 (Dual TF per pair)");
+      PrintFormat("DXY Filter: Symbol = %s | Contexts: %d (Dual TF per pair)", dxy_broker, DXY_CONTEXTS);
    }
 
    activeChainsCount = 0;
@@ -1069,14 +1069,14 @@ double CalculateAutoTP(string sym, double balance)
    double percentage = 0.005; // Mặc định chung
 
    // Nhóm biến động thấp/trung bình
-   if(SymbolHas(s, "EURUSD") || SymbolHas(s, "USDCHF"))
+   if(SymbolHas(s, "EURUSD"))
       percentage = 0.004;
 
-   // Nhóm biến động khác
-   else if(SymbolHas(s, "AUDUSD"))
+   // Nhóm biến động cao hơn (biên độ mở rộng)
+   else if(SymbolHas(s, "AUDUSD") || SymbolHas(s, "GBPUSD"))
       percentage = 0.006;
 
-   // Các nhóm còn lại giữ 0.005 (USDCAD, EURGBP...)
+   // Các nhóm còn lại giữ 0.005 (USDCAD, EURGBP, NZDUSD...)
    else
       percentage = 0.005;
 

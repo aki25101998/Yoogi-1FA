@@ -150,8 +150,8 @@ Cho dù tổng điểm có cao đến đâu, CT Entry **bắt buộc** phải pa
 2. **Dual TF Signal**: DXY được phân tích trên cả HTF (H1) và LTF (M5) sử dụng CCI Trap + Range Filter.
 3. **Convergence Rule**: DXY HTF và LTF phải cùng chiều. Nếu xung đột → reset DXY signal.
 4. **Pair Mapping**:
-   - **xxxUSD** (EURUSD, AUDUSD): Hợp lưu khi DXY **ngược chiều** cặp tiền.
-   - **USDxxx** (USDCAD, USDCHF): Hợp lưu khi DXY **cùng chiều** cặp tiền.
+   - **xxxUSD** (EURUSD, AUDUSD, GBPUSD, NZDUSD): Hợp lưu khi DXY **ngược chiều** cặp tiền.
+   - **USDxxx** (USDCAD): Hợp lưu khi DXY **cùng chiều** cặp tiền.
    - **Non-USD** (EURGBP): Bỏ qua DXY filter.
 5. **Signal Freshness**: DXY HTF signal tối đa 48 H1 bars, DXY LTF signal tối đa 288 M5 bars.
 
@@ -176,7 +176,7 @@ Cho dù tổng điểm có cao đến đâu, CT Entry **bắt buộc** phải pa
 ## ĐIỀU 7: KIẾN TRÚC AUTO-ONLY VÀ QUẢN LÝ VỐN
 
 1. **Auto-Only Architecture**: EA là hệ thống 100% AUTO. Mọi logic liên quan đến Manual Mode đã bị loại bỏ vĩnh viễn và **tuyệt đối không được khôi phục lại**.
-2. **Multi-Symbol**: EA gắn trên chart EURUSD H1, trade 5 cặp: EURUSD, AUDUSD, USDCAD, EURGBP, USDCHF. Auto-detect broker suffix.
+2. **Multi-Symbol**: EA gắn trên chart EURUSD H1, trade 6 cặp: EURUSD, AUDUSD, USDCAD, EURGBP, GBPUSD, NZDUSD. Auto-detect broker suffix.
 3. **Timeframe chuẩn**: HTF = H1, LTF = M5. TF Engine thêm MTF = M15 cho pullback detection.
 
 ### 7.1 Tính Lot (Risk-Based)
@@ -317,10 +317,10 @@ Toàn bộ state critical được lưu qua GlobalVariable để survive EA rest
 
 ## ĐIỀU 10: MULTI-SYMBOL ARCHITECTURE
 
-1. **5 Cặp tiền**: EURUSD, AUDUSD, USDCAD, EURGBP, USDCHF.
+1. **6 Cặp tiền**: EURUSD, AUDUSD, USDCAD, EURGBP, GBPUSD, NZDUSD.
 2. **Chart host**: Bắt buộc gắn trên EURUSD H1.
 3. **Auto Suffix Detection**: Tự động detect broker suffix (VD: `.pro`, `m`, `#`) từ chart hiện tại.
-4. **DXY Mapping**: 5 DXY contexts (1:1 với 5 pairs), chỉ active cho pairs có USD.
+4. **DXY Mapping**: 6 DXY contexts (1:1 với 6 pairs), chỉ active cho pairs có USD.
 5. **Timer Architecture**: 
    - `OnTick()`: Chạy ManagePairs() — logic giao dịch cốt lõi.
    - `OnTimer()` (3s): Cập nhật Dashboard — không ảnh hưởng trade logic.
@@ -338,7 +338,7 @@ Toàn bộ state critical được lưu qua GlobalVariable để survive EA rest
 2. **State Transition Logging**: Mọi chuyển đổi state đều được log với reason.
 3. **Build Diagnostic**: In đầy đủ cấu hình khi EA khởi động (version, constants, settings).
 4. **Trade Logging**: Mọi DCA-OPEN, CHAIN-CLOSE, DEBT-ADD, RECOVERY đều có structured log format.
-5. **Dashboard (InfoDisplay)**: Hiển thị real-time trạng thái 5 pairs, active chains, scores.
+5. **Dashboard (InfoDisplay)**: Hiển thị real-time trạng thái 6 pairs, active chains, scores.
 
 ---
 
