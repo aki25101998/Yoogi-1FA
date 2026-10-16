@@ -1466,52 +1466,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       else
       {
          TFDiag_LogFunnel(idx, trend_dir, "M5_SWEEP", "ABSENT", StringFormat("raw=%d, nosweep=%d, broken=%d, consumed=%d, range=%d", sum_raw, sum_rej_nosweep, sum_rej_broken, sum_rej_consumed, sum_rej_range));
-         PrintFormat("[M5_NO_VALID_SWEEP][%s] direction=%d (Pragmatic SMC: checking direct displacement)", sym, trend_dir);
-         
-         // Pragmatic SMC: Sweep is an optional bonus!
-         // If no sweep on this candle, directly evaluate if Displacement is present!
-         if(DetectDisplacement(sym, m5, trend_dir))
-         {
-            double close[]; CopyClose(sym, m5, 1, 1, close);
-            double high[], low[];
-            CopyHigh(sym, m5, 1, 1, high);
-            CopyLow(sym, m5, 1, 1, low);
-            
-            double candle_range = (ArraySize(high) > 0 && ArraySize(low) > 0) ? (high[0] - low[0]) : 0.0;
-            double range_atr = (atr > 0.0) ? (candle_range / atr) : 0.0;
-            G_TF[idx].m5_displacement_range_atr = range_atr;
-            
-            bool disp_pass = (range_atr >= TF_MIN_DISPLACEMENT_ATR);
-            TFDiag_RecordDisplacement(idx, trend_dir, disp_pass, range_atr, TF_MIN_DISPLACEMENT_ATR, current_time);
-            
-            Print("\n[TF_DISPLACEMENT_QUALITY]");
-            PrintFormat("symbol=%s", sym);
-            PrintFormat("direction=%s", (trend_dir == 1 ? "BUY" : "SELL"));
-            PrintFormat("range_atr=%.2f (NO SWEEP DIRECT)", range_atr);
-            PrintFormat("minimum_atr=%.2f", TF_MIN_DISPLACEMENT_ATR);
-            PrintFormat("%s", disp_pass ? "PASS" : "REJECT");
-            
-            if(disp_pass)
-            {
-               G_TF[idx].m5_sweep = false;
-               G_TF[idx].score_sweep = 0.0;
-               G_TF[idx].m5_displacement = true;
-               G_TF[idx].m5_displacement_time = current_time;
-               G_TF[idx].m5_displacement_price = close[0];
-               G_TF[idx].m5_displacement_range = candle_range;
-               if(range_atr >= TF_DISPLACEMENT_BONUS_ATR)
-                  G_TF[idx].score_displacement = 15.0;
-               else
-                  G_TF[idx].score_displacement = 10.0;
-               SetTFState(idx, TF_STATE_M5_WAIT_MSS, "M5_DISPLACEMENT_CONFIRMED_NO_SWEEP");
-               G_TF[idx].status = "WAIT MSS";
-               TFDiag_RecordFunnelStep(idx, trend_dir, TF_FUNNEL_DISPLACEMENT_FOUND);
-               TFDiag_LogFunnel(idx, trend_dir, "M5_DISPLACEMENT", "PASS", StringFormat("NO_SWEEP: range_atr=%.2f >= %.2f (score=%.0f)", range_atr, TF_MIN_DISPLACEMENT_ATR, G_TF[idx].score_displacement));
-               PrintFormat("[TREND-FOLLOWING][%s] M5 Displacement Confirmed WITHOUT SWEEP (dir=%d, score=%.0f) on time=%s", sym, trend_dir, G_TF[idx].score_displacement, TimeToString(current_time));
-               return;
-            }
-         }
-         return; // Only return if neither sweep nor displacement found
+         PrintFormat("[M5_NO_VALID_SWEEP][%s] direction=%d (Waiting for Liquidity Sweep)", sym, trend_dir);
+         return; // Sweep is strictly required - wait in TF_STATE_M5_WAIT_SWEEP
       }
    }
    
@@ -2257,15 +2213,17 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
       pass = false;
    }
    
-   // 4. Sweep Check (Optional in Pragmatic SMC - Quality Bonus only)
-   if(G_TF[idx].m5_sweep)
-   {
-      PrintFormat("[TF_PHASE2_INFO] Sweep Present (+10 pts bonus, price=%.5f)", G_TF[idx].m5_sweep_price);
-   }
-   else
-   {
-      Print("[TF_PHASE2_INFO] Sweep Absent (Pragmatic SMC: Optional, continuing with Displacement + MSS)");
-   }
+    // 4. Sweep Check (Strictly Required)
+    if(!G_TF[idx].m5_sweep)
+    {
+       if(first_reject == "") first_reject = "TF_P2_SWEEP_REJECT";
+       PrintFormat("[TF_PHASE2_REJECT] Liquidity Sweep Absent (Sweep is strictly required)");
+       pass = false;
+    }
+    else
+    {
+       PrintFormat("[TF_PHASE2_INFO] Sweep Present (+10 pts bonus, price=%.5f)", G_TF[idx].m5_sweep_price);
+    }
    
    // 5. Displacement Valid
    if(!G_TF[idx].m5_displacement || G_TF[idx].m5_displacement_range_atr < TF_MIN_DISPLACEMENT_ATR)
@@ -2360,11 +2318,27 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
       pass = false;
    }
    
+   // 13. H1 Over-Extension Check (Avoid entering at exhausted end of H1 wave)
+   bool rej_h1_ext = false;
+   double ema50_h1 = CalculateEMA_Generic(sym, PERIOD_H1, 50, 1);
+   double atr_h1   = CalculateATR_Generic(sym, PERIOD_H1, InpReversal_ATR_Period, 1);
+   if(ema50_h1 > 0.0 && atr_h1 > 0.0)
+   {
+      double h1_ext = (direction == 1) ? (close1 - ema50_h1) / atr_h1 : (ema50_h1 - close1) / atr_h1;
+      if(h1_ext > TF_MAX_H1_EXTENSION_ATR)
+      {
+         rej_h1_ext = true;
+         if(first_reject == "") first_reject = "TF_P2_H1_OVEREXTENDED";
+         PrintFormat("[TF_PHASE2_REJECT] H1 Over-extended (h1_ext=%.2f > max=%.2f ATR from EMA50)", h1_ext, TF_MAX_H1_EXTENSION_ATR);
+         pass = false;
+      }
+   }
+   
    // Record Phase 2 Funnel & Diagnostic Counters
    bool rej_h1    = (G_TF[idx].h1_trend_direction != direction || G_TF[idx].h1_trend_quality < TF_H1_QUALITY_BASE);
    bool rej_m15   = (!G_TF[idx].m15_pullback_valid || G_TF[idx].m15_pullback_quality < 20.0);
    bool rej_prot  = (!prot_ok);
-   bool rej_sweep = false; // Sweep is optional bonus in Pragmatic SMC
+   bool rej_sweep = (!G_TF[idx].m5_sweep);
    bool rej_disp  = (!G_TF[idx].m5_displacement || G_TF[idx].m5_displacement_range_atr < TF_MIN_DISPLACEMENT_ATR);
    bool rej_mss   = (!G_TF[idx].m5_mss || G_TF[idx].m5_mss_break_level <= 0.0 || G_TF[idx].m5_mss_break_distance_atr < TF_MIN_MSS_BREAK_ATR);
    bool rej_coh   = (!event_coherent);
@@ -2379,6 +2353,7 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
                        rej_h1, rej_m15, rej_prot, rej_sweep,
                        rej_disp, rej_mss, rej_coh, rej_mom,
                        rej_dist, rej_ext, rej_dxy, rej_score,
+                       rej_h1_ext,
                        p2_m5_time);
                        
    if(pass)
@@ -3528,12 +3503,13 @@ int CheckTrendFollowingSignal(int idx)
             G_TF[idx].status = "WAIT: " + rejectReason;
             return 0;
          }
-         else if(rejectReason == "TF_P2_ENTRY_LOCATION_REJECT" || rejectReason == "ENTRY_DISTANCE_TOO_FAR")
+         else if(rejectReason == "TF_P2_ENTRY_LOCATION_REJECT" || rejectReason == "ENTRY_DISTANCE_TOO_FAR" ||
+                 rejectReason == "TF_P2_H1_OVEREXTENDED" || rejectReason == "TF_P2_SWEEP_REJECT")
          {
             LogTFDecision(idx, dir, "REJECT", rejectReason, score);
             ResetTFM5Evidence(idx); // Reset M5 only, keep H1+M15
-            SetTFState(idx, TF_STATE_M15_PULLBACK, "ENTRY_LOCATION_REJECT");
-            G_TF[idx].status = "M5 RE-ACCUMULATING (location)";
+            SetTFState(idx, TF_STATE_M15_PULLBACK, rejectReason);
+            G_TF[idx].status = "M5 RE-ACCUMULATING (" + rejectReason + ")";
             return 0;
          }
          else if(rejectReason == "TF_P2_DISPLACEMENT_REJECT")

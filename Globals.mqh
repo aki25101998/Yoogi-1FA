@@ -299,6 +299,7 @@ const double TF_DISPLACEMENT_BONUS_ATR       = 1.20;  // Range >= 1.20 ATR gets 
 const double TF_MIN_MSS_BREAK_ATR            = 0.10;  // Closed M5 MSS break distance >= ATR * 0.10
 const double TF_MSS_BONUS_ATR                = 0.50;  // Break distance >= 0.50 ATR gets Quality Bonus (+5 pts)
 const double TF_MAX_MSS_ENTRY_EXTENSION_ATR  = 2.50;  // Closed M5 entry distance from MSS <= ATR * 2.50
+const double TF_MAX_H1_EXTENSION_ATR         = 2.0;   // Max distance (ATR) price may sit from H1 EMA50 at entry (prevents entering late in exhausted wave)
 
 // --- Trend-Following Phase 3 Quality Constants ---
 const int    TF_PHASE3_ATR_LOOKBACK                = 50;    // Baseline ATR lookback (closed M5 bars)

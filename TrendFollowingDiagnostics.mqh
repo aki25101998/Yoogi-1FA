@@ -177,6 +177,7 @@ struct TFFunnelCounters
    int p2_rej_entry_ext;
    int p2_rej_dxy;
    int p2_rej_score;
+   int p2_rej_h1_ext;
    
    // Phase 2 First Reject Reasons
    int p2_first_h1;
@@ -191,6 +192,7 @@ struct TFFunnelCounters
    int p2_first_entry_ext;
    int p2_first_dxy;
    int p2_first_score;
+   int p2_first_h1_ext;
    int p2_first_other;
    
    // 11. Phase 3 Context Gate Failures
@@ -259,12 +261,12 @@ struct TFFunnelCounters
       p2_evaluated = 0; p2_pass = 0;
       p2_rej_h1 = 0; p2_rej_m15 = 0; p2_rej_protected = 0; p2_rej_sweep = 0;
       p2_rej_displacement = 0; p2_rej_mss = 0; p2_rej_coherence = 0; p2_rej_momentum = 0;
-      p2_rej_entry_dist = 0; p2_rej_entry_ext = 0; p2_rej_dxy = 0; p2_rej_score = 0;
+      p2_rej_entry_dist = 0; p2_rej_entry_ext = 0; p2_rej_dxy = 0; p2_rej_score = 0; p2_rej_h1_ext = 0;
       
       p2_first_h1 = 0; p2_first_m15 = 0; p2_first_protected = 0; p2_first_sweep = 0;
       p2_first_displacement = 0; p2_first_mss = 0; p2_first_coherence = 0; p2_first_momentum = 0;
       p2_first_entry_dist = 0; p2_first_entry_ext = 0; p2_first_dxy = 0; p2_first_score = 0;
-      p2_first_other = 0;
+      p2_first_h1_ext = 0; p2_first_other = 0;
       
       p3_evaluated = 0; p3_pass = 0;
       p3_rej_volatility = 0; p3_rej_entry_candle = 0; p3_rej_spread = 0;
@@ -381,6 +383,7 @@ struct TFFunnelCounters
       p2_rej_entry_ext += other.p2_rej_entry_ext;
       p2_rej_dxy += other.p2_rej_dxy;
       p2_rej_score += other.p2_rej_score;
+      p2_rej_h1_ext += other.p2_rej_h1_ext;
       
       p2_first_h1 += other.p2_first_h1;
       p2_first_m15 += other.p2_first_m15;
@@ -394,6 +397,7 @@ struct TFFunnelCounters
       p2_first_entry_ext += other.p2_first_entry_ext;
       p2_first_dxy += other.p2_first_dxy;
       p2_first_score += other.p2_first_score;
+      p2_first_h1_ext += other.p2_first_h1_ext;
       p2_first_other += other.p2_first_other;
       
       p3_evaluated += other.p3_evaluated;
@@ -986,6 +990,7 @@ void TFDiag_RecordPhase2(int idx, int dir, bool pass, string first_reject,
                          bool rej_h1, bool rej_m15, bool rej_prot, bool rej_sweep,
                          bool rej_disp, bool rej_mss, bool rej_coh, bool rej_mom,
                          bool rej_dist, bool rej_ext, bool rej_dxy, bool rej_score,
+                         bool rej_h1_ext,
                          datetime tm)
 {
    if(idx < 0 || idx >= TOTAL_PAIRS) return;
@@ -1002,18 +1007,19 @@ void TFDiag_RecordPhase2(int idx, int dir, bool pass, string first_reject,
    else
    {
       // Record ALL failed gates
-      if(rej_h1)    TF_INC(idx, d, p2_rej_h1);
-      if(rej_m15)   TF_INC(idx, d, p2_rej_m15);
-      if(rej_prot)  TF_INC(idx, d, p2_rej_protected);
-      if(rej_sweep) TF_INC(idx, d, p2_rej_sweep);
-      if(rej_disp)  TF_INC(idx, d, p2_rej_displacement);
-      if(rej_mss)   TF_INC(idx, d, p2_rej_mss);
-      if(rej_coh)   TF_INC(idx, d, p2_rej_coherence);
-      if(rej_mom)   TF_INC(idx, d, p2_rej_momentum);
-      if(rej_dist)  TF_INC(idx, d, p2_rej_entry_dist);
-      if(rej_ext)   TF_INC(idx, d, p2_rej_entry_ext);
-      if(rej_dxy)   TF_INC(idx, d, p2_rej_dxy);
-      if(rej_score) TF_INC(idx, d, p2_rej_score);
+      if(rej_h1)     TF_INC(idx, d, p2_rej_h1);
+      if(rej_m15)    TF_INC(idx, d, p2_rej_m15);
+      if(rej_prot)   TF_INC(idx, d, p2_rej_protected);
+      if(rej_sweep)  TF_INC(idx, d, p2_rej_sweep);
+      if(rej_disp)   TF_INC(idx, d, p2_rej_displacement);
+      if(rej_mss)    TF_INC(idx, d, p2_rej_mss);
+      if(rej_coh)    TF_INC(idx, d, p2_rej_coherence);
+      if(rej_mom)    TF_INC(idx, d, p2_rej_momentum);
+      if(rej_dist)   TF_INC(idx, d, p2_rej_entry_dist);
+      if(rej_ext)    TF_INC(idx, d, p2_rej_entry_ext);
+      if(rej_dxy)    TF_INC(idx, d, p2_rej_dxy);
+      if(rej_score)  TF_INC(idx, d, p2_rej_score);
+      if(rej_h1_ext) TF_INC(idx, d, p2_rej_h1_ext);
       
       // Record FIRST reject reason
       if(first_reject == "TF_P2_H1_REJECT") TF_INC(idx, d, p2_first_h1);
@@ -1026,6 +1032,7 @@ void TFDiag_RecordPhase2(int idx, int dir, bool pass, string first_reject,
       else if(first_reject == "TF_P2_ENTRY_LOCATION_REJECT") TF_INC(idx, d, p2_first_entry_dist);
       else if(StringFind(first_reject, "DXY_") == 0 || first_reject == "TF_P2_DXY_REJECT") TF_INC(idx, d, p2_first_dxy);
       else if(first_reject == "TF_P2_SCORE_REJECT") TF_INC(idx, d, p2_first_score);
+      else if(first_reject == "TF_P2_H1_OVEREXTENDED") TF_INC(idx, d, p2_first_h1_ext);
       else TF_INC(idx, d, p2_first_other);
    }
 }
@@ -1180,12 +1187,12 @@ void PrintDetailedMetricsBlock(string sym, const TFFunnelCounters &c)
    if(hist_str != "") PrintFormat("  Score Histogram: %s", hist_str);
    
    PrintFormat("Phase 2 All Failed Gates: Evaluated=%d | Pass=%d", c.p2_evaluated, c.p2_pass);
-   PrintFormat("  H1=%d | M15=%d | Protected=%d | Sweep=%d | Disp=%d | MSS=%d | Coh=%d | Mom=%d | Dist=%d | Ext=%d | DXY=%d | Score=%d",
+   PrintFormat("  H1=%d | M15=%d | Protected=%d | Sweep=%d | Disp=%d | MSS=%d | Coh=%d | Mom=%d | Dist=%d | Ext=%d | DXY=%d | Score=%d | H1Ext=%d",
                c.p2_rej_h1, c.p2_rej_m15, c.p2_rej_protected, c.p2_rej_sweep, c.p2_rej_displacement, c.p2_rej_mss,
-               c.p2_rej_coherence, c.p2_rej_momentum, c.p2_rej_entry_dist, c.p2_rej_entry_ext, c.p2_rej_dxy, c.p2_rej_score);
-   PrintFormat("Phase 2 First Rejects: H1=%d | M15=%d | Prot=%d | Sweep=%d | Disp=%d | MSS=%d | Coh=%d | Mom=%d | Dist=%d | Ext=%d | DXY=%d | Score=%d | Other=%d",
+               c.p2_rej_coherence, c.p2_rej_momentum, c.p2_rej_entry_dist, c.p2_rej_entry_ext, c.p2_rej_dxy, c.p2_rej_score, c.p2_rej_h1_ext);
+   PrintFormat("Phase 2 First Rejects: H1=%d | M15=%d | Prot=%d | Sweep=%d | Disp=%d | MSS=%d | Coh=%d | Mom=%d | Dist=%d | Ext=%d | DXY=%d | Score=%d | H1Ext=%d | Other=%d",
                c.p2_first_h1, c.p2_first_m15, c.p2_first_protected, c.p2_first_sweep, c.p2_first_displacement, c.p2_first_mss,
-               c.p2_first_coherence, c.p2_first_momentum, c.p2_first_entry_dist, c.p2_first_entry_ext, c.p2_first_dxy, c.p2_first_score, c.p2_first_other);
+               c.p2_first_coherence, c.p2_first_momentum, c.p2_first_entry_dist, c.p2_first_entry_ext, c.p2_first_dxy, c.p2_first_score, c.p2_first_h1_ext, c.p2_first_other);
    
    PrintFormat("Phase 3 All Failed Filters: Evaluated=%d | Pass=%d", c.p3_evaluated, c.p3_pass);
    PrintFormat("  Volatility=%d | Candle=%d | Spread=%d | DispExt=%d | AdverseRetrace=%d | NoPostMSS=%d",
@@ -1263,6 +1270,7 @@ void TFDiag_PrintFunnelSummary()
    ADD_RANK_ITEM("Phase 2: MSS Break Distance Weak", all_symbols_total.p2_rej_mss);
    ADD_RANK_ITEM("Phase 2: Displacement Range Weak", all_symbols_total.p2_rej_displacement);
    ADD_RANK_ITEM("Phase 2: Sweep Missing", all_symbols_total.p2_rej_sweep);
+   ADD_RANK_ITEM("Phase 2: H1 Over-extended (>2.0 ATR)", all_symbols_total.p2_rej_h1_ext);
    ADD_RANK_ITEM("Phase 2: M15 Quality Invalid", all_symbols_total.p2_rej_m15);
    ADD_RANK_ITEM("Phase 2: Protected Structure Broken", all_symbols_total.p2_rej_protected);
    ADD_RANK_ITEM("Phase 2: H1 Trend Invalid", all_symbols_total.p2_rej_h1);
