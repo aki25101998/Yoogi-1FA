@@ -948,6 +948,15 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 {
    if(InpMaxDCAPerChain <= 0) return;
 
+   // SAFETY GUARD: Tuyệt đối không bao giờ mở DCA nếu lệnh đã chốt lời 50% (ft_partial_closed), đang chạy Runner, hoặc đã kích hoạt Break-Even
+   if(InpEnableDynamicTP && G_TradeProfile[idx].is_valid)
+   {
+      if(G_TradeProfile[idx].ft_partial_closed || G_TradeProfile[idx].runner_active || G_TradeProfile[idx].be_active)
+      {
+         return;
+      }
+   }
+
    string sym = G_Pairs[idx].symbol;
    ulong  id  = G_Pairs[idx].active_chain_id;
 
@@ -1288,10 +1297,14 @@ void ManagePairs()
                if(basket_dir == 1 && current_price >= basket_tp) tp_hit = true;
                if(basket_dir == -1 && current_price <= basket_tp) tp_hit = true;
 
-               if(tp_hit && !G_TradeProfile[i].runner_active)
+               // Profit in pips currently achieved
+               double pips_profit = (basket_dir == 1) ? PriceToPips(i, current_price - avg_entry)
+                                                      : PriceToPips(i, avg_entry - current_price);
+
+               // HYBRID SCALP-AND-RUN: FT Order 1 chốt lời 50% tiền tươi khi chạm TP1 HOẶC khi đã chạy >= 18.0 pips
+               if(G_TradeProfile[i].strategy_type == STRATEGY_FT && count == 1 && !G_TradeProfile[i].ft_partial_closed && !G_TradeProfile[i].runner_active)
                {
-                  // Check if FT Order 1 should Partial Close (Hybrid Scalp-and-Run)
-                  if(G_TradeProfile[i].strategy_type == STRATEGY_FT && count == 1 && !G_TradeProfile[i].ft_partial_closed)
+                  if(tp_hit || pips_profit >= 18.0)
                   {
                      if(ExecuteFTPartialClose(i, current_price))
                      {
@@ -1299,7 +1312,10 @@ void ManagePairs()
                         continue;
                      }
                   }
+               }
 
+               if(tp_hit && !G_TradeProfile[i].runner_active)
+               {
                   // Check if runner should activate instead of closing
                   if(CheckRunnerConditions(i))
                   {

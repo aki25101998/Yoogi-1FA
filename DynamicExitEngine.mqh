@@ -420,10 +420,14 @@ double CalculateNaturalTP(int idx, int direction, int strategy_type)
       }
       else
       {
-         // FT/DUAL: weighted average, leaning toward structure
+         // FT/DUAL: Bám sát cản kỹ thuật thực tế (structure target)
          if(atr_tp > 0.0)
-            base_tp = struct_tp * 0.6 + atr_tp * 0.4;
+            base_tp = struct_tp * 0.8 + atr_tp * 0.2;
          else
+            base_tp = struct_tp;
+
+         // Đảm bảo không vượt quá cản kỹ thuật thực tế
+         if(base_tp > struct_tp)
             base_tp = struct_tp;
       }
    }
@@ -440,6 +444,12 @@ double CalculateNaturalTP(int idx, int direction, int strategy_type)
 
    // --- Apply Momentum Factor ---
    base_tp = base_tp * mom_factor;
+
+   // Không để momentum đẩy TP1 vượt quá cản kỹ thuật (phần dư sẽ do Runner đảm nhiệm)
+   if(struct_tp > 0.0 && base_tp > struct_tp)
+   {
+      base_tp = struct_tp;
+   }
 
    // --- Available Space Limiter ---
    if(space_tp > 0.0 && base_tp > space_tp * 0.9)
