@@ -27,7 +27,7 @@
 
 ### Task 1: Khai báo hằng số và mở rộng `TradeProfile` trong `Globals.mqh`
 
-- [ ] **Step 1: Thêm hằng số TP phân nhánh cho FT và CT**
+- [x] **Step 1: Thêm hằng số TP phân nhánh cho FT và CT**
   - Mở `Globals.mqh`.
   - Thêm các hằng số:
     ```mql5
@@ -44,7 +44,7 @@
     const double TF_TRAILING_ATR_MULT        = 2.0;   // Khoảng đệm trailing (2.0x ATR M15)
     ```
 
-- [ ] **Step 2: Mở rộng struct `TradeProfile`**
+- [x] **Step 2: Mở rộng struct `TradeProfile`**
   - Thêm các trường:
     ```mql5
     bool   ft_partial_closed;  // Đã partial close 50% tại TP1 chưa?
@@ -57,7 +57,7 @@
 
 ### Task 2: Nâng cấp tính toán Natural TP trong `DynamicExitEngine.mqh`
 
-- [ ] **Step 1: Cập nhật hàm `CalculateNaturalTP`**
+- [x] **Step 1: Cập nhật hàm `CalculateNaturalTP`**
   - Điều chỉnh `atr_tp` và kẹp biên dải `[MinPips, MaxPips]` theo `strategy_type`:
     - Với `STRATEGY_FT`: Dùng `TF_DYNAMIC_TP_ATR_MULT`, clamp trong `[TF_DYNAMIC_TP_MIN_PIPS, TF_DYNAMIC_TP_MAX_PIPS]`.
     - Với `STRATEGY_CT`: Dùng `CT_DYNAMIC_TP_ATR_MULT`, clamp trong `[CT_DYNAMIC_TP_MIN_PIPS, CT_DYNAMIC_TP_MAX_PIPS]`.
@@ -66,7 +66,7 @@
 
 ### Task 3: Nâng cấp Trailing Stop & Bậc thang khóa lợi nhuận trong `DynamicExitEngine.mqh`
 
-- [ ] **Step 1: Cập nhật `UpdateBreakEvenState`**
+- [x] **Step 1: Cập nhật `UpdateBreakEvenState`**
   - Ngưỡng kích hoạt: `double be_threshold_pips = MathMax(atr_pips * TF_TRAILING_ATR_MULT, natural_tp_pips * TF_BE_TRIGGER_RATIO); if(be_threshold_pips < TF_BE_MIN_PIPS) be_threshold_pips = TF_BE_MIN_PIPS;`
   - Nếu `pips_run < be_threshold_pips`: return ngay để cho lệnh thở.
   - Khoảng đệm trailing: `trail_pips = atr_pips * TF_TRAILING_ATR_MULT;`
@@ -78,7 +78,7 @@
 
 ### Task 4: Hiện thực hóa Partial Close 50/50 cho Lệnh Đơn FT
 
-- [ ] **Step 1: Viết hàm `ExecuteFTPartialClose` trong `DynamicExitEngine.mqh`**
+- [x] **Step 1: Viết hàm `ExecuteFTPartialClose` trong `DynamicExitEngine.mqh`**
   - Kiểm tra điều kiện hợp lệ: `strategy_type == STRATEGY_FT`, `pos_count == 1`, `!ft_partial_closed`.
   - Tính 50% lot chuẩn sàn: `half_vol = MathFloor((total_vol * 0.5) / step) * step;`
   - Nếu `half_vol >= min_vol`:
@@ -89,12 +89,12 @@
     - Kích hoạt `runner_active = true` cho 50% khối lượng còn lại bám theo Trailing Stop.
   - Nếu `half_vol < min_vol` (ví dụ lệnh 0.01 lot): Chuyển toàn bộ vị thế sang Runner Mode với Stop khóa tại +50% TP1.
 
-- [ ] **Step 2: Lưu và khôi phục trạng thái Partial Close qua Global Variables**
+- [x] **Step 2: Lưu và khôi phục trạng thái Partial Close qua Global Variables**
   - Trong `SaveTradeProfile` và `LoadTradeProfile`: Lưu thêm `ft_partial_closed`, `ft_partial_profit`.
 
-- [ ] **Step 3: Tích hợp vào `Corelogic.mqh` tại điểm `tp_hit`**
+- [x] **Step 3: Tích hợp vào `Corelogic.mqh` tại điểm `tp_hit`**
   - Khi `tp_hit` xảy ra cho chuỗi:
-    - Nếu `G_TradeProfile[i].strategy_type == STRATEGY_FT && pos_count == 1 && !G_TradeProfile[i].ft_partial_closed`:
+    - Nếu `G_TradeProfile[i].strategy_type == STRATEGY_FT && count == 1 && !G_TradeProfile[i].ft_partial_closed`:
       - Gọi `ExecuteFTPartialClose(i, current_price)`.
       - Không gọi `CloseAndResolveChain(i, "TP")`.
     - Các trường hợp khác (CT hoặc chuỗi DCA $\ge 2$ lệnh hoặc đã partial close): Tiếp tục gọi `CloseAndResolveChain(i, "TP")` như bình thường.
@@ -103,12 +103,12 @@
 
 ### Task 5: Biên dịch & Kiểm tra bằng MetaEditor64 CLI
 
-- [ ] **Step 1: Xóa compile.log và chạy MetaEditor64 CLI**
-- [ ] **Step 2: Xác nhận `Result: 0 errors, 0 warnings` và cập nhật file `Yoogi 1FA.ex5`**
+- [x] **Step 1: Xóa compile.log và chạy MetaEditor64 CLI**
+- [x] **Step 2: Xác nhận `Result: 0 errors, 0 warnings` và cập nhật file `Yoogi 1FA.ex5`**
 
 ---
 
 ### Task 6: Commit và Push lên GitHub
 
-- [ ] **Step 1: Tạo commit với thông điệp chuẩn**
+- [x] **Step 1: Tạo commit với thông điệp chuẩn**
   `git add . ; git commit -m "feat(exit): implement Hybrid Scalp-and-Run TP, breathing space trailing and FT partial close" ; git push origin master`

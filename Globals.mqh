@@ -39,6 +39,19 @@ const int    InpDynamicTP_MinPips        = 15;
 const int    InpDynamicTP_MaxPips        = 90;
 const double InpDynamicTP_ATRMultiplier  = 2.0;
 
+// Strategy-Aware Dynamic TP & Trailing (Hardcoded)
+const int    TF_DYNAMIC_TP_MIN_PIPS      = 25;    // Min TP cho FT (25 pips)
+const int    TF_DYNAMIC_TP_MAX_PIPS      = 100;   // Max TP cho FT (100 pips)
+const double TF_DYNAMIC_TP_ATR_MULT      = 3.0;   // FT ATR Multiplier (3.0x ATR M15)
+
+const int    CT_DYNAMIC_TP_MIN_PIPS      = 15;    // Min TP cho CT (15 pips)
+const int    CT_DYNAMIC_TP_MAX_PIPS      = 40;    // Max TP cho CT (40 pips)
+const double CT_DYNAMIC_TP_ATR_MULT      = 1.5;   // CT ATR Multiplier (1.5x ATR M15)
+
+const double TF_BE_TRIGGER_RATIO         = 0.75;  // Ngưỡng kích hoạt BE/Trailing (75% TP)
+const double TF_BE_MIN_PIPS              = 18.0;  // Ngưỡng tối thiểu pips kích hoạt BE (tránh giật râu)
+const double TF_TRAILING_ATR_MULT        = 2.0;   // Khoảng đệm trailing động (2.0x ATR M15)
+
 // System Flags (Hardcoded)
 const bool InpEnableCounterTrend      = true;
 const bool InpEnableTrendFollowing    = true;

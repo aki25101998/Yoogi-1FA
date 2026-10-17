@@ -1290,6 +1290,16 @@ void ManagePairs()
 
                if(tp_hit && !G_TradeProfile[i].runner_active)
                {
+                  // Check if FT Order 1 should Partial Close (Hybrid Scalp-and-Run)
+                  if(G_TradeProfile[i].strategy_type == STRATEGY_FT && count == 1 && !G_TradeProfile[i].ft_partial_closed)
+                  {
+                     if(ExecuteFTPartialClose(i, current_price))
+                     {
+                        // Successfully partial closed 50%, remaining 50% is now running as a Runner!
+                        continue;
+                     }
+                  }
+
                   // Check if runner should activate instead of closing
                   if(CheckRunnerConditions(i))
                   {
