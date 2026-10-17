@@ -205,6 +205,7 @@ Cho dù tổng điểm có cao đến đâu, CT Entry **bắt buộc** phải pa
 - **Dynamic Step**: Tính từ ATR(14) M15 × multiplier, clamp trong [30, 60] pips. Step được **cố định tại thời điểm mở Master** và áp dụng cho toàn bộ chain.
 - **Chain Limit**: Khi đạt `InpMaxDCAPerChain` (3 positions) mà giá vẫn đi ngược, toàn bộ chain bị đóng (reason: MAX_DCA). Phần lỗ được ghi thành **System Debt** và hệ thống chuyển sang Recovery Mode.
 - **Margin Exhaustion Fail-safe**: Khi giá đi ngược chạm mốc DCA tiếp theo nhưng tài khoản không đủ Free Margin (`OrderCalcMargin` > FreeMargin) hoặc Broker từ chối mở lệnh (`TRADE_RETCODE_NO_MONEY`), toàn bộ chain lập tức bị đóng khẩn cấp (`CloseAndResolveChain(idx, "MAX_DCA")`) để bảo vệ tài khoản khỏi bị Margin Call / Stop Out, tuyệt đối không để lệnh trôi nổi khi không còn margin phòng thủ.
+- **Anti-Reversal Safety Lock (Chống Bẫy Quay Đầu)**: Tuyệt đối **CẤM** mở DCA 2 hoặc DCA 3 nếu vị thế hiện tại đã kích hoạt Break-Even (`be_active == true`), đã chốt 50% tiền tươi (`ft_partial_closed == true`), hoặc đang chạy Runner (`runner_active == true`). Một vị thế đã đi vào vùng có lãi (15 - 20 pips) chỉ được phép đóng hòa vốn hoặc có lãi qua cơ chế Trailing Stop / BE, không bao giờ được phép nhồi DCA khi giá đảo chiều sập qua điểm Entry.
 - **Chain ID**: Mỗi chain có ID unique (monotonic), lưu persistent qua GlobalVariable, survive EA restart.
 - **Strategy Attribution**: Mỗi chain gắn tag CT/FT/DUAL, lưu persistent, detect qua 7-priority fallback chain.
 
@@ -217,20 +218,20 @@ Cho dù tổng điểm có cao đến đâu, CT Entry **bắt buộc** phải pa
 
 ## ĐIỀU 8: DYNAMIC EXIT ENGINE (QUẢN LÝ THOÁT LỆNH ĐỘNG)
 
-### 8.1 TP Calculation (Natural TP)
+### 8.1 TP Calculation Theo Từng Chiến Lược (Strategy-Aware Natural TP)
 
-TP được tính động dựa trên 4 yếu tố, **không cố định 60 pips**:
+TP được tính động theo 4 ứng viên dựa trên đặc thù từng chiến lược, **không ép sàn cứng**:
 
-| # | Candidate | Nguồn | Mô tả |
-|---|---|---|---|
-| 1 | ATR Target | ATR(14) M15 × 2.0 | Scale: CT ×0.8, FT ×1.2, DUAL ×1.0 |
-| 2 | Structure Target | Swing High/Low M15 | Nearest swing trong direction |
-| 3 | Available Space | EMA50 obstacle M15+H1 | Khoảng cách tới EMA50 hợp lệ |
-| 4 | Momentum Factor | CCI + Range Filter | STRONG ×1.2, NEUTRAL ×1.0, WEAK ×0.8 |
+| # | Ứng Viên | Nguồn | Trend-Following (FT) | Counter-Trend (CT) |
+|---|---|---|---|---|
+| 1 | ATR Target | ATR(14) M15 | $2.0 \times \text{ATR}_{\text{M15}}$ (~16-20 pips) | $1.5 \times \text{ATR}_{\text{M15}}$ (~12-15 pips) |
+| 2 | Structure Target | Swing High/Low M15 | Nearest swing (80% trọng số) | Nearest swing (MIN với ATR) |
+| 3 | Available Space | EMA50 M15 + H1 | Không vượt quá 85% Available Space | Không vượt quá 85% Available Space |
+| 4 | Momentum Factor | CCI + Range Filter | STRONG ×1.2, NEUTRAL ×1.0, WEAK ×0.8 | STRONG ×1.2, NEUTRAL ×1.0, WEAK ×0.8 |
 
-- **Ưu tiên**: CT lấy MIN(Structure, ATR). FT/DUAL lấy Weighted Average (60% Structure + 40% ATR).
-- **Available Space Limiter**: TP không vượt quá 85% available space (trong Normal mode).
-- **Final Clamp**: TP kẹp trong [`InpDynamicTP_MinPips`, `InpDynamicTP_MaxPips`] = [15, 90] pips.
+- **Quy tắc phân định TP**:
+  - **Counter-Trend (CT)**: Sàn-Trần `[CT_DYNAMIC_TP_MIN_PIPS, CT_DYNAMIC_TP_MAX_PIPS] = [15, 40]` pips. Ưu tiên target thận trọng: `MIN(Structure, ATR)`.
+  - **Trend-Following (FT)**: Sàn-Trần `[TF_DYNAMIC_TP_MIN_PIPS, TF_DYNAMIC_TP_MAX_PIPS] = [15, 100]` pips. Trọng số cấu trúc cản kỹ thuật chiếm 80% (`struct_tp * 0.8 + atr_tp * 0.2`). **Chốt chặn kỹ thuật**: `base_tp` không được vượt quá cản `struct_tp` để đảm bảo chạm cản M15 là khớp chốt lời ngay.
 - **Fallback**: Nếu Dynamic Engine fail → dùng `InpMasterTPPips` = 60 pips.
 
 ### 8.2 TP Compression
@@ -240,12 +241,17 @@ Khi conditions xấu đi, TP được giảm xuống (chỉ giảm, không tăng
 - **Triggers**: Momentum yếu đi (×0.75), Structure target gần hơn, Available space thu hẹp.
 - **Anti-Jitter**: Thay đổi tối thiểu 5 pips, rate limit 1 lần/5 phút, chỉ khi profit ≥ 10 pips.
 
-### 8.3 Runner Mode (FT Only)
+### 8.3 Mô Hình Chốt Lời "Hybrid Scalp-and-Run" (Partial Close 50/50 & Runner)
 
-- **Activation**: Profit ≥ 80% target TP VÀ Momentum = STRONG VÀ M15 protected structure intact.
-- **Trailing**: ATR(14) M15 × 1.5, chỉ trail theo hướng có lợi.
-- **Exit**: Khi trailing stop bị hit.
-- **Scope**: Chỉ áp dụng cho strategy FT và DUAL, KHÔNG áp dụng cho CT.
+- **Áp dụng độc quyền cho Lệnh Đơn FT (Order 1)**:
+  - Khi giá chạm **TP1** HOẶC khi lợi nhuận đạt **$\ge 18.0$ pips**:
+    - Gọi ngay `PositionClosePartial` đóng **50% khối lượng** bỏ túi tiền tươi.
+    - Lợi nhuận của 50% này lập tức được trừ thẳng vào `System Debt` nếu đang ở Recovery Mode.
+    - Dời Stop ảo của 50% còn lại lên **Entry + 3 pips** (Free Trade tuyệt đối, bao phủ toàn bộ spread & com).
+    - Kích hoạt **Runner Trailing Stop** với khoảng đệm $2.0 \times \text{ATR}_{\text{M15}}$ để gồng trọn con sóng dài H1/H4 (50 - 100+ pips).
+  - **Failsafe**: Nếu khối lượng là `0.01 lot` (không thể chia nhỏ), EA khóa bảo toàn 50% TP1 và chuyển 100% vị thế sang Runner Trailing Stop.
+- **Áp dụng cho Chuỗi DCA ($\ge 2$ lệnh) & Counter-Trend (CT)**:
+  - Luôn đóng **100% Full Close** tại Basket TP, không áp dụng Partial Close nhằm giải phóng Margin và thoát hiểm nhanh chóng.
 
 ### 8.4 Recovery-Aware TP & Dynamic Ceiling
 
@@ -260,13 +266,17 @@ Khi hệ thống có Debt > 0, TP được tính toán để cover nợ:
 
 - Recovery TP KHÔNG BAO GIỜ thấp hơn Natural TP (khi Natural TP nằm dưới trần).
 - **Dynamic Ceiling (Trần Khống Chế Động)**: Tránh bẫy "Gánh nặng TP" khi nợ lớn. TP không bao giờ được vượt quá `Available Space × 0.85` (vùng cản kỹ thuật EMA50 M15/H1) hoặc `Structure Target × 1.05`, và bị chặn trần tối đa bởi `InpDynamicTP_MaxPips = 90` pips.
-- **Amortization (Khấu trừ trả góp dần)**: Khi chuỗi chạm trần TP hoặc Break-Even chốt lời, toàn bộ lợi nhuận thực tế đạt được (`Realized Profit`) sẽ được trừ thẳng vào `$Debt` (`Debt_After = Debt_Before - Realized_Profit`), phần dôi dư mới tính vào lãi ròng. Các chuỗi tiếp theo sẽ trả nốt phần nợ còn lại thay vì cố ép 1 chuỗi phải gánh hết nợ bất khả thi.
+- **Amortization (Khấu trừ trả góp dần)**: Toàn bộ lợi nhuận thực tế đạt được (`Realized Profit`) từ lệnh chốt 50% tiền tươi hoặc đóng toàn bộ chuỗi đều được trừ thẳng vào `$Debt` (`Debt_After = Debt_Before - Realized_Profit`), phần dôi dư mới tính vào lãi ròng.
 
 ### 8.5 Dynamic Break-Even & Trailing Lock (Bảo Vệ Hòa Vốn 2 Nấc)
 
-- **Nấc 1 (Khóa hòa vốn)**: Khi giá chạy được ≥ 75% Natural TP (hoặc ≥ 0.8× ATR M15, tối thiểu 10 pips) → Kích hoạt Break-Even, dời Stop ảo về `AvgEntry ± 2 pips` (`InpBreakEven_OffsetPips`).
-- **Nấc 2 (Trailing Lock)**: Khi giá vượt qua 100% Natural TP (đang rướn lên vùng Recovery TP) → Khóa bảo toàn tối thiểu 50% Natural TP hoặc Trailing theo sau giá 1.2× ATR M15. Stop chỉ dời theo hướng có lợi.
-- **Thoát lệnh**: Khi giá chạm Stop bảo vệ → đóng toàn bộ chuỗi với reason `BREAK_EVEN`, bảo toàn vốn và lấy lợi nhuận đạt được khấu trừ nợ.
+- **Ngưỡng kích hoạt**: Đạt tối thiểu $\max\big(1.5 \times \text{ATR}_{\text{M15}}, \ \text{Natural TP} \times 0.70, \ \mathbf{15.0\text{ pips}}\big)$.
+- **Khoảng đệm Trailing Stop**: Tăng lên **$2.0 \times \text{ATR}_{\text{M15}}$** (tránh râu nến M5 rung lắc).
+- **Bậc thang khóa lợi nhuận (Tiered Profit-Protection)**:
+  - Đạt $\ge 75\%$ TP: Khóa tối thiểu **+30% Natural TP**.
+  - Đạt $\ge 90\%$ TP: Khóa tối thiểu **+60% Natural TP**.
+  - Sàn bảo vệ tối thiểu: `InpBreakEven_OffsetPips = 2.0` pips.
+- **Thoát lệnh**: Khi giá chạm Stop bảo vệ → đóng toàn bộ chuỗi với reason `BREAK_EVEN`, bảo toàn vốn và khấu trừ nợ.
 
 ### 8.6 Basket TP
 
@@ -278,9 +288,10 @@ Khi hệ thống có Debt > 0, TP được tính toán để cover nợ:
 
 ## ĐIỀU 9: SYSTEM-LEVEL DEBT & RECOVERY (QUẢN LÝ NỢ & PHỤC HỒI)
 
-### 9.1 System Debt
+### 9.1 System Debt & Cross-Strategy Recovery (Phục Hồi Liên Chiến Lược)
 
 - **Unified per Symbol**: Nợ được gộp chung cho mỗi symbol, **không tách theo strategy** (CT/FT/DUAL).
+- **Strategy-Independent Recovery**: Chuỗi Counter-Trend (CT) bị gãy $\rightarrow$ hoàn toàn có thể được gỡ nợ bởi chuỗi Trend-Following (FT) tiếp theo (và ngược lại). Động cơ nào cho tín hiệu trước, EA sẽ mở lệnh của động cơ đó với khối lượng Recovery (`next_dca_seq`).
 - **Debt Source**: Khi chain bị đóng do MAX_DCA (hoặc lý do khác) với loss < 0 → `Debt += |Loss|`.
 - **Authoritative Resolution**: PnL được tính từ lịch sử deals (DEAL_ENTRY_OUT), **không dùng floating PnL**.
 - **Idempotency**: Mỗi chain chỉ được resolve 1 lần (marker: `Yoogi_Resolved_{symbol}_{chain_id}`).
