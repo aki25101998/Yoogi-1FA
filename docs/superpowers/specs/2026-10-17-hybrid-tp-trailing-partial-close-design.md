@@ -53,16 +53,21 @@ Sau khi nâng cấp thành công bộ lọc Chống quá mức H1 (`TF_MAX_H1_EX
 Trong `DynamicExitEngine.mqh`:
 1. **Tham số mới trong `Globals.mqh`**:
    ```mql5
-   const int    TF_DYNAMIC_TP_MIN_PIPS      = 25;    // Min TP cho FT (25 pips)
+   const int    TF_DYNAMIC_TP_MIN_PIPS      = 15;    // Min TP cho FT (15 pips - bám sát cản M15)
    const int    TF_DYNAMIC_TP_MAX_PIPS      = 100;   // Max TP cho FT (100 pips)
-   const double TF_DYNAMIC_TP_ATR_MULT      = 3.0;   // FT ATR Multiplier (3.0x ATR M15)
+   const double TF_DYNAMIC_TP_ATR_MULT      = 2.0;   // FT ATR Multiplier (2.0x ATR M15 ~ 16-20 pips)
    
    const int    CT_DYNAMIC_TP_MIN_PIPS      = 15;    // Min TP cho CT (15 pips)
    const int    CT_DYNAMIC_TP_MAX_PIPS      = 40;    // Max TP cho CT (40 pips)
    const double CT_DYNAMIC_TP_ATR_MULT      = 1.5;   // CT ATR Multiplier (1.5x ATR M15)
+
+   const double TF_BE_TRIGGER_RATIO         = 0.70;  // Ngưỡng kích hoạt BE/Trailing (70% TP)
+   const double TF_BE_MIN_PIPS              = 15.0;  // Ngưỡng tối thiểu pips kích hoạt BE (15 pips)
+   const double TF_TRAILING_ATR_MULT        = 2.0;   // Khoảng đệm trailing động (2.0x ATR M15)
    ```
 2. **Logic tính toán phân nhánh**:
    - Khi `strategy_type == STRATEGY_FT`:
+     - Ưu tiên cản kỹ thuật M15 (`struct_tp * 0.8 + atr_tp * 0.2`), không vượt quá cản M15.
      - `atr_tp = atr_pips * TF_DYNAMIC_TP_ATR_MULT;`
      - Kẹp trong dải `[TF_DYNAMIC_TP_MIN_PIPS, TF_DYNAMIC_TP_MAX_PIPS]`.
    - Khi `strategy_type == STRATEGY_CT`:
@@ -72,9 +77,9 @@ Trong `DynamicExitEngine.mqh`:
 ### 3.2 Nâng Cấp Ngưỡng Kích Hoạt Trailing Stop & Break-Even (`UpdateBreakEvenState`)
 1. **Ngưỡng kích hoạt mới**:
    ```mql5
-   // Chỉ kích hoạt khi giá chạy được ≥ 75% Natural TP (hoặc ≥ 1.5x ATR M15, tối thiểu 18 pips)
-   double be_threshold_pips = MathMax(atr_pips * 1.5, natural_tp_pips * 0.75);
-   if(be_threshold_pips < 18.0) be_threshold_pips = 18.0;
+   // Chỉ kích hoạt khi giá chạy được ≥ 70% Natural TP (hoặc ≥ 1.5x ATR M15, tối thiểu 15 pips)
+   double be_threshold_pips = MathMax(atr_pips * 1.5, natural_tp_pips * TF_BE_TRIGGER_RATIO);
+   if(be_threshold_pips < TF_BE_MIN_PIPS) be_threshold_pips = TF_BE_MIN_PIPS;
    
    if(pips_run < be_threshold_pips) return; // Cho lệnh thở tự do
    ```

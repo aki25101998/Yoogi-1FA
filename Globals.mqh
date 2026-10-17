@@ -49,7 +49,7 @@ const int    CT_DYNAMIC_TP_MAX_PIPS      = 40;    // Max TP cho CT (40 pips)
 const double CT_DYNAMIC_TP_ATR_MULT      = 1.5;   // CT ATR Multiplier (1.5x ATR M15)
 
 const double TF_BE_TRIGGER_RATIO         = 0.70;  // Ngưỡng kích hoạt BE/Trailing (70% TP)
-const double TF_BE_MIN_PIPS              = 12.0;  // Ngưỡng tối thiểu pips kích hoạt BE (bảo vệ sớm tại 12 pips)
+const double TF_BE_MIN_PIPS              = 15.0;  // Ngưỡng tối thiểu pips kích hoạt BE (bảo vệ tại 15 pips)
 const double TF_TRAILING_ATR_MULT        = 2.0;   // Khoảng đệm trailing động (2.0x ATR M15)
 
 // System Flags (Hardcoded)

@@ -1471,7 +1471,7 @@ void UpdateBreakEvenState(int idx)
       atr_val = CalculateATR_Generic(sym, PERIOD_M15, InpReversal_ATR_Period, 1);
    double atr_pips = PriceToPips(idx, atr_val);
 
-   // --- NGƯỠNG KÍCH HOẠT DYNAMIC TRAILING STOP: Max(1.5x ATR, 75% Natural TP, min 18 pips) ---
+   // --- NGƯỠNG KÍCH HOẠT DYNAMIC TRAILING STOP: Max(1.5x ATR, 70% Natural TP, min 15 pips) ---
    double be_threshold_pips = MathMax(atr_pips * 1.5, natural_tp_pips * TF_BE_TRIGGER_RATIO);
    if(be_threshold_pips < TF_BE_MIN_PIPS)
       be_threshold_pips = TF_BE_MIN_PIPS;
