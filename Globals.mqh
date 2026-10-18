@@ -52,6 +52,13 @@ const double TF_BE_TRIGGER_RATIO         = 0.70;  // Ngưỡng kích hoạt BE/T
 const double TF_BE_MIN_PIPS              = 15.0;  // Ngưỡng tối thiểu pips kích hoạt BE (bảo vệ tại 15 pips)
 const double TF_TRAILING_ATR_MULT        = 2.0;   // Khoảng đệm trailing động (2.0x ATR M15)
 
+// Optimized Runner Configuration (Hardcoded)
+const double TF_RUNNER_BREATHE_PIPS      = 30.0;  // Vùng đệm thở tự do trước khi bám Swing (30 pips)
+const double TF_RUNNER_TP2_MIN_PIPS      = 50.0;  // Sàn chốt lời TP2 tối thiểu cho Runner (50 pips)
+const double TF_RUNNER_TP2_MAX_PIPS      = 85.0;  // Trần chốt lời TP2 tối đa cho Runner (85 pips)
+const double TF_RUNNER_SWING_BUFFER_ATR  = 0.5;   // Khoảng đệm an toàn dưới/trên Swing M15 (0.5x ATR M15)
+const int    TF_RUNNER_SWING_LOOKBACK    = 35;    // Số nến M15 dùng để quét tìm đỉnh/đáy swing
+
 // System Flags (Hardcoded)
 const bool InpEnableCounterTrend      = true;
 const bool InpEnableTrendFollowing    = true;

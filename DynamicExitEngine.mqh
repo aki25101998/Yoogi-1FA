@@ -44,9 +44,12 @@ struct TradeProfile
    double available_space_pips;  // Available space
    int    momentum_state;      // MOM_STRONG / MOM_NEUTRAL / MOM_WEAK
 
-   // Runner Mode
-   bool   runner_active;       // Runner mode activated?
-   double runner_trail_price;  // Trailing stop price for Runner
+   // Optimized Runner Mode (3-Stage Engine)
+   bool     runner_active;      // Runner mode activated?
+   double   runner_trail_price; // Trailing stop price for Runner
+   double   runner_tp2_price;   // Extended Target TP2 price level
+   double   runner_tp2_pips;    // Extended Target TP2 distance in pips
+   int      runner_stage;       // 1 = Breathing (15-30p), 2 = Structure Trailing (30-55p), 3 = Extended TP2 Harvested
 
    // Compression
    bool   compression_active;  // Compression has occurred?
@@ -78,6 +81,8 @@ double GetBasketTPPrice(int idx, double avg_entry, int direction);
 void UpdateBreakEvenState(int idx);
 bool IsBreakEvenStopped(int idx, double current_price, int direction);
 bool ExecuteFTPartialClose(int idx, double current_price);
+double CalcH1TargetTP2(int idx, int direction, double entry);
+double CalcM15SwingTrailingStop(int idx, int direction);
 
 // ==================================================================
 // HELPER: Determine strategy type from entry_mode string
@@ -481,6 +486,9 @@ void InitTradeProfile(int idx, int direction, int strategy_type, double entry_pr
    // Initialize state
    G_TradeProfile[idx].runner_active = false;
    G_TradeProfile[idx].runner_trail_price = 0.0;
+   G_TradeProfile[idx].runner_tp2_price = 0.0;
+   G_TradeProfile[idx].runner_tp2_pips = 0.0;
+   G_TradeProfile[idx].runner_stage = 0;
    G_TradeProfile[idx].compression_active = false;
    G_TradeProfile[idx].last_compression_tp = natural_tp;
    G_TradeProfile[idx].be_active = false;
@@ -543,11 +551,18 @@ void ResetTradeProfile(int idx)
    G_TradeProfile[idx].momentum_state = MOM_NEUTRAL;
    G_TradeProfile[idx].runner_active = false;
    G_TradeProfile[idx].runner_trail_price = 0.0;
+   G_TradeProfile[idx].runner_tp2_price = 0.0;
+   G_TradeProfile[idx].runner_tp2_pips = 0.0;
+   G_TradeProfile[idx].runner_stage = 0;
    G_TradeProfile[idx].compression_active = false;
    G_TradeProfile[idx].last_compression_tp = 0.0;
    G_TradeProfile[idx].be_active = false;
    G_TradeProfile[idx].be_stop_price = 0.0;
    G_TradeProfile[idx].be_stage = 0;
+   G_TradeProfile[idx].ft_partial_closed = false;
+   G_TradeProfile[idx].ft_partial_profit = 0.0;
+   G_TradeProfile[idx].ft_partial_vol = 0.0;
+   G_TradeProfile[idx].ft_partial_time = 0;
    G_TradeProfile[idx].last_update_time = 0;
 }
 
@@ -695,41 +710,181 @@ bool CheckRunnerConditions(int idx)
    return true;
 }
 
+// ==================================================================
+// EXTENDED TP2 TARGET CALCULATION (H1 STRUCTURE & OBSTACLE HARVEST)
+// ==================================================================
+// Scans H1 timeframe for major swing obstacle or EMA50 in [TF_RUNNER_TP2_MIN_PIPS, TF_RUNNER_TP2_MAX_PIPS]
+double CalcH1TargetTP2(int idx, int direction, double entry)
+{
+   string sym = G_Pairs[idx].symbol;
+   if(entry <= 0.0) return 60.0;
+
+   double highs[], lows[];
+   int lookback = 40;
+   if(!ReadHighLow_Generic(sym, PERIOD_H1, 1, lookback, highs, lows))
+      return 60.0; // Fallback default 60 pips
+
+   int left = 3;
+   int right = 1;
+   double min_dist_price = PipsToPrice(idx, TF_RUNNER_TP2_MIN_PIPS);
+   double max_dist_price = PipsToPrice(idx, TF_RUNNER_TP2_MAX_PIPS);
+
+   double candidate_target = 0.0;
+
+   if(direction == 1) // BUY -> Look for H1 Swing High resistance above entry
+   {
+      double nearest = 0.0;
+      for(int i = right; i < lookback - left; i++)
+      {
+         if(IsSwingHigh(highs, i, left, right, lookback))
+         {
+            if(highs[i] >= entry + min_dist_price && highs[i] <= entry + max_dist_price)
+            {
+               if(nearest == 0.0 || highs[i] < nearest)
+                  nearest = highs[i];
+            }
+         }
+      }
+      if(nearest > 0.0)
+         candidate_target = PriceToPips(idx, nearest - entry);
+   }
+   else if(direction == -1) // SELL -> Look for H1 Swing Low support below entry
+   {
+      double nearest = 0.0;
+      for(int i = right; i < lookback - left; i++)
+      {
+         if(IsSwingLow(lows, i, left, right, lookback))
+         {
+            if(lows[i] <= entry - min_dist_price && lows[i] >= entry - max_dist_price)
+            {
+               if(nearest == 0.0 || lows[i] > nearest)
+                  nearest = lows[i];
+            }
+         }
+      }
+      if(nearest > 0.0)
+         candidate_target = PriceToPips(idx, entry - nearest);
+   }
+
+   // Also check H1 EMA50 obstacle
+   double ema50_h1 = CalculateEMA_Generic(sym, PERIOD_H1, 50, 1);
+   if(ema50_h1 > 0.0)
+   {
+      if(direction == 1 && ema50_h1 >= entry + min_dist_price && ema50_h1 <= entry + max_dist_price)
+      {
+         double ema_pips = PriceToPips(idx, ema50_h1 - entry);
+         if(candidate_target <= 0.0 || ema_pips < candidate_target)
+            candidate_target = ema_pips;
+      }
+      else if(direction == -1 && ema50_h1 <= entry - min_dist_price && ema50_h1 >= entry - max_dist_price)
+      {
+         double ema_pips = PriceToPips(idx, entry - ema50_h1);
+         if(candidate_target <= 0.0 || ema_pips < candidate_target)
+            candidate_target = ema_pips;
+      }
+   }
+
+   // Clamp within [TF_RUNNER_TP2_MIN_PIPS, TF_RUNNER_TP2_MAX_PIPS]
+   if(candidate_target < TF_RUNNER_TP2_MIN_PIPS)
+      candidate_target = 60.0; // Default sweet spot
+   if(candidate_target > TF_RUNNER_TP2_MAX_PIPS)
+      candidate_target = TF_RUNNER_TP2_MAX_PIPS;
+
+   return candidate_target;
+}
+
+// ==================================================================
+// M15 STRUCTURE SWING TRAILING STOP
+// ==================================================================
+// Finds latest confirmed swing low (BUY) / swing high (SELL) on M15
+// and adds 0.5x ATR M15 buffer
+double CalcM15SwingTrailingStop(int idx, int direction)
+{
+   string sym = G_Pairs[idx].symbol;
+   double entry = G_TradeProfile[idx].entry_price;
+   if(entry <= 0.0) return 0.0;
+
+   double highs[], lows[];
+   int lookback = TF_RUNNER_SWING_LOOKBACK;
+   if(!ReadHighLow_Generic(sym, PERIOD_M15, 1, lookback, highs, lows))
+      return 0.0;
+
+   double atr = CalculateATR_Generic(sym, PERIOD_M15, InpReversal_ATR_Period, 1);
+   double buffer = (atr > 0.0) ? (atr * TF_RUNNER_SWING_BUFFER_ATR) : PipsToPrice(idx, 5.0);
+
+   int left = 3;
+   int right = 1;
+   double min_profit_dist = PipsToPrice(idx, 5.0); // Stop must be at least entry + 5 pips
+
+   if(direction == 1) // BUY -> Find latest Swing Low (Higher Low)
+   {
+      for(int i = right; i < lookback - left; i++)
+      {
+         if(IsSwingLow(lows, i, left, right, lookback))
+         {
+            double candidate_stop = lows[i] - buffer;
+            if(candidate_stop >= entry + min_profit_dist)
+            {
+               return candidate_stop; // Found the most recent valid Higher Low
+            }
+         }
+      }
+   }
+   else if(direction == -1) // SELL -> Find latest Swing High (Lower High)
+   {
+      for(int i = right; i < lookback - left; i++)
+      {
+         if(IsSwingHigh(highs, i, left, right, lookback))
+         {
+            double candidate_stop = highs[i] + buffer;
+            if(candidate_stop <= entry - min_profit_dist)
+            {
+               return candidate_stop; // Found the most recent valid Lower High
+            }
+         }
+      }
+   }
+
+   return 0.0; // No valid swing found yet
+}
+
 void ActivateRunner(int idx)
 {
    if(G_TradeProfile[idx].runner_active) return;
 
    string sym = G_Pairs[idx].symbol;
    int direction = G_TradeProfile[idx].direction;
-   double atr = CalculateATR_Generic(sym, PERIOD_M15, InpReversal_ATR_Period, 1);
-   if(atr <= 0.0) return;
+   double entry = G_TradeProfile[idx].entry_price;
+   if(entry <= 0.0) return;
 
    double current_price = (direction == 1) ? SymbolInfoDouble(sym, SYMBOL_BID)
                                            : SymbolInfoDouble(sym, SYMBOL_ASK);
 
-   double trail_distance = atr * TF_TRAILING_ATR_MULT;
+   // Calculate Extended TP2 target if not already set
+   if(G_TradeProfile[idx].runner_tp2_price <= 0.0)
+   {
+      double tp2_pips = CalcH1TargetTP2(idx, direction, entry);
+      G_TradeProfile[idx].runner_tp2_pips = tp2_pips;
+      G_TradeProfile[idx].runner_tp2_price = (direction == 1) ? (entry + PipsToPrice(idx, tp2_pips))
+                                                              : (entry - PipsToPrice(idx, tp2_pips));
+   }
 
-   if(direction == 1)
-   {
-      double candidate = current_price - trail_distance;
-      G_TradeProfile[idx].runner_trail_price = candidate;
-   }
-   else
-   {
-      double candidate = current_price + trail_distance;
-      G_TradeProfile[idx].runner_trail_price = candidate;
-   }
+   // Set Stage 1 (Breathing Buffer: lock SL at Entry + 3 pips)
+   G_TradeProfile[idx].runner_stage = 1;
+   double safe_stop = (direction == 1) ? (entry + PipsToPrice(idx, 3.0))
+                                       : (entry - PipsToPrice(idx, 3.0));
+   G_TradeProfile[idx].runner_trail_price = safe_stop;
 
    G_TradeProfile[idx].runner_active = true;
    SaveTradeProfile(idx, G_Pairs[idx].active_chain_id);
 
    // --- LOG ---
-   double profit_pips = (direction == 1) ? PriceToPips(idx, current_price - G_TradeProfile[idx].entry_price)
-                                         : PriceToPips(idx, G_TradeProfile[idx].entry_price - current_price);
-   double threshold = G_TradeProfile[idx].initial_dynamic_tp * 0.8;
+   double profit_pips = (direction == 1) ? PriceToPips(idx, current_price - entry)
+                                         : PriceToPips(idx, entry - current_price);
    
-   PrintFormat("\n[RUNNER]\nSYMBOL=%s\nStrategy=FT\nInitialTP=%.1f\nThreshold=%.1f\nProfit=%.1f\nMomentum=STRONG\nRunner=ACTIVATED\nTrailDist=%.1f pips (%.2fx ATR)",
-               sym, G_TradeProfile[idx].initial_dynamic_tp, threshold, profit_pips, PriceToPips(idx, trail_distance), TF_TRAILING_ATR_MULT);
+   PrintFormat("\n[OPTIMIZED-RUNNER-ACTIVATED]\nSYMBOL=%s\nStrategy=%s\nEntry=%.5f\nProfit=%.1f pips\nInitialStop=%.5f (Entry+3p)\nExtendedTP2=%.5f (%.1f pips)\nStage=1 (Breathing Buffer: 15-30p)",
+               sym, (G_TradeProfile[idx].strategy_type == STRATEGY_FT ? "FT" : "CT"),
+               entry, profit_pips, safe_stop, G_TradeProfile[idx].runner_tp2_price, G_TradeProfile[idx].runner_tp2_pips);
 }
 
 // Update runner trailing stop (move trail only in favor direction)
@@ -739,32 +894,89 @@ void UpdateRunnerTrail(int idx)
 
    string sym = G_Pairs[idx].symbol;
    int direction = G_TradeProfile[idx].direction;
-   double atr = CalculateATR_Generic(sym, PERIOD_M15, InpReversal_ATR_Period, 1);
-   if(atr <= 0.0) return;
+   double entry = G_TradeProfile[idx].entry_price;
+   if(entry <= 0.0) return;
 
    double current_price = (direction == 1) ? SymbolInfoDouble(sym, SYMBOL_BID)
                                            : SymbolInfoDouble(sym, SYMBOL_ASK);
-   double trail_distance = atr * TF_TRAILING_ATR_MULT;
+   if(current_price <= 0.0) return;
+
+   double profit_pips = (direction == 1) ? PriceToPips(idx, current_price - entry)
+                                         : PriceToPips(idx, entry - current_price);
 
    bool sl_updated = false;
    double old_trail = G_TradeProfile[idx].runner_trail_price;
 
-   if(direction == 1)
+   // ---------------------------------------------------------------
+   // STAGE 1: BREATHING BUFFER (15 - 30 pips)
+   // ---------------------------------------------------------------
+   if(profit_pips < TF_RUNNER_BREATHE_PIPS)
    {
-      double new_trail = current_price - trail_distance;
-      if(new_trail > G_TradeProfile[idx].runner_trail_price)
+      G_TradeProfile[idx].runner_stage = 1;
+      // SL is held strictly at Entry + 3 pips (risk-free, no micro-ATR noise shakeouts)
+      double safe_stop = (direction == 1) ? (entry + PipsToPrice(idx, 3.0))
+                                          : (entry - PipsToPrice(idx, 3.0));
+
+      if(direction == 1)
       {
-         G_TradeProfile[idx].runner_trail_price = new_trail;
-         sl_updated = true;
+         if(G_TradeProfile[idx].runner_trail_price < safe_stop)
+         {
+            G_TradeProfile[idx].runner_trail_price = safe_stop;
+            sl_updated = true;
+         }
+      }
+      else
+      {
+         if(G_TradeProfile[idx].runner_trail_price > safe_stop || G_TradeProfile[idx].runner_trail_price <= 0.0)
+         {
+            G_TradeProfile[idx].runner_trail_price = safe_stop;
+            sl_updated = true;
+         }
       }
    }
+   // ---------------------------------------------------------------
+   // STAGE 2: STRUCTURE TRAILING (>= 30 pips)
+   // ---------------------------------------------------------------
    else
    {
-      double new_trail = current_price + trail_distance;
-      if(new_trail < G_TradeProfile[idx].runner_trail_price)
+      G_TradeProfile[idx].runner_stage = 2;
+      double candidate_stop = CalcM15SwingTrailingStop(idx, direction);
+
+      // Fallback: If no confirmed M15 swing found yet, use wide ATR M15 buffer (2.0x ATR)
+      if(candidate_stop <= 0.0)
       {
-         G_TradeProfile[idx].runner_trail_price = new_trail;
-         sl_updated = true;
+         double atr = CalculateATR_Generic(sym, PERIOD_M15, InpReversal_ATR_Period, 1);
+         if(atr > 0.0)
+         {
+            double trail_distance = atr * TF_TRAILING_ATR_MULT;
+            candidate_stop = (direction == 1) ? (current_price - trail_distance)
+                                              : (current_price + trail_distance);
+         }
+      }
+
+      if(candidate_stop > 0.0)
+      {
+         // Ratchet rule: Stop can ONLY move forward (tightening), never widen
+         if(direction == 1)
+         {
+            if(candidate_stop > G_TradeProfile[idx].runner_trail_price)
+            {
+               G_TradeProfile[idx].runner_trail_price = candidate_stop;
+               sl_updated = true;
+               PrintFormat("[%s] >>> [RUNNER-TRAIL-RATCHET] BUY SL Ratcheted to %.5f (Profit=%.1f pips, Swing M15)",
+                           sym, candidate_stop, profit_pips);
+            }
+         }
+         else
+         {
+            if(candidate_stop < G_TradeProfile[idx].runner_trail_price || G_TradeProfile[idx].runner_trail_price <= 0.0)
+            {
+               G_TradeProfile[idx].runner_trail_price = candidate_stop;
+               sl_updated = true;
+               PrintFormat("[%s] >>> [RUNNER-TRAIL-RATCHET] SELL SL Ratcheted to %.5f (Profit=%.1f pips, Swing M15)",
+                           sym, candidate_stop, profit_pips);
+            }
+         }
       }
    }
    
@@ -847,27 +1059,12 @@ bool ExecuteFTPartialClose(int idx, double current_price)
       G_TradeProfile[idx].ft_partial_profit = 0.0;
       G_TradeProfile[idx].ft_partial_time = TimeCurrent();
 
-      // Activate Runner mode for entire position
+      // Activate Runner mode for entire position (initializes TP2, sets stage 1, locks SL at Entry + 3 pips)
       ActivateRunner(idx);
 
-      // Lock minimum stop price at Entry + 5 pips
-      double lock_pips = MathMax(5.0, G_TradeProfile[idx].initial_dynamic_tp * 0.5);
-      double safe_stop = (dir == 1) ? (entry + PipsToPrice(idx, lock_pips))
-                                    : (entry - PipsToPrice(idx, lock_pips));
-      if(dir == 1)
-      {
-         if(G_TradeProfile[idx].runner_trail_price < safe_stop)
-            G_TradeProfile[idx].runner_trail_price = safe_stop;
-      }
-      else
-      {
-         if(G_TradeProfile[idx].runner_trail_price > safe_stop || G_TradeProfile[idx].runner_trail_price <= 0.0)
-            G_TradeProfile[idx].runner_trail_price = safe_stop;
-      }
-
       SaveTradeProfile(idx, chain_id);
-      PrintFormat("[%s] >>> [HYBRID SCALP-AND-RUN] FT Order 1 TP Hit (Vol=%.2f <= MinVol): Cannot split, transitioning 100% to Runner Trailing (Locked=%.1f pips, Trail=%.5f)",
-                  sym, vol, lock_pips, G_TradeProfile[idx].runner_trail_price);
+      PrintFormat("[%s] >>> [HYBRID SCALP-AND-RUN] FT Order 1 TP Hit (Vol=%.2f <= MinVol): Cannot split, transitioning 100% to Runner (TP2=%.5f / %.1f pips, Trail=%.5f)",
+                  sym, vol, G_TradeProfile[idx].runner_tp2_price, G_TradeProfile[idx].runner_tp2_pips, G_TradeProfile[idx].runner_trail_price);
       return true;
    }
 
@@ -921,22 +1118,8 @@ bool ExecuteFTPartialClose(int idx, double current_price)
                   sym, chain_id, half_vol, (vol - half_vol), realized_profit, pips_won);
    }
 
-   // Activate Runner Mode for the remaining 50%
+   // Activate Runner Mode for the remaining 50% (initializes TP2, sets stage 1, locks SL at Entry + 3 pips)
    ActivateRunner(idx);
-
-   // Lock minimum stop price for the remaining 50% at Entry + 3 pips
-   double safe_stop = (dir == 1) ? (entry + PipsToPrice(idx, 3.0))
-                                 : (entry - PipsToPrice(idx, 3.0));
-   if(dir == 1)
-   {
-      if(G_TradeProfile[idx].runner_trail_price < safe_stop)
-         G_TradeProfile[idx].runner_trail_price = safe_stop;
-   }
-   else
-   {
-      if(G_TradeProfile[idx].runner_trail_price > safe_stop || G_TradeProfile[idx].runner_trail_price <= 0.0)
-         G_TradeProfile[idx].runner_trail_price = safe_stop;
-   }
 
    SaveTradeProfile(idx, chain_id);
    return true;
@@ -1347,6 +1530,9 @@ void SaveTradeProfile(int idx, ulong chain_id)
    GlobalVariableSet("Yoogi_DynTP_Price_" + sym + "_" + id_str, G_TradeProfile[idx].tp_price);
    GlobalVariableSet("Yoogi_Runner_Active_" + sym + "_" + id_str, G_TradeProfile[idx].runner_active ? 1.0 : 0.0);
    GlobalVariableSet("Yoogi_Runner_Trail_" + sym + "_" + id_str, G_TradeProfile[idx].runner_trail_price);
+   GlobalVariableSet("Yoogi_Runner_TP2_" + sym + "_" + id_str, G_TradeProfile[idx].runner_tp2_price);
+   GlobalVariableSet("Yoogi_Runner_TP2Pips_" + sym + "_" + id_str, G_TradeProfile[idx].runner_tp2_pips);
+   GlobalVariableSet("Yoogi_Runner_Stage_" + sym + "_" + id_str, (double)G_TradeProfile[idx].runner_stage);
    GlobalVariableSet("Yoogi_DynTP_Compress_" + sym + "_" + id_str, G_TradeProfile[idx].compression_active ? 1.0 : 0.0);
    GlobalVariableSet("Yoogi_DynTP_LastComp_" + sym + "_" + id_str, G_TradeProfile[idx].last_compression_tp);
    GlobalVariableSet("Yoogi_BE_Active_" + sym + "_" + id_str, G_TradeProfile[idx].be_active ? 1.0 : 0.0);
@@ -1373,6 +1559,9 @@ void LoadTradeProfile(int idx, ulong chain_id)
       G_TradeProfile[idx].tp_price            = GlobalVariableGet("Yoogi_DynTP_Price_" + sym + "_" + id_str);
       G_TradeProfile[idx].runner_active       = (GlobalVariableGet("Yoogi_Runner_Active_" + sym + "_" + id_str) > 0.5);
       G_TradeProfile[idx].runner_trail_price  = GlobalVariableGet("Yoogi_Runner_Trail_" + sym + "_" + id_str);
+      G_TradeProfile[idx].runner_tp2_price    = GlobalVariableGet("Yoogi_Runner_TP2_" + sym + "_" + id_str);
+      G_TradeProfile[idx].runner_tp2_pips     = GlobalVariableGet("Yoogi_Runner_TP2Pips_" + sym + "_" + id_str);
+      G_TradeProfile[idx].runner_stage        = (int)GlobalVariableGet("Yoogi_Runner_Stage_" + sym + "_" + id_str);
       G_TradeProfile[idx].compression_active  = (GlobalVariableGet("Yoogi_DynTP_Compress_" + sym + "_" + id_str) > 0.5);
       G_TradeProfile[idx].last_compression_tp = GlobalVariableGet("Yoogi_DynTP_LastComp_" + sym + "_" + id_str);
       G_TradeProfile[idx].be_active           = (GlobalVariableGet("Yoogi_BE_Active_" + sym + "_" + id_str) > 0.5);
@@ -1383,10 +1572,11 @@ void LoadTradeProfile(int idx, ulong chain_id)
       G_TradeProfile[idx].last_update_time    = TimeCurrent();
       G_TradeProfile[idx].is_valid            = true;
 
-      PrintFormat("[%s] >>> DYNAMIC EXIT RESTORED: Strat=%d, Dir=%d, InitTP=%.1f, CurrTP=%.1f, Runner=%s, Trail=%.5f, BE=%s, BEStop=%.5f, PartClosed=%s",
+      PrintFormat("[%s] >>> DYNAMIC EXIT RESTORED: Strat=%d, Dir=%d, InitTP=%.1f, CurrTP=%.1f, Runner=%s, Stage=%d, Trail=%.5f, TP2=%.5f (%.1f p), BE=%s, BEStop=%.5f, PartClosed=%s",
                   sym, G_TradeProfile[idx].strategy_type, G_TradeProfile[idx].direction,
                   G_TradeProfile[idx].initial_dynamic_tp, G_TradeProfile[idx].current_dynamic_tp,
-                  G_TradeProfile[idx].runner_active ? "YES" : "NO", G_TradeProfile[idx].runner_trail_price,
+                  G_TradeProfile[idx].runner_active ? "YES" : "NO", G_TradeProfile[idx].runner_stage,
+                  G_TradeProfile[idx].runner_trail_price, G_TradeProfile[idx].runner_tp2_price, G_TradeProfile[idx].runner_tp2_pips,
                   G_TradeProfile[idx].be_active ? "YES" : "NO", G_TradeProfile[idx].be_stop_price,
                   G_TradeProfile[idx].ft_partial_closed ? "YES" : "NO");
    }
@@ -1424,6 +1614,9 @@ void ClearTradeProfilePersistence(int idx, ulong chain_id)
    GlobalVariableDel("Yoogi_DynTP_Price_" + sym + "_" + id_str);
    GlobalVariableDel("Yoogi_Runner_Active_" + sym + "_" + id_str);
    GlobalVariableDel("Yoogi_Runner_Trail_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_Runner_TP2_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_Runner_TP2Pips_" + sym + "_" + id_str);
+   GlobalVariableDel("Yoogi_Runner_Stage_" + sym + "_" + id_str);
    GlobalVariableDel("Yoogi_DynTP_Compress_" + sym + "_" + id_str);
    GlobalVariableDel("Yoogi_DynTP_LastComp_" + sym + "_" + id_str);
    GlobalVariableDel("Yoogi_BE_Active_" + sym + "_" + id_str);
@@ -1606,7 +1799,7 @@ void UpdateDynamicExit(int idx)
 // ==================================================================
 // DYNAMIC TP CHECK — Should we close the trade?
 // ==================================================================
-// Returns: 0 = hold, 1 = close at TP, 2 = close by runner stop
+// Returns: 0 = hold, 1 = close at TP, 2 = close by runner stop, 3 = close by runner TP2
 int CheckDynamicTPHit(int idx, double current_price, int direction)
 {
    if(!G_TradeProfile[idx].is_valid) return 0;
@@ -1614,6 +1807,23 @@ int CheckDynamicTPHit(int idx, double current_price, int direction)
    // --- Runner Mode Exit ---
    if(G_TradeProfile[idx].runner_active)
    {
+      // Check Extended Target TP2 hit first
+      if(G_TradeProfile[idx].runner_tp2_price > 0.0)
+      {
+         if(direction == 1 && current_price >= G_TradeProfile[idx].runner_tp2_price)
+         {
+            PrintFormat("[DYNAMIC-TP-RUNNER-TP2-EXIT] SYMBOL=%s TP2Price=%.5f CurrentPrice=%.5f",
+                        G_Pairs[idx].symbol, G_TradeProfile[idx].runner_tp2_price, current_price);
+            return 3;
+         }
+         if(direction == -1 && current_price <= G_TradeProfile[idx].runner_tp2_price)
+         {
+            PrintFormat("[DYNAMIC-TP-RUNNER-TP2-EXIT] SYMBOL=%s TP2Price=%.5f CurrentPrice=%.5f",
+                        G_Pairs[idx].symbol, G_TradeProfile[idx].runner_tp2_price, current_price);
+            return 3;
+         }
+      }
+
       if(IsRunnerStopped(idx))
       {
          PrintFormat("[DYNAMIC-TP-RUNNER-EXIT] SYMBOL=%s TrailPrice=%.5f CurrentPrice=%.5f",

@@ -429,6 +429,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       else if(pr_val == 2.0) reason = "TP";
       else if(pr_val == 3.0) reason = "RUNNER";
       else if(pr_val == 4.0) reason = "BREAK_EVEN";
+      else if(pr_val == 5.0) reason = "RUNNER_TP2";
       GlobalVariableDel(pending_reason_gv);
    }
    else if(reason == "BROKER_CLOSE")
@@ -569,7 +570,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          }
       }
    }
-   else if(reason == "TP" || reason == "RUNNER" || reason == "BREAK_EVEN")
+   else if(reason == "TP" || reason == "RUNNER" || reason == "BREAK_EVEN" || reason == "RUNNER_TP2")
    {
       if(debt_before <= 0.001)
       {
@@ -719,6 +720,7 @@ void CloseAndResolveChain(int idx, string reason)
    else if(reason == "TP") pr_val = 2.0;
    else if(reason == "RUNNER") pr_val = 3.0;
    else if(reason == "BREAK_EVEN") pr_val = 4.0;
+   else if(reason == "RUNNER_TP2") pr_val = 5.0;
    GlobalVariableSet(pending_reason_gv, pr_val);
 
    // 1. Request closing of all positions belonging to this chain
@@ -1276,6 +1278,24 @@ void ManagePairs()
                                                        : SymbolInfoDouble(sym, SYMBOL_ASK);
 
                // Check Runner exit
+               // Check Runner Extended TP2 Harvest exit (50 - 85 pips at H1 obstacle)
+               if(G_TradeProfile[i].runner_active && G_TradeProfile[i].runner_tp2_price > 0.0)
+               {
+                  bool tp2_hit = false;
+                  if(basket_dir == 1 && current_price >= G_TradeProfile[i].runner_tp2_price) tp2_hit = true;
+                  if(basket_dir == -1 && current_price <= G_TradeProfile[i].runner_tp2_price) tp2_hit = true;
+
+                  if(tp2_hit)
+                  {
+                     double pips_earned = (basket_dir == 1) ? PriceToPips(i, current_price - avg_entry)
+                                                            : PriceToPips(i, avg_entry - current_price);
+                     PrintFormat("[%s] >>> RUNNER TP2 HIT: Reached Extended Target %.5f (%.1f pips). Closing with peak profit...",
+                                 sym, G_TradeProfile[i].runner_tp2_price, pips_earned);
+                     CloseAndResolveChain(i, "RUNNER_TP2");
+                     continue;
+                  }
+               }
+
                if(G_TradeProfile[i].runner_active && IsRunnerStopped(i))
                {
                   PrintFormat("[%s] >>> RUNNER EXIT: Trailing stop hit. Closing...", sym);
