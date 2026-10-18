@@ -326,6 +326,10 @@ void ClearChainState_Multi(int idx)
    G_Pairs[idx].locked_balance = 0.0;
    G_Pairs[idx].active_chain_id = 0;
    G_Pairs[idx].active_chain_strategy = "";
+
+   // Reset clean state for both entry engines
+   ResetReversalSetup(idx, "Chain Cleared");
+   ResetTFSetup(idx, "Chain Cleared");
 }
 
 // ==================================================================
@@ -503,6 +507,14 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       SetSystemDCASeq(idx, current_dca_seq);
    }
 
+   // In Hybrid Scalp-and-Run, if FT Order 1 already amortized its 50% partial profit into SystemDebt,
+   // the remaining profit eligible for amortization in this final closure is only (realized_pnl - ft_partial_profit)
+   double unamortized_profit = realized_pnl;
+   if(G_TradeProfile[idx].ft_partial_closed && G_TradeProfile[idx].ft_partial_profit > 0.0)
+   {
+      unamortized_profit = MathMax(0.0, realized_pnl - G_TradeProfile[idx].ft_partial_profit);
+   }
+
    // Update Debt, Recovery State & DCA Sequence based on Reason and Realized P&L
    if(reason == "MAX_DCA")
    {
@@ -523,7 +535,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       else
       {
          // MAX_DCA with profit (not TP)
-         if(debt_before > 0.001 && realized_pnl > 0.0)
+         if(debt_before > 0.001 && unamortized_profit > 0.0)
          {
             bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
             double debt_target = 0.0;
@@ -534,14 +546,14 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
             else
                debt_target = debt_before;  // First recovery, 3+ pos → 100%
 
-            double debt_reduction = MathMin(debt_target, realized_pnl);
+            double debt_reduction = MathMin(debt_target, unamortized_profit);
             debt_reduction = MathMin(debt_reduction, debt_before);
 
-            double normal_profit = realized_pnl - debt_reduction;
+            double normal_profit = unamortized_profit - debt_reduction;
             double debt_after = debt_before - debt_reduction;
             
-            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
-                        sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
+            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nUnamortizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
+                        sym, strat, chain_id, realized_pnl, unamortized_profit, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
 
             if(debt_after <= 0.00001)
             {
@@ -585,16 +597,16 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
       else
       {
          // Recovery TP / Break-Even: settle debt with realized profit (Amortization)
-         if(realized_pnl > 0.0)
+         if(unamortized_profit > 0.0)
          {
             // Amortization (Trả nợ trừ dần): Bất kể lãi bao nhiêu cũng ưu tiên trừ thẳng vào nợ
-            double debt_reduction = MathMin(debt_before, realized_pnl);
+            double debt_reduction = MathMin(debt_before, unamortized_profit);
 
-            double normal_profit = realized_pnl - debt_reduction;
+            double normal_profit = unamortized_profit - debt_reduction;
             double debt_after = debt_before - debt_reduction;
             
-            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nREASON=%s\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
-                        sym, strat, chain_id, reason, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
+            PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nREASON=%s\nRealizedProfit=%.2f\nUnamortizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
+                        sym, strat, chain_id, reason, realized_pnl, unamortized_profit, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
 
             if(debt_after <= 0.00001)
             {
@@ -643,7 +655,7 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          PrintFormat("[DEBT-ADD]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nDCA_FROM=%d\nDCA_TO=%d\nCHAIN_RESULT=%.2f\nDEBT_BEFORE=%.2f\nDEBT_ADDED=%.2f\nDEBT_AFTER=%.2f\nDCA_SEQUENCE=%d\nMODE=RECOVERY",
                      sym, strat, chain_id, dca_from, dca_to, realized_pnl, debt_before, net_loss, debt_after, current_dca_seq);
       }
-      else if(realized_pnl > 0.0 && debt_before > 0.001)
+      else if(unamortized_profit > 0.0 && debt_before > 0.001)
       {
          // Other closure with positive profit during recovery: settle debt
          bool partial_done = G_Pairs[idx].system_debt_partially_recovered;
@@ -655,14 +667,14 @@ bool ResolveClosedChainFromHistory(int idx, ulong chain_id, string reason)
          else
             debt_target = debt_before;  // First recovery, 3+ pos → 100%
 
-         double debt_reduction = MathMin(debt_target, realized_pnl);
+         double debt_reduction = MathMin(debt_target, unamortized_profit);
          debt_reduction = MathMin(debt_reduction, debt_before);
 
-         double normal_profit = realized_pnl - debt_reduction;
+         double normal_profit = unamortized_profit - debt_reduction;
          double debt_after = debt_before - debt_reduction;
          
-         PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
-                     sym, strat, chain_id, realized_pnl, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
+         PrintFormat("\n[RECOVERY CHAIN CLOSED]\nSYMBOL=%s\nSTRATEGY=%s\nCHAIN_ID=%I64u\nRealizedProfit=%.2f\nUnamortizedProfit=%.2f\nDebtBefore=%.2f\nDebtReduction=%.2f\nNormalProfit=%.2f\nDebtAfter=%.2f\nRecoveryComplete=%s\nDCA_SEQUENCE=%d",
+                     sym, strat, chain_id, realized_pnl, unamortized_profit, debt_before, debt_reduction, normal_profit, debt_after, (debt_after <= 0.00001 ? "true" : "false"), current_dca_seq);
 
          if(debt_after <= 0.00001)
          {
@@ -911,11 +923,9 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
       // Cập nhật System DCA sequence (AUTHORITATIVE)
       SetSystemDCASeq(idx, next_dca_seq);
 
-      // Reset Reversal Engine sau khi vào lệnh thành công
-      G_Pairs[idx].htf_trap_signal = 0;
-      G_Pairs[idx].state_machine = STATE_NO_SETUP;
-      G_Pairs[idx].setup_direction = 0;
-      G_Pairs[idx].rev_status = "NO SETUP";
+      // Reset cả 2 Entry Engines sau khi vào lệnh thành công
+      ResetReversalSetup(idx, "Master Order Opened");
+      ResetTFSetup(idx, "Master Order Opened");
 
       // --- INIT DYNAMIC EXIT TRADE PROFILE ---
       if(InpEnableDynamicTP)
@@ -977,6 +987,11 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
    if(enough)
    {
+      // --- COOLDOWN THROTTLE: Toi thieu 2 giay giua cac lan DCA cho cung 1 cap de chong bao tick/truot gia kep ---
+      static datetime last_dca_time[TOTAL_PAIRS];
+      datetime now = TimeCurrent();
+      if(now - last_dca_time[idx] < 2) return;
+
       string strat = G_Pairs[idx].active_chain_strategy;
       if(strat == "") strat = "CT";
       
@@ -985,7 +1000,7 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
       int next_dca_seq    = current_dca_seq + 1;
       int cur_pos_count   = G_Pairs[idx].chain_position_count;
 
-      // 2. CHECK CHAIN LIMIT: Không mở DCA vượt quá InpMaxDCAPerChain
+      // 2. CHECK CHAIN LIMIT: Khong mo DCA vuot qua InpMaxDCAPerChain
       if(cur_pos_count >= InpMaxDCAPerChain)
       {
          PrintFormat("[CHAIN-LIMIT]\nDCA_SEQUENCE=%d\nCHAIN_POSITION=%d\nMAX_CHAIN_POSITIONS=%d\nNEXT_DCA_SEQUENCE=%d\nACTION=CLOSE_CHAIN",
@@ -996,15 +1011,17 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
       int next_chain_pos = cur_pos_count + 1;
 
-      // 3. Tính Lot (Dùng Previous DCA Lot * InpHeSoLot hoặc CalculateDCALot)
+      // 3. Tinh Lot (Dung CalculateDCALot voi bao ve buoc nhay toi thieu)
       double working_balance = (G_Pairs[idx].locked_balance > 0) ? G_Pairs[idx].locked_balance : AccountInfoDouble(ACCOUNT_BALANCE);
       if(InpSetBalance > 0.0) working_balance = InpSetBalance;
 
-      double new_lot = 0.0;
-      if(last_lot > 0.0)
-         new_lot = NormalizeLot(sym, last_lot * InpHeSoLot);
-      else
-         new_lot = CalculateDCALot(idx, next_dca_seq, working_balance);
+      double new_lot = CalculateDCALot(idx, next_dca_seq, working_balance);
+      double step_lot = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+      if(step_lot <= 0.0) step_lot = 0.01;
+      if(last_lot > 0.0 && new_lot <= last_lot)
+      {
+         new_lot = NormalizeLot(sym, last_lot + step_lot);
+      }
 
       // --- MARGIN EXHAUSTION PRE-CHECK ---
       ENUM_ORDER_TYPE order_type = (master_type == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
@@ -1020,12 +1037,13 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
          return;
       }
 
-      // 4. Mở lệnh
+      // 4. Mo lenh
       string cmt = strat + " | DCA " + IntegerToString(next_dca_seq);
       bool res = OpenChildOrder_Multi(idx, master_type, new_lot, cmt);
 
       if(res)
       {
+         last_dca_time[idx] = now;
          G_Pairs[idx].chain_position_count = next_chain_pos;
          G_Pairs[idx].chain_end_dca_seq = next_dca_seq;
          // Update System DCA sequence (AUTHORITATIVE)
@@ -1134,8 +1152,6 @@ int CheckDXYConvergence_Dual(int idx)
                   (mainTrap == 1 ? "BUY" : "SELL"),
                   (dxySignal == 1 ? "BUY" : "SELL"));
       G_Pairs[idx].trapSignal = 0;
-      G_DXY_TrapSignal_HTF[di] = 0;
-      G_DXY_TrapSignal_LTF[di] = 0;
       return 0;
    }
 }
@@ -1271,9 +1287,11 @@ void ManagePairs()
 
             int basket_dir = (m_type == POSITION_TYPE_BUY) ? 1 : -1;
 
-               // DCA ON: Use basket average entry for TP
-               double avg_entry = CalcBasketAverageEntry(i);
-               double basket_tp = GetBasketTPPrice(i, avg_entry, basket_dir);
+               // DCA ON: Use basket average entry and TP calculated in UpdateDynamicExit
+               double avg_entry = G_TradeProfile[i].entry_price;
+               if(avg_entry <= 0.0) avg_entry = CalcBasketAverageEntry(i);
+               double basket_tp = G_TradeProfile[i].tp_price;
+               if(basket_tp <= 0.0) basket_tp = GetBasketTPPrice(i, avg_entry, basket_dir);
                double current_price = (basket_dir == 1) ? SymbolInfoDouble(sym, SYMBOL_BID)
                                                        : SymbolInfoDouble(sym, SYMBOL_ASK);
 
@@ -1336,23 +1354,15 @@ void ManagePairs()
 
                if(tp_hit && !G_TradeProfile[i].runner_active)
                {
-                  // Check if runner should activate instead of closing
-                  if(CheckRunnerConditions(i))
-                  {
-                     ActivateRunner(i);
-                     // Don't close, runner will manage exit
-                  }
-                  else
-                  {
-                     PrintFormat("[%s] >>> DYNAMIC TP HIT: AvgEntry=%.5f TP=%.5f Current=%.5f (%.1f pips). Closing...",
-                                 sym, avg_entry, basket_tp, current_price, G_TradeProfile[i].current_dynamic_tp);
+                  PrintFormat("[%s] >>> DYNAMIC TP HIT: AvgEntry=%.5f TP=%.5f Current=%.5f (%.1f pips). Closing...",
+                              sym, avg_entry, basket_tp, current_price, G_TradeProfile[i].current_dynamic_tp);
 
-                     PrintFormat("[DCA] Step=%d pips | AvgEntry=%.5f | BasketTP=%.5f",
-                                 InpKhoangMoPip, avg_entry, basket_tp);
+                  int dca_step_display = (G_Pairs[i].chain_step_pips > 0) ? G_Pairs[i].chain_step_pips : InpKhoangMoPip;
+                  PrintFormat("[DCA] Step=%d pips | AvgEntry=%.5f | BasketTP=%.5f",
+                              dca_step_display, avg_entry, basket_tp);
 
-                     CloseAndResolveChain(i, "TP");
-                     continue;
-                  }
+                  CloseAndResolveChain(i, "TP");
+                  continue;
                }
          }
          else

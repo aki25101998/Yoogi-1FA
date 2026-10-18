@@ -669,8 +669,9 @@ bool CheckRunnerConditions(int idx)
    if(!InpEnableRunnerMode) return false;
    if(!G_TradeProfile[idx].is_valid) return false;
 
-   // Runner only for FT
+   // Runner only for FT single position (never on DCA baskets)
    if(G_TradeProfile[idx].strategy_type == STRATEGY_CT) return false;
+   if(G_Pairs[idx].chain_position_count > 1) return false;
 
    string sym = G_Pairs[idx].symbol;
    int direction = G_TradeProfile[idx].direction;
@@ -1785,64 +1786,8 @@ void UpdateDynamicExit(int idx)
       return; // When runner is active, don't compress
    }
 
-   // Check if should activate runner
-   if(CheckRunnerConditions(idx))
-   {
-      ActivateRunner(idx);
-      return;
-   }
-
-   // --- TP Compression ---
+   // --- TP Compression (only when runner is not active) ---
    TryTPCompression(idx);
-}
-
-// ==================================================================
-// DYNAMIC TP CHECK — Should we close the trade?
-// ==================================================================
-// Returns: 0 = hold, 1 = close at TP, 2 = close by runner stop, 3 = close by runner TP2
-int CheckDynamicTPHit(int idx, double current_price, int direction)
-{
-   if(!G_TradeProfile[idx].is_valid) return 0;
-
-   // --- Runner Mode Exit ---
-   if(G_TradeProfile[idx].runner_active)
-   {
-      // Check Extended Target TP2 hit first
-      if(G_TradeProfile[idx].runner_tp2_price > 0.0)
-      {
-         if(direction == 1 && current_price >= G_TradeProfile[idx].runner_tp2_price)
-         {
-            PrintFormat("[DYNAMIC-TP-RUNNER-TP2-EXIT] SYMBOL=%s TP2Price=%.5f CurrentPrice=%.5f",
-                        G_Pairs[idx].symbol, G_TradeProfile[idx].runner_tp2_price, current_price);
-            return 3;
-         }
-         if(direction == -1 && current_price <= G_TradeProfile[idx].runner_tp2_price)
-         {
-            PrintFormat("[DYNAMIC-TP-RUNNER-TP2-EXIT] SYMBOL=%s TP2Price=%.5f CurrentPrice=%.5f",
-                        G_Pairs[idx].symbol, G_TradeProfile[idx].runner_tp2_price, current_price);
-            return 3;
-         }
-      }
-
-      if(IsRunnerStopped(idx))
-      {
-         PrintFormat("[DYNAMIC-TP-RUNNER-EXIT] SYMBOL=%s TrailPrice=%.5f CurrentPrice=%.5f",
-                     G_Pairs[idx].symbol, G_TradeProfile[idx].runner_trail_price, current_price);
-         return 2;
-      }
-      // In runner mode, don't check normal TP
-      return 0;
-   }
-
-   // --- Normal TP Check ---
-   double tp_price = G_TradeProfile[idx].tp_price;
-
-   if(direction == 1 && current_price >= tp_price)
-      return 1;
-   if(direction == -1 && current_price <= tp_price)
-      return 1;
-
-   return 0;
 }
 
 // ==================================================================

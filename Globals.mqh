@@ -1131,7 +1131,7 @@ double CalculateAutoLot(int idx, double balance)
    return NormalizeLot(sym, raw_lot);
 }
 
-// Logic tính Lot theo Global DCA Sequence (DCA 1 = BaseLot, DCA N = Previous DCA Lot * InpHeSoLot)
+// Logic tính Lot theo Global DCA Sequence (DCA 1 = BaseLot, DCA N = BaseLot * InpHeSoLot^(seq-1))
 double CalculateDCALot(int idx, int dca_seq, double balance)
 {
    string sym = G_Pairs[idx].symbol;
@@ -1139,12 +1139,17 @@ double CalculateDCALot(int idx, int dca_seq, double balance)
    if(base_lot <= 0.0) return 0.0;
    if(dca_seq <= 1) return base_lot;
    
-   double cur_lot = base_lot;
-   for(int s = 2; s <= dca_seq; s++)
+   double raw_lot = base_lot * MathPow(InpHeSoLot, dca_seq - 1);
+   double lot = NormalizeLot(sym, raw_lot);
+
+   // Anti-rounding trap: nếu InpHeSoLot > 1.0 và dca_seq > 1 mà lot không tăng so với base_lot (ví dụ base=0.01)
+   if(InpHeSoLot > 1.0 && lot <= base_lot)
    {
-      cur_lot = NormalizeLot(sym, cur_lot * InpHeSoLot);
+      double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+      if(step <= 0.0) step = 0.01;
+      lot = NormalizeDouble(base_lot + (dca_seq - 1) * step, (step < 0.1) ? 2 : ((step < 1.0) ? 1 : 0));
    }
-   return cur_lot;
+   return lot;
 }
 
 // ======================================================================
