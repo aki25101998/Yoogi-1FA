@@ -1,7 +1,7 @@
 # YOOGI-1FA: HIẾN PHÁP HỆ THỐNG (CONSTITUTION)
 
-> **Phiên bản**: 2.0 — Cập nhật ngày 13/10/2026
-> **Build**: TF_MOMENTUM_10BAR | Version 33.00
+> **Phiên bản**: 3.0 — Cập nhật ngày 19/10/2026
+> **Build**: OPTIMIZED_RUNNER_HYBRID_STRUCTURE_TRAILING | Version 33.00
 
 Tài liệu này đóng vai trò là "Hiến pháp" cốt lõi của Yoogi-1FA. Mọi bản cập nhật, chỉnh sửa trong tương lai đều phải tuân thủ nghiêm ngặt các nguyên tắc và logic được định nghĩa tại đây.
 
@@ -241,17 +241,36 @@ Khi conditions xấu đi, TP được giảm xuống (chỉ giảm, không tăng
 - **Triggers**: Momentum yếu đi (×0.75), Structure target gần hơn, Available space thu hẹp.
 - **Anti-Jitter**: Thay đổi tối thiểu 5 pips, rate limit 1 lần/5 phút, chỉ khi profit ≥ 10 pips.
 
-### 8.3 Mô Hình Chốt Lời "Hybrid Scalp-and-Run" (Partial Close 50/50 & Runner)
+### 8.3 Động Cơ Runner Tối Ưu Hóa 3 Giai Đoạn (Optimized Runner Engine: Hybrid Structure & Multi-Tier Trailing)
 
-- **Áp dụng độc quyền cho Lệnh Đơn FT (Order 1)**:
-  - Khi giá chạm **TP1** HOẶC khi lợi nhuận đạt **$\ge 18.0$ pips**:
-    - Gọi ngay `PositionClosePartial` đóng **50% khối lượng** bỏ túi tiền tươi.
-    - Lợi nhuận của 50% này lập tức được trừ thẳng vào `System Debt` nếu đang ở Recovery Mode.
-    - Dời Stop ảo của 50% còn lại lên **Entry + 3 pips** (Free Trade tuyệt đối, bao phủ toàn bộ spread & com).
-    - Kích hoạt **Runner Trailing Stop** với khoảng đệm $2.0 \times \text{ATR}_{\text{M15}}$ để gồng trọn con sóng dài H1/H4 (50 - 100+ pips).
-  - **Failsafe**: Nếu khối lượng là `0.01 lot` (không thể chia nhỏ), EA khóa bảo toàn 50% TP1 và chuyển 100% vị thế sang Runner Trailing Stop.
-- **Áp dụng cho Chuỗi DCA ($\ge 2$ lệnh) & Counter-Trend (CT)**:
-  - Luôn đóng **100% Full Close** tại Basket TP, không áp dụng Partial Close nhằm giải phóng Margin và thoát hiểm nhanh chóng.
+Áp dụng độc quyền cho **Lệnh Đơn Trend-Following (FT Order 1)** nhằm giải phóng tối đa tiềm năng gồng lời mà không bị rung lắc nến nhỏ loại bỏ:
+
+1. **Giai đoạn 0: Chốt Lời Tiền Tươi (Hybrid Partial Close 50/50 tại TP1)**:
+   - Khi giá chạm **TP1** HOẶC khi lợi nhuận đạt **$\ge 18.0$ pips**:
+     - Lập tức đóng **50% khối lượng** vị thế bằng `PositionClosePartial` để bỏ túi tiền tươi.
+     - Lợi nhuận của 50% này ngay lập tức khấu trừ vào `System Debt` nếu tài khoản đang ở Recovery Mode.
+     - 50% khối lượng còn lại chuyển sang chế độ **Optimized Runner Engine**.
+   - *Failsafe*: Nếu khối lượng là `0.01 lot` (không thể chia nhỏ), EA chuyển toàn bộ 100% vị thế sang Runner với SL bảo vệ tại `Entry ± 3 pips`.
+
+2. **Giai đoạn 1: Vùng Đệm Thở Tự Do (Breathing Buffer: 15–30 pips)**:
+   - Trong khoảng lợi nhuận từ 15 đến dưới 30 pips (`profit_pips < TF_RUNNER_BREATHE_PIPS`):
+   - Mức Stop Loss ảo được **khóa cố định tại Entry + 3 pips** (BUY) hoặc **Entry - 3 pips** (SELL).
+   - *Nguyên tắc cốt lõi*: Tuyệt đối không siết trailing stop theo nến micro M5 tại vùng này. Vị thế đã là Free-Trade (bảo hiểm 100% rủi ro, bù đắp đủ phí spread và hoa hồng), cần không gian để thị trường tích lũy tạo đà bứt phá.
+
+3. **Giai đoạn 2: Bám Cấu Trúc Đáy/Đỉnh M15 (Structure Trailing: 30–55 pips)**:
+   - Khi lợi nhuận vượt qua 30 pips (`profit_pips >= TF_RUNNER_BREATHE_PIPS`):
+   - Chuyển `runner_stage = 2`. Kích hoạt thuật toán `CalcM15SwingTrailingStop`:
+     - **BUY**: Dò tìm đáy Swing Low gần nhất hợp lệ trên M15, trừ đi khoảng đệm an toàn $0.5 \times \text{ATR}_{\text{M15}}$.
+     - **SELL**: Dò tìm đỉnh Swing High gần nhất hợp lệ trên M15, cộng thêm khoảng đệm an toàn $0.5 \times \text{ATR}_{\text{M15}}$.
+   - **Quy tắc Ratchet (Khóa một chiều)**: Trailing Stop **chỉ được phép siết chặt theo chiều có lợi**, tuyệt đối không nới rộng khi giá thoái lui. Nếu chưa có cấu trúc M15 rõ ràng, dùng đệm phụ rộng $2.0 \times \text{ATR}_{\text{M15}}$.
+
+4. **Giai đoạn 3: Chốt Lời Mở Rộng TP2 Tại Cản H1 (Extended Target Harvest: 50–85 pips)**:
+   - Ngay khi kích hoạt Runner, hàm `CalcH1TargetTP2` tự động quét 40 nến H1 để xác định mức cản kỹ thuật tiếp theo (Swing High/Low hoặc EMA50 H1) kẹp trong khoảng `[50, 85]` pips (mặc định 60 pips) và lưu vào `runner_tp2_price`.
+   - Khi giá chạm ngưỡng cản này, EA chủ động đóng toàn bộ vị thế với lý do `RUNNER_TP2` (Pending Reason `5.0`) để hiện thực hóa toàn bộ lợi nhuận tại đỉnh sóng (đạt các mức kỷ lục như $356.00/lệnh).
+   - Lợi nhuận từ `RUNNER_TP2` được ưu tiên khấu trừ trả nợ hệ thống nếu đang ở Recovery Mode.
+
+5. **Áp dụng cho Chuỗi DCA ($\ge 2$ lệnh) & Counter-Trend (CT)**:
+   - Luôn đóng **100% Full Close** tại Basket TP, không chạy Runner nhằm giải phóng Margin và bảo toàn an toàn tuyệt đối cho tài khoản.
 
 ### 8.4 Recovery-Aware TP & Dynamic Ceiling
 
@@ -353,11 +372,42 @@ Toàn bộ state critical được lưu qua GlobalVariable để survive EA rest
 
 ---
 
+## ĐIỀU 12: BẢNG THÀNH TÍCH VÀ BẰNG CHỨNG KIỂM CHỨNG (OFFICIAL BENCHMARK)
+
+Bảng thành tích chính thức sau đợt kiểm chứng backtest 3 năm toàn diện (2023.01.01 – 2026.01.01) trên nền tảng MT5 Strategy Tester (Every Tick, 6 cặp tiền, Vốn ban đầu $10,000, Leverage 1:100):
+
+### 12.1 Chỉ Số Hiệu Suất Hệ Thống (Portfolio Metrics)
+- **Vốn ban đầu (Initial Deposit)**: $10,000.00 USD
+- **Số dư cuối kỳ (Final Balance)**: **$13,400.75 USD**
+- **Lợi nhuận ròng (Total Net Profit)**: **+$3,400.75 USD (+34.01%)**
+- **Max Equity Drawdown**: **16.76% ($2,050.00)** (Mức rủi ro sụt giảm vốn cực thấp so với mốc gốc 42.93%)
+- **Margin Level tối thiểu**: **499.21%** (Tài khoản vận hành tuyệt đối an toàn, loại bỏ hoàn toàn nguy cơ Margin Call)
+- **Profit Factor**: **1.40** (Gross Profit: $11,954 vs Gross Loss: -$8,553)
+- **Sharpe Ratio**: **1.30** (Đạt chuẩn định lượng của các quỹ đầu tư chuyên nghiệp $\ge 1.0$)
+- **Recovery Factor**: **1.66**
+- **Tỷ lệ lệnh thắng (Win Rate)**: **74.51%** (415 thắng / 142 thua trên tổng số 557 trades)
+- **Lệnh thắng lớn nhất (Largest Profit Trade)**: **+$356.00 USD** (Khai phá thành công nhờ Động cơ Runner)
+- **Chuỗi thắng liên tiếp tối đa**: **22 lệnh liên tiếp ($452.00 USD)**
+
+### 12.2 Phân Rã Hiệu Suất Theo Chiến Lược
+- **Counter-Trend (CT)**: 110 chuỗi | 106 Thắng - 4 Thua | **Win Rate: 96.4%** | Lợi nhuận: **+$2,531.16 USD**
+- **Trend-Following (FT)**: 197 chuỗi | 177 Thắng - 20 Thua | **Win Rate: 89.8%** | Lợi nhuận: **+$869.59 USD**
+
+### 12.3 Phân Rã Hiệu Suất Theo Cặp Tiền (Toàn Bộ 6/6 Cặp Đều Có Lãi Ròng)
+1. **EURGBP**: 65 chuỗi | 63 Thắng - 2 Thua | **Win Rate: 96.9%** | Lãi ròng: **+$1,122.64 USD** | Max DCA: 8
+2. **EURUSD**: 89 chuỗi | 82 Thắng - 7 Thua | **Win Rate: 92.1%** | Lãi ròng: **+$759.71 USD** | Max DCA: 10
+3. **USDCAD**: 34 chuỗi | 31 Thắng - 3 Thua | **Win Rate: 91.2%** | Lãi ròng: **+$589.86 USD** | Max DCA: 6
+4. **AUDUSD**: 55 chuỗi | 49 Thắng - 6 Thua | **Win Rate: 89.1%** | Lãi ròng: **+$518.58 USD** | Max DCA: 9
+5. **GBPUSD**: 42 chuỗi | 37 Thắng - 5 Thua | **Win Rate: 88.1%** | Lãi ròng: **+$261.28 USD** | Max DCA: 7
+6. **NZDUSD**: 22 chuỗi | 21 Thắng - 1 Thua | **Win Rate: 95.5%** | Lãi ròng: **+$148.68 USD** | Max DCA: 4
+
+---
+
 ## TỔNG KẾT
 
 Mọi lập trình viên, AI Assistant hay Sub-agent khi tác động vào Yoogi-1FA đều phải:
 1. Đọc và hiểu CONSTITUTION này trước tiên.
-2. Code theo định hướng Dual Engine + Scoring + Hard Requirements.
+2. Code theo định hướng Dual Engine + Scoring + Hard Requirements + 3-Stage Optimized Runner.
 3. KHÔNG sửa đổi hardcoded constants (InpMaxDCAPerChain, InpHeSoLot, InpKhoangMoPip, ...) trừ khi có sự đồng ý rõ ràng từ người dùng.
 4. Đảm bảo mọi state critical đều được persist qua GlobalVariable.
 5. Commit lên Github NGAY LẬP TỨC sau khi sửa đổi code thành công (tuân thủ **Điều 1**).

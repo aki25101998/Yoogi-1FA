@@ -5,7 +5,7 @@
 //| (v12.3 - Yoogi One For All - Timer Optimized 3s - No Lag)        |
 //+------------------------------------------------------------------+
 #property version   "33.00"
-#define YOOGI_BUILD_VERSION "TF_MOMENTUM_10BAR"
+#define YOOGI_BUILD_VERSION "OPTIMIZED_RUNNER_HYBRID_STRUCTURE_TRAILING"
 #property description "Yoogi One For All – Trade For Living"
 #property description "Gắn EA vào chart EURUSD H1 để chạy đa cặp"
 #property description "Kích hoạt WebRequest: script.google.com"
