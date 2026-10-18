@@ -15,7 +15,7 @@ Remove-Item "d:\Project\yoogi 1fa\compile.log" -Force -ErrorAction SilentlyConti
 
 2. Biên dịch EA:
 ```powershell
-cmd.exe /c "`"C:\Program Files\MetaTrader 5 EXNESS\MetaEditor64.exe`" /compile:`"d:\Project\yoogi 1fa\Yoogi 1FA.mq5`" /log:`"d:\Project\yoogi 1fa\compile.log`""
+Start-Process -FilePath "C:\Program Files\MetaTrader 5 EXNESS\MetaEditor64.exe" -ArgumentList "/compile:`"d:\Project\yoogi 1fa\Yoogi 1FA.mq5`" /log:`"d:\Project\yoogi 1fa\compile.log`"" -Wait -NoNewWindow
 ```
 
 3. Kiểm tra kết quả biên dịch:
