@@ -70,7 +70,7 @@ Cho dù tổng điểm có cao đến đâu, CT Entry **bắt buộc** phải pa
 1. **HTF Location**: Nằm trong vùng Reversal Zone hợp lệ.
 2. **Exhaustion Evidence**: Ít nhất 1 dấu hiệu kiệt sức.
 3. **Structure Shift (MSS)**: Cấu trúc phải bị phá vỡ.
-4. **Min Score**: Tổng điểm ≥ `InpCT_RequiredScore` (đối với các cặp USD có DXY bảo vệ; các cặp chéo như EURGBP không có DXY bắt buộc cố định = 100).
+4. **Min Score**: Tổng điểm ≥ `GetPairCTRequiredScore(idx)` (tùy chỉnh riêng cho từng cặp USD qua Input; riêng cặp chéo EURGBP không có DXY bắt buộc cố định = 100).
 5. **DXY Alignment**: DXY không được chống lại setup (cặp USD).
 6. **Bar Closed**: Chỉ sử dụng nến đã đóng (`shift = 1`) — không repaint.
 7. **Timeout / Invalidation**: Setup chưa quá 150 bars (safety) và chưa bị phá vỡ cấu trúc.
@@ -129,7 +129,7 @@ Cho dù tổng điểm có cao đến đâu, CT Entry **bắt buộc** phải pa
 2. **M15 Pullback**: Phải có pullback hợp lệ.
 3. **M5 SMC Sequence**: Sweep → Displacement → MSS phải hoàn tất đúng trình tự.
 4. **Momentum Confirmation**: Ít nhất 1 indicator (CCI/RF/PC) xác nhận trong window.
-5. **Min Score**: Tổng điểm ≥ `InpTF_RequiredScore` (đối với các cặp USD có DXY bảo vệ; các cặp chéo như EURGBP không có DXY bắt buộc cố định = 100).
+5. **Min Score**: Tổng điểm ≥ `GetPairTFRequiredScore(idx)` (tùy chỉnh riêng cho từng cặp USD qua Input; riêng cặp chéo EURGBP không có DXY bắt buộc cố định = 100).
 6. **Phase 3 Filters**: Tất cả quality filters phải pass.
 7. **Bar Closed**: Chỉ sử dụng nến đã đóng — không repaint.
 

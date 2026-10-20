@@ -16,9 +16,21 @@ input group "=== TÙY CHỈNH CHUNG ==="
 input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = dùng ACCOUNT_BALANCE thực tế)
 input double InpRiskPercent = 0.5; // % Balance dùng để tính Lot (ví dụ: 0.5 = 0.5%)
 
-input group "=== ENTRY ENGINE ==="
-input double InpCT_RequiredScore         = 100.0;  // Counter-Trend Required Score (USD pairs; Cross pairs like EURGBP always = 100.0)
-input double InpTF_RequiredScore         = 100.0;  // Trend-Following Required Score (USD pairs; Cross pairs like EURGBP always = 100.0)
+input group "=== ENTRY REQUIRED SCORE (COUNTER-TREND) ==="
+input double InpEURUSD_CT_Score = 95.0;  // [EURUSD] Counter-Trend Required Score
+input double InpAUDUSD_CT_Score = 95.0;  // [AUDUSD] Counter-Trend Required Score
+input double InpUSDCAD_CT_Score = 95.0;  // [USDCAD] Counter-Trend Required Score
+input double InpGBPUSD_CT_Score = 95.0;  // [GBPUSD] Counter-Trend Required Score
+input double InpNZDUSD_CT_Score = 95.0;  // [NZDUSD] Counter-Trend Required Score
+
+input group "=== ENTRY REQUIRED SCORE (TREND-FOLLOWING) ==="
+input double InpEURUSD_TF_Score = 100.0; // [EURUSD] Trend-Following Required Score
+input double InpAUDUSD_TF_Score = 100.0; // [AUDUSD] Trend-Following Required Score
+input double InpUSDCAD_TF_Score = 100.0; // [USDCAD] Trend-Following Required Score
+input double InpGBPUSD_TF_Score = 100.0; // [GBPUSD] Trend-Following Required Score
+input double InpNZDUSD_TF_Score = 100.0; // [NZDUSD] Trend-Following Required Score
+// (Ghi chú: EURGBP là cặp chéo không có DXY bảo vệ nên mặc định điểm luôn luôn là 100.0, không cần input)
+
 
 
 

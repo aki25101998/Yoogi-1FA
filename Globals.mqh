@@ -283,21 +283,55 @@ PairContext G_Pairs[TOTAL_PAIRS];
 
 // ==================================================================
 // DYNAMIC REQUIRED SCORE ACCESSORS
-// Cặp có USD (được DXY bảo vệ): tuân theo User Inputs (InpCT_RequiredScore / InpTF_RequiredScore)
-// Cặp chéo (như EURGBP không có DXY bảo vệ): mặc định điểm luôn là 100.0
+// Điểm yêu cầu cho từng cặp tiền dựa trên User Inputs (theo từng cặp).
+// Riêng cặp chéo EURGBP không có DXY bảo vệ: mặc định điểm luôn luôn là 100.0
 // ==================================================================
 double GetPairCTRequiredScore(int idx)
 {
-   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].isUSDPair)
-      return InpCT_RequiredScore;
-   return 100.0;
+   if(idx < 0 || idx >= TOTAL_PAIRS) return 100.0;
+   string base = G_Pairs[idx].base_name;
+   if(base == "EURUSD") return InpEURUSD_CT_Score;
+   if(base == "AUDUSD") return InpAUDUSD_CT_Score;
+   if(base == "USDCAD") return InpUSDCAD_CT_Score;
+   if(base == "GBPUSD") return InpGBPUSD_CT_Score;
+   if(base == "NZDUSD") return InpNZDUSD_CT_Score;
+   if(base == "EURGBP") return 100.0;
+
+   // Fallback theo index (0=EURUSD, 1=AUDUSD, 2=USDCAD, 3=EURGBP, 4=GBPUSD, 5=NZDUSD)
+   switch(idx)
+   {
+      case 0: return InpEURUSD_CT_Score;
+      case 1: return InpAUDUSD_CT_Score;
+      case 2: return InpUSDCAD_CT_Score;
+      case 3: return 100.0;
+      case 4: return InpGBPUSD_CT_Score;
+      case 5: return InpNZDUSD_CT_Score;
+      default: return 100.0;
+   }
 }
 
 double GetPairTFRequiredScore(int idx)
 {
-   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].isUSDPair)
-      return InpTF_RequiredScore;
-   return 100.0;
+   if(idx < 0 || idx >= TOTAL_PAIRS) return 100.0;
+   string base = G_Pairs[idx].base_name;
+   if(base == "EURUSD") return InpEURUSD_TF_Score;
+   if(base == "AUDUSD") return InpAUDUSD_TF_Score;
+   if(base == "USDCAD") return InpUSDCAD_TF_Score;
+   if(base == "GBPUSD") return InpGBPUSD_TF_Score;
+   if(base == "NZDUSD") return InpNZDUSD_TF_Score;
+   if(base == "EURGBP") return 100.0;
+
+   // Fallback theo index (0=EURUSD, 1=AUDUSD, 2=USDCAD, 3=EURGBP, 4=GBPUSD, 5=NZDUSD)
+   switch(idx)
+   {
+      case 0: return InpEURUSD_TF_Score;
+      case 1: return InpAUDUSD_TF_Score;
+      case 2: return InpUSDCAD_TF_Score;
+      case 3: return 100.0;
+      case 4: return InpGBPUSD_TF_Score;
+      case 5: return InpNZDUSD_TF_Score;
+      default: return 100.0;
+   }
 }
 
 // ==================================================================
