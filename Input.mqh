@@ -17,8 +17,8 @@ input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = d
 input double InpRiskPercent = 0.5; // % Balance dùng để tính Lot (ví dụ: 0.5 = 0.5%)
 
 input group "=== ENTRY REQUIRED SCORE (COUNTER-TREND) ==="
-input double InpEURUSD_CT_Score = 95.0;  // [EURUSD] Counter-Trend Required Score
-input double InpAUDUSD_CT_Score = 95.0;  // [AUDUSD] Counter-Trend Required Score
+input double InpEURUSD_CT_Score = 100.0;  // [EURUSD] Counter-Trend Required Score
+input double InpAUDUSD_CT_Score = 100.0;  // [AUDUSD] Counter-Trend Required Score
 input double InpUSDCAD_CT_Score = 95.0;  // [USDCAD] Counter-Trend Required Score
 input double InpGBPUSD_CT_Score = 95.0;  // [GBPUSD] Counter-Trend Required Score
 input double InpNZDUSD_CT_Score = 95.0;  // [NZDUSD] Counter-Trend Required Score
