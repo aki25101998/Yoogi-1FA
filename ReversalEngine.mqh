@@ -932,7 +932,7 @@ double CalculateReversalScore(int idx, int direction)
                 + G_Pairs[idx].score_momentum;
    
    G_Pairs[idx].reversal_score = total;
-   CTDiag_RecordScore(idx, total, InpCT_RequiredScore);
+   CTDiag_RecordScore(idx, total, GetPairCTRequiredScore(idx));
    return total;
 }
 
@@ -1045,7 +1045,7 @@ bool ValidateHardRequirements(int idx, int direction, string &rejectReason)
    }
    
    // 6. Score >= MinScore
-   if(G_Pairs[idx].reversal_score < InpCT_RequiredScore)
+   if(G_Pairs[idx].reversal_score < GetPairCTRequiredScore(idx))
    {
       rejectReason = "SCORE_BELOW_MIN";
       return false;
@@ -1156,7 +1156,7 @@ bool IsEvidenceReady(int idx, int direction)
    
    if(InpReversal_RequireStructureShift && !G_Pairs[idx].conf_mss) return false;
    
-   if(CalculateReversalScore(idx, direction) < InpCT_RequiredScore) return false;
+   if(CalculateReversalScore(idx, direction) < GetPairCTRequiredScore(idx)) return false;
    return true;
 }
 

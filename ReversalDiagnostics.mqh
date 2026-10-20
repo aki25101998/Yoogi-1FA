@@ -233,7 +233,7 @@ void PrintCTFunnelBlock(string title, const CTFunnelCounters &c)
    PrintFormat("Sweep found        : %d", c.sweep_found);
    PrintFormat("Displacement found : %d", c.displacement_found);
    PrintFormat("MSS confirmed      : %d", c.mss_found);
-   PrintFormat("%-19s: %d", StringFormat("Score >=%.0f", InpCT_RequiredScore), c.score_pass);
+   PrintFormat("%-19s: %d", StringFormat("Score (USD>=%.0f,Cross=100)", InpCT_RequiredScore), c.score_pass);
    PrintFormat("Coherence pass     : %d", c.coherence_pass);
    PrintFormat("Distance pass      : %d", c.entry_dist_pass);
    PrintFormat("DXY pass           : %d (Conflict=%d, Waiting=%d)", c.dxy_pass, c.dxy_conflict, c.dxy_waiting);

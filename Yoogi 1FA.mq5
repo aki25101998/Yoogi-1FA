@@ -81,8 +81,8 @@ int OnInit()
    PrintFormat("TF_MOMENTUM_MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
    PrintFormat("RISK_PERCENT=%.2f%%", InpRiskPercent);
    PrintFormat("SET_BALANCE=%.2f", InpSetBalance);
-   PrintFormat("CT_REQUIRED_SCORE=%.0f", InpCT_RequiredScore);
-   PrintFormat("TF_REQUIRED_SCORE=%.0f", InpTF_RequiredScore);
+   PrintFormat("CT_REQUIRED_SCORE=%.0f (USD Pairs) | Cross Pairs=100", InpCT_RequiredScore);
+   PrintFormat("TF_REQUIRED_SCORE=%.0f (USD Pairs) | Cross Pairs=100", InpTF_RequiredScore);
    PrintFormat("TF_MAX_EVENT_BARS=%d", TF_MAX_EVENT_BARS);
    PrintFormat("TF_MSS_MAX_WAIT_BARS=%d", TF_MSS_MAX_WAIT_BARS);
    

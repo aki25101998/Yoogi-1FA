@@ -411,17 +411,17 @@ void PopulateUnifiedDisplayFields(int idx, ReversalDisplayData &data)
     if(data.displayMode == "FT")
     {
         data.displayScore = G_TF[idx].total_score;
-        data.displayScoreStr = StringFormat("%.0f/%.0f", data.displayScore, InpTF_RequiredScore);
+        data.displayScoreStr = StringFormat("%.0f/%.0f", data.displayScore, GetPairTFRequiredScore(idx));
     }
     else if(data.displayMode == "CT")
     {
         data.displayScore = G_Pairs[idx].reversal_score;
-        data.displayScoreStr = StringFormat("%.0f/%.0f", data.displayScore, InpCT_RequiredScore);
+        data.displayScoreStr = StringFormat("%.0f/%.0f", data.displayScore, GetPairCTRequiredScore(idx));
     }
     else if(data.displayMode == "DUAL")
     {
         data.displayScore = MathMax(G_Pairs[idx].reversal_score, G_TF[idx].total_score);
-        double req = (G_Pairs[idx].reversal_score > G_TF[idx].total_score) ? InpCT_RequiredScore : InpTF_RequiredScore;
+        double req = (G_Pairs[idx].reversal_score > G_TF[idx].total_score) ? GetPairCTRequiredScore(idx) : GetPairTFRequiredScore(idx);
         data.displayScoreStr = StringFormat("%.0f/%.0f", data.displayScore, req);
     }
     else
@@ -548,9 +548,9 @@ void PopulateUnifiedDisplayFields(int idx, ReversalDisplayData &data)
     }
 
     double req_score_block = 100.0;
-    if(data.displayMode == "FT") req_score_block = InpTF_RequiredScore;
-    else if(data.displayMode == "CT") req_score_block = InpCT_RequiredScore;
-    else if(data.displayMode == "DUAL") req_score_block = (G_Pairs[idx].reversal_score > G_TF[idx].total_score) ? InpCT_RequiredScore : InpTF_RequiredScore;
+    if(data.displayMode == "FT") req_score_block = GetPairTFRequiredScore(idx);
+    else if(data.displayMode == "CT") req_score_block = GetPairCTRequiredScore(idx);
+    else if(data.displayMode == "DUAL") req_score_block = (G_Pairs[idx].reversal_score > G_TF[idx].total_score) ? GetPairCTRequiredScore(idx) : GetPairTFRequiredScore(idx);
 
     // Override State if Blocked
     if(data.displayScore >= req_score_block && data.displayBlockReason != "NONE" && !data.activeChain)

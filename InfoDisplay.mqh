@@ -280,9 +280,9 @@ void UpdateDisplay()
       else if(data.displayDir == "SELL") clr_type = C_WARN;
 
       double target_score = 100.0;
-      if(data.displayMode == "FT") target_score = InpTF_RequiredScore;
-      else if(data.displayMode == "CT") target_score = InpCT_RequiredScore;
-      else if(data.displayMode == "DUAL") target_score = MathMax(InpTF_RequiredScore, InpCT_RequiredScore);
+      if(data.displayMode == "FT") target_score = GetPairTFRequiredScore(i);
+      else if(data.displayMode == "CT") target_score = GetPairCTRequiredScore(i);
+      else if(data.displayMode == "DUAL") target_score = MathMax(GetPairTFRequiredScore(i), GetPairCTRequiredScore(i));
       
       color clr_score = (data.displayScore >= target_score ? C_VALUE : (data.displayScore >= target_score * 0.7 ? C_LIMIT : C_SUB));
 

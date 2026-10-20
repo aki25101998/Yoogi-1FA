@@ -1649,10 +1649,11 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       {
          // If momentum was NOT fully confirmed within the window AND score < required → TIMEOUT
          double cur_score = CalculateTFScore(idx);
-         if(G_TF[idx].score_momentum < 10.0 && cur_score < InpTF_RequiredScore)
+         double req_tf_score = GetPairTFRequiredScore(idx);
+         if(G_TF[idx].score_momentum < 10.0 && cur_score < req_tf_score)
          {
             TFDiag_RecordMomentumTimeout(idx, trend_dir, bars_elapsed, closed_m5_time);
-            TFDiag_LogFunnel(idx, trend_dir, "MOMENTUM", "REJECT", StringFormat("TIMEOUT: bars=%d > %d, score=%.0f, total=%.0f < %.0f", bars_elapsed, TF_MOMENTUM_MAX_BARS, G_TF[idx].score_momentum, cur_score, InpTF_RequiredScore));
+            TFDiag_LogFunnel(idx, trend_dir, "MOMENTUM", "REJECT", StringFormat("TIMEOUT: bars=%d > %d, score=%.0f, total=%.0f < %.0f", bars_elapsed, TF_MOMENTUM_MAX_BARS, G_TF[idx].score_momentum, cur_score, req_tf_score));
             Print("\n[TF_MOMENTUM_TIMEOUT]");
             PrintFormat("SYMBOL=%s", sym);
             PrintFormat("DIRECTION=%s", (trend_dir == 1 ? "BUY" : "SELL"));
@@ -1769,7 +1770,8 @@ void EvaluateM5Trigger(int idx, int trend_dir)
       PrintFormat("%s", mom_q_status);
       
       double current_total = CalculateTFScore(idx);
-      if(G_TF[idx].score_momentum == 10.0 || current_total >= InpTF_RequiredScore)
+      double req_tf_diag = GetPairTFRequiredScore(idx);
+      if(G_TF[idx].score_momentum == 10.0 || current_total >= req_tf_diag)
       {
          Print("\n[TF_SCORE_DIAGNOSTIC]");
          PrintFormat("SYMBOL=%s", sym);
@@ -1784,7 +1786,7 @@ void EvaluateM5Trigger(int idx, int trend_dir)
          if(G_TF[idx].h1_trend_quality < 20.0) PrintFormat("DXY=%.0f", G_TF[idx].score_dxy);
          PrintFormat("TOTAL=%.0f", current_total);
          
-         if(current_total >= InpTF_RequiredScore) {
+         if(current_total >= req_tf_diag) {
              Print("[SCORE_REQ_REACHED]");
          }
       }
@@ -2252,10 +2254,11 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    
    // 8. Momentum Score = 10 (or Total Score >= InpTF_RequiredScore via High-Quality SMC Bonus)
    double score = CalculateTFScore(idx);
-   if(G_TF[idx].score_momentum < 10.0 && score < InpTF_RequiredScore)
+   double req_tf_p2 = GetPairTFRequiredScore(idx);
+   if(G_TF[idx].score_momentum < 10.0 && score < req_tf_p2)
    {
       if(first_reject == "") first_reject = "TF_P2_MOMENTUM_REJECT";
-      PrintFormat("[TF_PHASE2_REJECT] Momentum (score=%.0f < 10, total_score=%.0f < req=%.0f)", G_TF[idx].score_momentum, score, InpTF_RequiredScore);
+      PrintFormat("[TF_PHASE2_REJECT] Momentum (score=%.0f < 10, total_score=%.0f < req=%.0f)", G_TF[idx].score_momentum, score, req_tf_p2);
       pass = false;
    }
    
@@ -2311,10 +2314,10 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    }
    
    // 12. Total Score >= InpTF_RequiredScore
-   if(score < InpTF_RequiredScore)
+   if(score < req_tf_p2)
    {
       if(first_reject == "") first_reject = "TF_P2_SCORE_REJECT";
-      PrintFormat("[TF_PHASE2_REJECT] Final Score (score=%.0f < req=%.0f)", score, InpTF_RequiredScore);
+      PrintFormat("[TF_PHASE2_REJECT] Final Score (score=%.0f < req=%.0f)", score, req_tf_p2);
       pass = false;
    }
    
@@ -2342,11 +2345,11 @@ bool ValidateTFPhase2EntryQuality(int idx, int direction, string &rejectReason)
    bool rej_disp  = (!G_TF[idx].m5_displacement || G_TF[idx].m5_displacement_range_atr < TF_MIN_DISPLACEMENT_ATR);
    bool rej_mss   = (!G_TF[idx].m5_mss || G_TF[idx].m5_mss_break_level <= 0.0 || G_TF[idx].m5_mss_break_distance_atr < TF_MIN_MSS_BREAK_ATR);
    bool rej_coh   = (!event_coherent);
-   bool rej_mom   = (G_TF[idx].score_momentum < 10.0 && score < InpTF_RequiredScore);
+   bool rej_mom   = (G_TF[idx].score_momentum < 10.0 && score < req_tf_p2);
    bool rej_dist  = (!dist_valid);
    bool rej_ext   = (!ext_valid);
    bool rej_dxy   = (h1_base && !dxy_pass);
-   bool rej_score = (score < InpTF_RequiredScore);
+   bool rej_score = (score < req_tf_p2);
    
    datetime p2_m5_time = iTime(sym, PERIOD_M5, 1);
    TFDiag_RecordPhase2(idx, direction, pass, first_reject,
@@ -3403,12 +3406,13 @@ int CheckTrendFollowingSignal(int idx)
    double score = CalculateTFScore(idx);
    
    datetime m5_score_time = iTime(sym, PERIOD_M5, 1);
-   TFDiag_RecordScore(idx, dir, score, InpTF_RequiredScore, m5_score_time);
+   double req_tf_gate = GetPairTFRequiredScore(idx);
+   TFDiag_RecordScore(idx, dir, score, req_tf_gate, m5_score_time);
    
-   if(score >= InpTF_RequiredScore)
+   if(score >= req_tf_gate)
    {
       TFDiag_RecordFunnelStep(idx, dir, TF_FUNNEL_SCORE_PASS);
-      TFDiag_LogFunnel(idx, dir, "SCORE", "PASS", StringFormat("SCORE=%.0f REQ=%.0f", score, InpTF_RequiredScore));
+      TFDiag_LogFunnel(idx, dir, "SCORE", "PASS", StringFormat("SCORE=%.0f REQ=%.0f", score, req_tf_gate));
       
       Print("\n[SCORE_REQ_REACHED]");
       PrintFormat("SYMBOL=%s", sym);
@@ -3568,7 +3572,7 @@ int CheckTrendFollowingSignal(int idx)
       if(!G_TF[idx].m5_mss) missing += "MSS ";
       if(G_TF[idx].score_momentum < 10.0) missing += "MOM ";
       
-      G_TF[idx].status = "Score " + IntegerToString((int)score) + "/" + IntegerToString((int)InpTF_RequiredScore) + " | Missing: " + missing;
+      G_TF[idx].status = "Score " + IntegerToString((int)score) + "/" + IntegerToString((int)GetPairTFRequiredScore(idx)) + " | Missing: " + missing;
    }
    
    return 0;

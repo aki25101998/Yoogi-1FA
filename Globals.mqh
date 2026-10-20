@@ -282,6 +282,25 @@ struct PairContext
 PairContext G_Pairs[TOTAL_PAIRS];
 
 // ==================================================================
+// DYNAMIC REQUIRED SCORE ACCESSORS
+// Cặp có USD (được DXY bảo vệ): tuân theo User Inputs (InpCT_RequiredScore / InpTF_RequiredScore)
+// Cặp chéo (như EURGBP không có DXY bảo vệ): mặc định điểm luôn là 100.0
+// ==================================================================
+double GetPairCTRequiredScore(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].isUSDPair)
+      return InpCT_RequiredScore;
+   return 100.0;
+}
+
+double GetPairTFRequiredScore(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].isUSDPair)
+      return InpTF_RequiredScore;
+   return 100.0;
+}
+
+// ==================================================================
 // TREND-FOLLOWING ENGINE CONTEXT
 // ==================================================================
 

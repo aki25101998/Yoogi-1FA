@@ -948,7 +948,7 @@ void TFDiag_RecordScore(int idx, int dir, double score, double req_score, dateti
    int d = TFDiag_DirToIdx(dir);
    TF_INC(idx, d, score_evaluated);
    
-   double req = (req_score > 0.0) ? req_score : InpTF_RequiredScore;
+   double req = (req_score > 0.0) ? req_score : GetPairTFRequiredScore(idx);
    if(score < req)
    {
       TF_INC(idx, d, score_reject);
@@ -1114,7 +1114,7 @@ void PrintFunnelBlock(string title, const TFFunnelCounters &c)
    PrintFormat("Displacement found : %d", c.funnel_disp_found);
    PrintFormat("MSS found          : %d", c.funnel_mss_found);
    PrintFormat("Momentum pass      : %d", c.funnel_mom_pass);
-   PrintFormat("%-19s: %d", StringFormat("Score >=%.0f", InpTF_RequiredScore), c.funnel_score_pass);
+   PrintFormat("%-19s: %d", StringFormat("Score (USD>=%.0f,Cross=100)", InpTF_RequiredScore), c.funnel_score_pass);
    PrintFormat("Phase2 pass        : %d", c.funnel_p2_pass);
    PrintFormat("Phase3 pass        : %d", c.funnel_p3_pass);
    PrintFormat("FINAL ENTRY        : %d", c.funnel_final_entry);

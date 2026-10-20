@@ -17,8 +17,8 @@ input double InpSetBalance = 0.0; // Balance tham chiếu để tính lot (0 = d
 input double InpRiskPercent = 0.5; // % Balance dùng để tính Lot (ví dụ: 0.5 = 0.5%)
 
 input group "=== ENTRY ENGINE ==="
-input double InpCT_RequiredScore         = 75.0;   // Counter-Trend Required Score (Constitution min >= 70.0)
-input double InpTF_RequiredScore         = 75.0;   // Trend-Following Required Score (Pragmatic SMC setup = 75.0)
+input double InpCT_RequiredScore         = 100.0;  // Counter-Trend Required Score (USD pairs; Cross pairs like EURGBP always = 100.0)
+input double InpTF_RequiredScore         = 100.0;  // Trend-Following Required Score (USD pairs; Cross pairs like EURGBP always = 100.0)
 
 
 
