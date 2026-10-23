@@ -15,12 +15,12 @@
 **Files:**
 - Modify: `d:\Project\yoogi 1fa\Input.mqh:20-33`
 
-- [ ] **Step 1: Bổ sung input CT và TF Required Score cho XAUUSD**
+- [x] **Step 1: Bổ sung input CT và TF Required Score cho XAUUSD**
   - Mở `Input.mqh`
   - Thêm `input double InpXAUUSD_CT_Score = 100.0;  // [XAUUSD] Counter-Trend Required Score` vào nhóm CT Score.
   - Thêm `input double InpXAUUSD_TF_Score = 100.0; // [XAUUSD] Trend-Following Required Score` vào nhóm TF Score.
 
-- [ ] **Step 2: Xác nhận cú pháp và lưu file**
+- [x] **Step 2: Xác nhận cú pháp và lưu file**
   - Đảm bảo các comment rõ ràng, đồng bộ với các cặp tiền khác.
 
 ---
@@ -34,25 +34,25 @@
 - Modify: `d:\Project\yoogi 1fa\Globals.mqh:676-695` (Pip Value Standardization)
 - Modify: `d:\Project\yoogi 1fa\Globals.mqh:1161-1185` (CalculateAutoLot Divisor)
 
-- [ ] **Step 1: Cập nhật hằng số số lượng cặp**
+- [x] **Step 1: Cập nhật hằng số số lượng cặp**
   - Sửa `#define TOTAL_PAIRS 6` thành `#define TOTAL_PAIRS 7`.
   - Sửa `#define DXY_CONTEXTS 6` thành `#define DXY_CONTEXTS 7`.
 
-- [ ] **Step 2: Cập nhật mảng tên chuẩn và hàm tự động nhận diện ký hiệu sàn (`GetBrokerSymbol`)**
+- [x] **Step 2: Cập nhật mảng tên chuẩn và hàm tự động nhận diện ký hiệu sàn (`GetBrokerSymbol`)**
   - Cập nhật `StandardBaseNames[TOTAL_PAIRS]`: thêm `"XAUUSD"`.
   - Cập nhật `CommonBases[]`: thêm `"XAUUSD"`.
   - Mở rộng hàm `GetBrokerSymbol`: nếu `std_name == "XAUUSD"`, kiểm tra `XAUUSD` hoặc `GOLD`, hỗ trợ prefix/suffix từ biểu đồ hiện tại.
 
-- [ ] **Step 3: Chuẩn hóa Pip Value cho Vàng trong `InitGlobals()`**
+- [x] **Step 3: Chuẩn hóa Pip Value cho Vàng trong `InitGlobals()`**
   - Kiểm tra `if(G_Pairs[i].base_name == "XAUUSD")`:
     - Nếu digits == 2: `pip_value = 10.0 * point` (0.10 USD).
     - Nếu digits == 3: `pip_value = 100.0 * point` (0.10 USD).
     - Ngược lại: `pip_value = 10.0 * point`.
 
-- [ ] **Step 4: Cập nhật Lot Divisor cho XAUUSD trong `CalculateAutoLot`**
+- [x] **Step 4: Cập nhật Lot Divisor cho XAUUSD trong `CalculateAutoLot`**
   - Thêm điều kiện: `else if(base == "XAUUSD") divisor = 12.0;`
 
-- [ ] **Step 5: Cập nhật hàm truy xuất điểm Required Score**
+- [x] **Step 5: Cập nhật hàm truy xuất điểm Required Score**
   - Cập nhật `GetPairCTRequiredScore`: map `base == "XAUUSD"` và `case 6:` trả về `InpXAUUSD_CT_Score`.
   - Cập nhật `GetPairTFRequiredScore`: map `base == "XAUUSD"` và `case 6:` trả về `InpXAUUSD_TF_Score`.
 
@@ -63,12 +63,12 @@
 **Files:**
 - Modify: `d:\Project\yoogi 1fa\CoreLogic.mqh`
 
-- [ ] **Step 1: Bổ sung các hàm helper phân định Step theo cặp**
+- [x] **Step 1: Bổ sung các hàm helper phân định Step theo cặp**
   - Thêm `GetPairDCAMinStep(int idx)`: trả về 60 cho `XAUUSD`, `InpDCA_MinStepPips` (30) cho Forex.
   - Thêm `GetPairDCAMaxStep(int idx)`: trả về 120 cho `XAUUSD`, `InpDCA_MaxStepPips` (60) cho Forex.
   - Thêm `GetPairDCADefaultStep(int idx)`: trả về 70 cho `XAUUSD`, `InpKhoangMoPip` (30) cho Forex.
 
-- [ ] **Step 2: Cập nhật logic tính Dynamic Step và Fallback Step**
+- [x] **Step 2: Cập nhật logic tính Dynamic Step và Fallback Step**
   - Tại vị trí tính `dyn_step` khi mở Master Order:
     - Kẹp biên: `if(dyn_step < GetPairDCAMinStep(idx)) dyn_step = GetPairDCAMinStep(idx);`
     - Kẹp biên: `if(dyn_step > GetPairDCAMaxStep(idx)) dyn_step = GetPairDCAMaxStep(idx);`
@@ -81,7 +81,7 @@
 **Files:**
 - Modify: `d:\Project\yoogi 1fa\DynamicExitEngine.mqh`
 
-- [ ] **Step 1: Xây dựng các hàm helper xác định TP & Trailing theo cặp**
+- [x] **Step 1: Xây dựng các hàm helper xác định TP & Trailing theo cặp**
   - Thêm `GetPairDynamicTPMinPips(int idx, int strategy_type)`:
     - XAUUSD: 40.0 cho FT, 30.0 cho CT.
     - Forex: `TF_DYNAMIC_TP_MIN_PIPS` (15.0), `CT_DYNAMIC_TP_MIN_PIPS` (15.0).
@@ -93,7 +93,7 @@
   - Thêm `GetPairRunnerBreathePips(int idx)`: XAUUSD = 40.0, Forex = 30.0.
   - Thêm `GetPairBEMinPips(int idx)`: XAUUSD = 25.0, Forex = 15.0.
 
-- [ ] **Step 2: Áp dụng các helper vào các logic tính toán**
+- [x] **Step 2: Áp dụng các helper vào các logic tính toán**
   - Trong `CalculateNaturalTP`: thay thế các biến kẹp min/max pips bằng `GetPairDynamicTPMinPips(idx, strategy_type)` và `GetPairDynamicTPMaxPips(idx, strategy_type)`.
   - Trong `CalcH1TargetTP2`: thay thế `TF_RUNNER_TP2_MIN_PIPS` và `TF_RUNNER_TP2_MAX_PIPS` bằng helper theo cặp.
   - Trong `UpdateRunnerStage`: kiểm tra `profit_pips < GetPairRunnerBreathePips(idx)`.
@@ -106,7 +106,7 @@
 **Files:**
 - Modify: `d:\Project\yoogi 1fa\Yoogi 1FA.mq5:84-88`
 
-- [ ] **Step 1: Cập nhật in diagnostic điểm số của XAUUSD trong `OnInit`**
+- [x] **Step 1: Cập nhật in diagnostic điểm số của XAUUSD trong `OnInit`**
   - Bổ sung `XAU=%.0f` vào cả 2 dòng `PrintFormat` của `CT_REQUIRED_SCORE` và `TF_REQUIRED_SCORE`.
   - Cập nhật nội dung log mô tả `Chế độ: 7 Pairs Fixed (EURUSD, AUDUSD, USDCAD, EURGBP, GBPUSD, NZDUSD, XAUUSD)`.
 
@@ -117,7 +117,7 @@
 **Files:**
 - Run: MetaEditor64 CLI compilation
 
-- [ ] **Step 1: Chạy biên dịch qua PowerShell CLI**
+- [x] **Step 1: Chạy biên dịch qua PowerShell CLI**
   - Xóa `compile.log`.
   - Chạy `MetaEditor64.exe /compile:"Yoogi 1FA.mq5" /log:"compile.log"`.
   - Đọc `compile.log` và xác nhận kết quả: `0 errors, 0 warnings`.
@@ -130,7 +130,7 @@
 **Files:**
 - Git: Commit & Push
 
-- [ ] **Step 1: Thực hiện commit và push toàn bộ thay đổi**
+- [x] **Step 1: Thực hiện commit và push toàn bộ thay đổi**
   - `git add .`
   - `git commit -m "feat(pair): add XAUUSD gold support with dedicated lot, step and dynamic exit profiles"`
   - `git push origin master`
