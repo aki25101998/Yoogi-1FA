@@ -62,7 +62,7 @@ int OnInit()
 
    // [CẬP NHẬT] Thay đổi nội dung log in ra tab Expert
    Print(">>> Yoogi One For All đã khởi động trên EURUSD.");
-   Print(">>> Chế độ: 6 Pairs Fixed - Optimized Timer (3s).");
+   Print(">>> Chế độ: 7 Pairs Fixed (6 Forex + XAUUSD) - Optimized Timer (3s).");
    
    Print("\n[DXY_TF_INIT]");
    Print("ENGINE=ACTIVE");
@@ -81,10 +81,10 @@ int OnInit()
    PrintFormat("TF_MOMENTUM_MAX_BARS=%d", TF_MOMENTUM_MAX_BARS);
    PrintFormat("RISK_PERCENT=%.2f%%", InpRiskPercent);
    PrintFormat("SET_BALANCE=%.2f", InpSetBalance);
-   PrintFormat("CT_REQUIRED_SCORE: EU=%.0f, AU=%.0f, UC=%.0f, GU=%.0f, NU=%.0f | EG=100", 
-               InpEURUSD_CT_Score, InpAUDUSD_CT_Score, InpUSDCAD_CT_Score, InpGBPUSD_CT_Score, InpNZDUSD_CT_Score);
-   PrintFormat("TF_REQUIRED_SCORE: EU=%.0f, AU=%.0f, UC=%.0f, GU=%.0f, NU=%.0f | EG=100", 
-               InpEURUSD_TF_Score, InpAUDUSD_TF_Score, InpUSDCAD_TF_Score, InpGBPUSD_TF_Score, InpNZDUSD_TF_Score);
+   PrintFormat("CT_REQUIRED_SCORE: EU=%.0f, AU=%.0f, UC=%.0f, GU=%.0f, NU=%.0f, XAU=%.0f | EG=100", 
+               InpEURUSD_CT_Score, InpAUDUSD_CT_Score, InpUSDCAD_CT_Score, InpGBPUSD_CT_Score, InpNZDUSD_CT_Score, InpXAUUSD_CT_Score);
+   PrintFormat("TF_REQUIRED_SCORE: EU=%.0f, AU=%.0f, UC=%.0f, GU=%.0f, NU=%.0f, XAU=%.0f | EG=100", 
+               InpEURUSD_TF_Score, InpAUDUSD_TF_Score, InpUSDCAD_TF_Score, InpGBPUSD_TF_Score, InpNZDUSD_TF_Score, InpXAUUSD_TF_Score);
    PrintFormat("TF_MAX_EVENT_BARS=%d", TF_MAX_EVENT_BARS);
    PrintFormat("TF_MSS_MAX_WAIT_BARS=%d", TF_MSS_MAX_WAIT_BARS);
    

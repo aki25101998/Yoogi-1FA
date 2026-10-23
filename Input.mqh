@@ -22,6 +22,7 @@ input double InpAUDUSD_CT_Score = 100.0;  // [AUDUSD] Counter-Trend Required Sco
 input double InpUSDCAD_CT_Score = 95.0;  // [USDCAD] Counter-Trend Required Score
 input double InpGBPUSD_CT_Score = 95.0;  // [GBPUSD] Counter-Trend Required Score
 input double InpNZDUSD_CT_Score = 95.0;  // [NZDUSD] Counter-Trend Required Score
+input double InpXAUUSD_CT_Score = 100.0; // [XAUUSD] Counter-Trend Required Score
 
 input group "=== ENTRY REQUIRED SCORE (TREND-FOLLOWING) ==="
 input double InpEURUSD_TF_Score = 100.0; // [EURUSD] Trend-Following Required Score
@@ -29,6 +30,7 @@ input double InpAUDUSD_TF_Score = 100.0; // [AUDUSD] Trend-Following Required Sc
 input double InpUSDCAD_TF_Score = 100.0; // [USDCAD] Trend-Following Required Score
 input double InpGBPUSD_TF_Score = 100.0; // [GBPUSD] Trend-Following Required Score
 input double InpNZDUSD_TF_Score = 100.0; // [NZDUSD] Trend-Following Required Score
+input double InpXAUUSD_TF_Score = 100.0; // [XAUUSD] Trend-Following Required Score
 // (Ghi chú: EURGBP là cặp chéo không có DXY bảo vệ nên mặc định điểm luôn luôn là 100.0, không cần input)
 
 

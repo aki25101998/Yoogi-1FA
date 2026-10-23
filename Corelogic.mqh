@@ -11,6 +11,28 @@
 // HỖ TRỢ CẤP THẤP (MULTI-SYMBOL)
 // ==================================================================
 
+// Helper phân định khoảng cách DCA Step theo cặp tiền (Vàng vs Forex)
+int GetPairDCAMinStep(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return 60; // 60 pips ($6 giá) cho Vàng
+   return InpDCA_MinStepPips; // 30 pips cho Forex
+}
+
+int GetPairDCAMaxStep(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return 120; // 120 pips ($12 giá) cho Vàng
+   return InpDCA_MaxStepPips; // 60 pips cho Forex
+}
+
+int GetPairDCADefaultStep(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return 70; // 70 pips ($7 giá) cho Vàng
+   return InpKhoangMoPip; // 30 pips cho Forex
+}
+
 // Lấy thông tin lệnh MỚI NHẤT trong chuỗi của một cặp cụ thể
 bool GetLastPositionInfo_Multi(int idx, ulong chain_id, double &price, double &lot)
 {
@@ -248,7 +270,7 @@ void LoadChainState_Multi(int idx, ulong chain_id)
    else                             G_Pairs[idx].chain_end_dca_seq = 0;
 
    if(GlobalVariableCheck(n_dca_step)) G_Pairs[idx].chain_step_pips = (int)GlobalVariableGet(n_dca_step);
-   else                                G_Pairs[idx].chain_step_pips = InpDCA_MinStepPips;
+   else                                G_Pairs[idx].chain_step_pips = GetPairDCAMinStep(idx);
 
    G_Pairs[idx].active_chain_strategy = DetectChainStrategy(idx, chain_id);
 
@@ -903,12 +925,12 @@ void OpenMasterTrade_Multi(int idx, int signal, string entry_mode = "")
 
       // Tính toán Dynamic Step
       double atr_val = CalculateATR_Generic(sym, PERIOD_M15, 14, 1);
-      int dyn_step = InpDCA_MinStepPips;
+      int dyn_step = GetPairDCADefaultStep(idx);
       if (atr_val > 0) {
           double atr_pips = atr_val / G_Pairs[idx].pip_value;
           dyn_step = (int)MathRound(atr_pips * InpDCA_Step_ATRMultiplier);
-          if(dyn_step < InpDCA_MinStepPips) dyn_step = InpDCA_MinStepPips;
-          if(dyn_step > InpDCA_MaxStepPips) dyn_step = InpDCA_MaxStepPips;
+          if(dyn_step < GetPairDCAMinStep(idx)) dyn_step = GetPairDCAMinStep(idx);
+          if(dyn_step > GetPairDCAMaxStep(idx)) dyn_step = GetPairDCAMaxStep(idx);
       }
 
       // Cập nhật trạng thái Global cho cặp này
@@ -977,7 +999,7 @@ void ManageTrendDCA_Multi(int idx, int current_orders, ENUM_POSITION_TYPE master
 
    // 1. Logic Khoảng cách
    int step_pips = G_Pairs[idx].chain_step_pips;
-   if(step_pips <= 0) step_pips = InpDCA_MinStepPips; // Fallback an toàn
+   if(step_pips <= 0) step_pips = GetPairDCADefaultStep(idx); // Fallback an toàn
    double step = step_pips * G_Pairs[idx].pip_value;
    double current_price = (master_type==POSITION_TYPE_BUY) ? SymbolInfoDouble(sym, SYMBOL_BID) : SymbolInfoDouble(sym, SYMBOL_ASK);
 
@@ -1357,7 +1379,7 @@ void ManagePairs()
                   PrintFormat("[%s] >>> DYNAMIC TP HIT: AvgEntry=%.5f TP=%.5f Current=%.5f (%.1f pips). Closing...",
                               sym, avg_entry, basket_tp, current_price, G_TradeProfile[i].current_dynamic_tp);
 
-                  int dca_step_display = (G_Pairs[i].chain_step_pips > 0) ? G_Pairs[i].chain_step_pips : InpKhoangMoPip;
+                  int dca_step_display = (G_Pairs[i].chain_step_pips > 0) ? G_Pairs[i].chain_step_pips : GetPairDCADefaultStep(i);
                   PrintFormat("[DCA] Step=%d pips | AvgEntry=%.5f | BasketTP=%.5f",
                               dca_step_display, avg_entry, basket_tp);
 

@@ -10,8 +10,8 @@
 // ==================================================================
 // HẰNG SỐ & CẤU HÌNH GIỚI HẠN
 // ==================================================================
-#define TOTAL_PAIRS 6   // Tổng cộng 6 cặp tiền
-#define DXY_CONTEXTS 6 // So luong DXY context dong bo voi 6 cap
+#define TOTAL_PAIRS 7   // Tổng cộng 7 cặp (6 cặp Forex + XAUUSD)
+#define DXY_CONTEXTS 7 // Số lượng DXY context đồng bộ với 7 cặp
 #define EA_MAGIC_NUMBER 1
 
 // --- GIỚI HẠN HOẠT ĐỘNG (Dựa trên Virtual Balance) ---
@@ -295,9 +295,10 @@ double GetPairCTRequiredScore(int idx)
    if(base == "USDCAD") return InpUSDCAD_CT_Score;
    if(base == "GBPUSD") return InpGBPUSD_CT_Score;
    if(base == "NZDUSD") return InpNZDUSD_CT_Score;
+   if(base == "XAUUSD") return InpXAUUSD_CT_Score;
    if(base == "EURGBP") return 100.0;
 
-   // Fallback theo index (0=EURUSD, 1=AUDUSD, 2=USDCAD, 3=EURGBP, 4=GBPUSD, 5=NZDUSD)
+   // Fallback theo index (0=EURUSD, 1=AUDUSD, 2=USDCAD, 3=EURGBP, 4=GBPUSD, 5=NZDUSD, 6=XAUUSD)
    switch(idx)
    {
       case 0: return InpEURUSD_CT_Score;
@@ -306,6 +307,7 @@ double GetPairCTRequiredScore(int idx)
       case 3: return 100.0;
       case 4: return InpGBPUSD_CT_Score;
       case 5: return InpNZDUSD_CT_Score;
+      case 6: return InpXAUUSD_CT_Score;
       default: return 100.0;
    }
 }
@@ -319,9 +321,10 @@ double GetPairTFRequiredScore(int idx)
    if(base == "USDCAD") return InpUSDCAD_TF_Score;
    if(base == "GBPUSD") return InpGBPUSD_TF_Score;
    if(base == "NZDUSD") return InpNZDUSD_TF_Score;
+   if(base == "XAUUSD") return InpXAUUSD_TF_Score;
    if(base == "EURGBP") return 100.0;
 
-   // Fallback theo index (0=EURUSD, 1=AUDUSD, 2=USDCAD, 3=EURGBP, 4=GBPUSD, 5=NZDUSD)
+   // Fallback theo index (0=EURUSD, 1=AUDUSD, 2=USDCAD, 3=EURGBP, 4=GBPUSD, 5=NZDUSD, 6=XAUUSD)
    switch(idx)
    {
       case 0: return InpEURUSD_TF_Score;
@@ -330,6 +333,7 @@ double GetPairTFRequiredScore(int idx)
       case 3: return 100.0;
       case 4: return InpGBPUSD_TF_Score;
       case 5: return InpNZDUSD_TF_Score;
+      case 6: return InpXAUUSD_TF_Score;
       default: return 100.0;
    }
 }
@@ -553,10 +557,10 @@ bool   g_dxy_available = false;         // True neu DXY duoc tim thay tren san
 int     activeChainsCount = 0;
 
 // ==================================================================
-// DANH SÁCH TÊN CHUẨN (5 CẶP)
+// DANH SÁCH TÊN CHUẨN (7 CẶP)
 // ==================================================================
 string StandardBaseNames[TOTAL_PAIRS] = {
-   "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "GBPUSD", "NZDUSD"
+   "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "GBPUSD", "NZDUSD", "XAUUSD"
 };
 
 // ==================================================================
@@ -566,13 +570,14 @@ string GetBrokerSymbol(string std_name)
 {
    // 1. Nếu tên chuẩn chạy được ngay
    if(SymbolSelect(std_name, true)) return std_name;
+   if(std_name == "XAUUSD" && SymbolSelect("GOLD", true)) return "GOLD";
 
    // 2. Nếu không, tìm quy luật từ chart hiện tại
    string current_chart_sym = _Symbol;
 
    // List base để detect suffix
    string CommonBases[] = {
-      "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "GBPUSD", "NZDUSD"
+      "EURUSD", "AUDUSD", "USDCAD", "EURGBP", "GBPUSD", "NZDUSD", "XAUUSD"
    };
 
    string prefix = "";
@@ -597,13 +602,28 @@ string GetBrokerSymbol(string std_name)
    {
       string candidate = prefix + std_name + suffix;
       if(SymbolSelect(candidate, true)) return candidate;
+
+      if(std_name == "XAUUSD")
+      {
+         string candidate_gold = prefix + "GOLD" + suffix;
+         if(SymbolSelect(candidate_gold, true)) return candidate_gold;
+      }
    }
 
    // Fallback: Quét Market Watch
    for(int i = 0; i < SymbolsTotal(false); i++)
    {
       string s = SymbolName(i, false);
-      if(StringFind(s, std_name) >= 0) return s;
+      if(StringFind(s, std_name) >= 0)
+      {
+         SymbolSelect(s, true);
+         return s;
+      }
+      if(std_name == "XAUUSD" && StringFind(s, "GOLD") >= 0)
+      {
+         SymbolSelect(s, true);
+         return s;
+      }
    }
 
    return std_name;
@@ -684,10 +704,22 @@ void InitGlobals()
       G_Pairs[i].digits    = (int)SymbolInfoInteger(G_Pairs[i].symbol, SYMBOL_DIGITS);
       G_Pairs[i].point     = SymbolInfoDouble(G_Pairs[i].symbol, SYMBOL_POINT);
 
-      if (G_Pairs[i].digits == 5 || G_Pairs[i].digits == 3)
-         G_Pairs[i].pip_value = 10.0 * G_Pairs[i].point;
+      if(G_Pairs[i].base_name == "XAUUSD")
+      {
+         if(G_Pairs[i].digits == 2)
+            G_Pairs[i].pip_value = 10.0 * G_Pairs[i].point;   // 10 * 0.01 = 0.10
+         else if(G_Pairs[i].digits == 3)
+            G_Pairs[i].pip_value = 100.0 * G_Pairs[i].point;  // 100 * 0.001 = 0.10
+         else
+            G_Pairs[i].pip_value = 10.0 * G_Pairs[i].point;
+      }
       else
-         G_Pairs[i].pip_value = 1.0 * G_Pairs[i].point;
+      {
+         if (G_Pairs[i].digits == 5 || G_Pairs[i].digits == 3)
+            G_Pairs[i].pip_value = 10.0 * G_Pairs[i].point;
+         else
+            G_Pairs[i].pip_value = 1.0 * G_Pairs[i].point;
+      }
 
       // --- CHE DO TU DONG (DUY NHAT): Mac dinh H1/M5, Risk InpRiskPercent cho tat ca ---
       G_Pairs[i].htf = PERIOD_H1;
@@ -1174,6 +1206,7 @@ double CalculateAutoLot(int idx, double balance)
 
    if(base == "USDCAD")      divisor = 4.48;
    else if(base == "EURGBP") divisor = 7.64;
+   else if(base == "XAUUSD") divisor = 12.0; // Vang: Giam 50% lot so voi Forex de bao toan von va margin
 
    // 3. Tính toán: (Balance * (Risk% / 100)) / Divisor
    double raw_lot = (balance * (risk_pct / 100.0)) / (divisor * 100.0);

@@ -113,6 +113,51 @@ double PriceToPips(int idx, double price_distance)
 }
 
 // ==================================================================
+// PAIR-AWARE TP & TRAILING HELPERS (XAUUSD vs Forex)
+// ==================================================================
+double GetPairDynamicTPMinPips(int idx, int strategy_type)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return (strategy_type == STRATEGY_FT) ? 40.0 : 30.0;
+   return (strategy_type == STRATEGY_FT) ? (double)TF_DYNAMIC_TP_MIN_PIPS : (double)CT_DYNAMIC_TP_MIN_PIPS;
+}
+
+double GetPairDynamicTPMaxPips(int idx, int strategy_type)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return (strategy_type == STRATEGY_FT) ? 150.0 : 80.0;
+   return (strategy_type == STRATEGY_FT) ? (double)TF_DYNAMIC_TP_MAX_PIPS : (double)CT_DYNAMIC_TP_MAX_PIPS;
+}
+
+double GetPairRunnerTP2MinPips(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return 70.0; // $7 giá
+   return TF_RUNNER_TP2_MIN_PIPS; // 50.0 pips
+}
+
+double GetPairRunnerTP2MaxPips(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return 200.0; // $20 giá
+   return TF_RUNNER_TP2_MAX_PIPS; // 85.0 pips
+}
+
+double GetPairRunnerBreathePips(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return 40.0; // $4 giá
+   return TF_RUNNER_BREATHE_PIPS; // 30.0 pips
+}
+
+double GetPairBEMinPips(int idx)
+{
+   if(idx >= 0 && idx < TOTAL_PAIRS && G_Pairs[idx].base_name == "XAUUSD")
+      return 25.0; // $2.5 giá
+   return TF_BE_MIN_PIPS; // 15.0 pips
+}
+
+// ==================================================================
 // TP CANDIDATE 1: ATR TARGET
 // ==================================================================
 // Uses ATR(14) on M15 timeframe × multiplier, scaled by strategy type
@@ -400,8 +445,8 @@ double CalculateNaturalTP(int idx, int direction, int strategy_type)
    int    mom_state = G_TradeProfile[idx].momentum_state;
 
    // Strategy-Aware Min / Max Pips
-   double min_tp_pips = (strategy_type == STRATEGY_FT) ? (double)TF_DYNAMIC_TP_MIN_PIPS : (double)CT_DYNAMIC_TP_MIN_PIPS;
-   double max_tp_pips = (strategy_type == STRATEGY_FT) ? (double)TF_DYNAMIC_TP_MAX_PIPS : (double)CT_DYNAMIC_TP_MAX_PIPS;
+   double min_tp_pips = GetPairDynamicTPMinPips(idx, strategy_type);
+   double max_tp_pips = GetPairDynamicTPMaxPips(idx, strategy_type);
 
    // --- Momentum Factor ---
    double mom_factor = 1.0;
@@ -718,17 +763,21 @@ bool CheckRunnerConditions(int idx)
 double CalcH1TargetTP2(int idx, int direction, double entry)
 {
    string sym = G_Pairs[idx].symbol;
-   if(entry <= 0.0) return 60.0;
+   double runner_min_pips = GetPairRunnerTP2MinPips(idx);
+   double runner_max_pips = GetPairRunnerTP2MaxPips(idx);
+   double sweet_spot = (G_Pairs[idx].base_name == "XAUUSD") ? 100.0 : 60.0;
+
+   if(entry <= 0.0) return sweet_spot;
 
    double highs[], lows[];
    int lookback = 40;
    if(!ReadHighLow_Generic(sym, PERIOD_H1, 1, lookback, highs, lows))
-      return 60.0; // Fallback default 60 pips
+      return sweet_spot; // Fallback default
 
    int left = 3;
    int right = 1;
-   double min_dist_price = PipsToPrice(idx, TF_RUNNER_TP2_MIN_PIPS);
-   double max_dist_price = PipsToPrice(idx, TF_RUNNER_TP2_MAX_PIPS);
+   double min_dist_price = PipsToPrice(idx, runner_min_pips);
+   double max_dist_price = PipsToPrice(idx, runner_max_pips);
 
    double candidate_target = 0.0;
 
@@ -785,11 +834,11 @@ double CalcH1TargetTP2(int idx, int direction, double entry)
       }
    }
 
-   // Clamp within [TF_RUNNER_TP2_MIN_PIPS, TF_RUNNER_TP2_MAX_PIPS]
-   if(candidate_target < TF_RUNNER_TP2_MIN_PIPS)
-      candidate_target = 60.0; // Default sweet spot
-   if(candidate_target > TF_RUNNER_TP2_MAX_PIPS)
-      candidate_target = TF_RUNNER_TP2_MAX_PIPS;
+   // Clamp within [runner_min_pips, runner_max_pips]
+   if(candidate_target < runner_min_pips)
+      candidate_target = sweet_spot; // Default sweet spot
+   if(candidate_target > runner_max_pips)
+      candidate_target = runner_max_pips;
 
    return candidate_target;
 }
@@ -911,7 +960,7 @@ void UpdateRunnerTrail(int idx)
    // ---------------------------------------------------------------
    // STAGE 1: BREATHING BUFFER (15 - 30 pips)
    // ---------------------------------------------------------------
-   if(profit_pips < TF_RUNNER_BREATHE_PIPS)
+   if(profit_pips < GetPairRunnerBreathePips(idx))
    {
       G_TradeProfile[idx].runner_stage = 1;
       // SL is held strictly at Entry + 3 pips (risk-free, no micro-ATR noise shakeouts)
@@ -1667,8 +1716,9 @@ void UpdateBreakEvenState(int idx)
 
    // --- NGƯỠNG KÍCH HOẠT DYNAMIC TRAILING STOP: Max(1.5x ATR, 70% Natural TP, min 15 pips) ---
    double be_threshold_pips = MathMax(atr_pips * 1.5, natural_tp_pips * TF_BE_TRIGGER_RATIO);
-   if(be_threshold_pips < TF_BE_MIN_PIPS)
-      be_threshold_pips = TF_BE_MIN_PIPS;
+   double be_min_pips = GetPairBEMinPips(idx);
+   if(be_threshold_pips < be_min_pips)
+      be_threshold_pips = be_min_pips;
 
    // Chưa đạt ngưỡng bứt phá tối thiểu -> Cho lệnh thở tự do
    if(pips_run < be_threshold_pips) return;
