@@ -15,6 +15,7 @@ Tài liệu này đóng vai trò là "Hiến pháp" cốt lõi của Yoogi-1FA. 
    - Hoặc có thể sử dụng workflow `/backup`.
    - Message commit phải miêu tả ngắn gọn và chính xác thay đổi.
 3. **Mục tiêu**: Đảm bảo source code không bao giờ bị mất, dễ dàng rollback nếu cập nhật gây lỗi, và đồng bộ hóa công việc.
+4. **Quy tắc định danh Commit trên EA (Commit Tracking Rule)**: Luôn cập nhật mã commit Git tương ứng vào mục thông tin chung (`#property description "Commit: <hash>"`) trong file `Yoogi 1FA.mq5` mỗi khi có update mới, giúp hiển thị rõ ràng phiên bản trực tiếp tại tab Common trên MT5 để người dùng luôn biết chính xác bản build đang chạy và yêu cầu khôi phục khi cần.
 
 ---
 

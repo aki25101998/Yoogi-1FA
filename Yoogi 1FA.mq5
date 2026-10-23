@@ -10,6 +10,7 @@
 #property description "Gắn EA vào chart EURUSD H1 để chạy đa cặp"
 #property description "Kích hoạt WebRequest: script.google.com"
 #property description "Zalo/Tele: 0346134678 | Bom.so/Yoogi"
+#property description "Commit: 86c3130"
 #property link "Bom.so/Yoogi"
 
 // LIÊN KẾT TỆP
